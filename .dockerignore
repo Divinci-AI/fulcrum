@@ -1,0 +1,51 @@
+# Keep the build context small and predictable. Anything that would only
+# bloat the image or leak local state belongs here.
+
+# Dependencies — installed fresh by bun in the builder stage.
+node_modules
+**/node_modules
+
+# Local builds — regenerated in the builder stage.
+dist
+**/dist
+.vite
+.tsbuildinfo
+**/*.tsbuildinfo
+
+# Local Fulcrum runtime state — must never be baked into the image.
+.fulcrum
+**/.fulcrum
+fulcrum.db*
+age.txt
+fnox.toml
+
+# Git internals — not needed at runtime, and `.git` can be huge.
+.git
+.gitignore
+.gitattributes
+
+# IDE/OS junk.
+.vscode
+.idea
+.DS_Store
+*.swp
+
+# Local env overrides — secrets should come from --env-file at run time.
+.env
+.env.*
+!.env.example
+
+# CI / packaging output.
+desktop/.tmp
+desktop/dist
+desktop/*.dmg
+desktop/*.AppImage
+screenshots
+
+# Test scratch.
+coverage
+.nyc_output
+
+# Mise local state — image uses an explicit Bun base, no mise needed.
+.mise
+.mise.lock
