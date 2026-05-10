@@ -171,6 +171,22 @@ export function useGoogleClientSecret() {
   }
 }
 
+// When a hosted Fulcrum (e.g. Divinci-AI) supplies GOOGLE_CLIENT_ID/SECRET via env,
+// users shouldn't see the credential input fields. managedByHost is true only when
+// both come from the environment.
+interface GoogleOAuthStatus {
+  clientId: { provider: 'env' | 'fnox' | 'none'; configured: boolean }
+  clientSecret: { provider: 'env' | 'fnox' | 'none'; configured: boolean }
+  managedByHost: boolean
+}
+
+export function useGoogleOAuthStatus() {
+  return useQuery({
+    queryKey: ['google-oauth-status'],
+    queryFn: () => fetchJSON<GoogleOAuthStatus>(`${API_BASE}/api/config/google-oauth-status`),
+  })
+}
+
 import type { AgentType } from '@/types'
 
 export function useDefaultAgent() {
