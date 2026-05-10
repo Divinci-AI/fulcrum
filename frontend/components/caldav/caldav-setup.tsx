@@ -21,7 +21,7 @@ import {
   useDisableCaldav,
   useSyncCaldav,
 } from '@/hooks/use-caldav'
-import { useConfig, useUpdateConfig, usePort } from '@/hooks/use-config'
+import { useConfig, useUpdateConfig, usePort, useGoogleOAuthStatus } from '@/hooks/use-config'
 
 interface CaldavSetupProps {
   isLoading?: boolean
@@ -39,6 +39,8 @@ export function CaldavSetup({ isLoading = false }: CaldavSetupProps) {
   const sync = useSyncCaldav()
   const updateConfig = useUpdateConfig()
   const backendPort = usePort()
+  const { data: oauthStatus } = useGoogleOAuthStatus()
+  const managedByHost = oauthStatus?.managedByHost ?? false
 
   // Read current settings to detect if credentials exist
   const { data: serverUrlConfig } = useConfig('caldav.serverUrl')
@@ -168,18 +170,30 @@ export function CaldavSetup({ isLoading = false }: CaldavSetupProps) {
   }
 
   const handleGoogleConnect = async () => {
-    if (!googleClientId.trim() || !googleClientSecret.trim()) {
+    // In host-managed mode, the backend pulls Client ID/Secret from
+    // integrations.* (which respects GOOGLE_CLIENT_ID/SECRET env vars), so we
+    // skip the local credential requirement and the per-CalDAV configure call.
+    if (!managedByHost && (!googleClientId.trim() || !googleClientSecret.trim())) {
       toast.error(t('caldav.googleFillRequired'))
       return
     }
 
     try {
-      // Save credentials first
-      await configureGoogle.mutateAsync({
-        googleClientId: googleClientId.trim(),
-        googleClientSecret: googleClientSecret.trim(),
-        syncIntervalMinutes: parseInt(googleSyncInterval, 10) || 15,
-      })
+      if (!managedByHost) {
+        // Save the user-supplied credentials so the OAuth callback can find them
+        await configureGoogle.mutateAsync({
+          googleClientId: googleClientId.trim(),
+          googleClientSecret: googleClientSecret.trim(),
+          syncIntervalMinutes: parseInt(googleSyncInterval, 10) || 15,
+        })
+      } else {
+        // Host-managed: still persist the sync interval, but skip the credentials
+        await configureGoogle.mutateAsync({
+          googleClientId: '',
+          googleClientSecret: '',
+          syncIntervalMinutes: parseInt(googleSyncInterval, 10) || 15,
+        })
+      }
 
       // Get authorization URL
       const { authUrl } = await getAuthUrl.mutateAsync()
@@ -361,26 +375,37 @@ export function CaldavSetup({ isLoading = false }: CaldavSetupProps) {
             {/* Google Calendar tab */}
             <TabsContent value="google">
               <div className="space-y-3 pt-2">
-                <div className="space-y-2">
-                  <label className="block text-xs text-muted-foreground">{t('caldav.googleClientId')}</label>
-                  <Input
-                    type="text"
-                    placeholder={t('caldav.googleClientIdPlaceholder')}
-                    value={googleClientId}
-                    onChange={(e) => setGoogleClientId(e.target.value)}
-                    className="max-w-md font-mono text-sm"
-                  />
-                </div>
-                <div className="space-y-2">
-                  <label className="block text-xs text-muted-foreground">{t('caldav.googleClientSecret')}</label>
-                  <Input
-                    type="password"
-                    placeholder={t('caldav.googleClientSecretPlaceholder')}
-                    value={googleClientSecret}
-                    onChange={(e) => setGoogleClientSecret(e.target.value)}
-                    className="max-w-md font-mono text-sm"
-                  />
-                </div>
+                {managedByHost ? (
+                  <div className="rounded-md border border-dashed border-muted-foreground/30 bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
+                    {t(
+                      'caldav.googleManagedByHost',
+                      'Google OAuth provided by your Fulcrum host — click Connect to authorize.'
+                    )}
+                  </div>
+                ) : (
+                  <>
+                    <div className="space-y-2">
+                      <label className="block text-xs text-muted-foreground">{t('caldav.googleClientId')}</label>
+                      <Input
+                        type="text"
+                        placeholder={t('caldav.googleClientIdPlaceholder')}
+                        value={googleClientId}
+                        onChange={(e) => setGoogleClientId(e.target.value)}
+                        className="max-w-md font-mono text-sm"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <label className="block text-xs text-muted-foreground">{t('caldav.googleClientSecret')}</label>
+                      <Input
+                        type="password"
+                        placeholder={t('caldav.googleClientSecretPlaceholder')}
+                        value={googleClientSecret}
+                        onChange={(e) => setGoogleClientSecret(e.target.value)}
+                        className="max-w-md font-mono text-sm"
+                      />
+                    </div>
+                  </>
+                )}
                 <div className="space-y-2">
                   <label className="block text-xs text-muted-foreground">{t('caldav.syncInterval')}</label>
                   <Input
@@ -396,7 +421,7 @@ export function CaldavSetup({ isLoading = false }: CaldavSetupProps) {
                   <Button
                     size="sm"
                     onClick={handleGoogleConnect}
-                    disabled={isPending || isPollingForConnect || !googleClientId.trim() || !googleClientSecret.trim()}
+                    disabled={isPending || isPollingForConnect || (!managedByHost && (!googleClientId.trim() || !googleClientSecret.trim()))}
                   >
                     {(configureGoogle.isPending || getAuthUrl.isPending || isPollingForConnect) ? (
                       <HugeiconsIcon icon={Loading03Icon} size={14} strokeWidth={2} className="mr-2 animate-spin" />
