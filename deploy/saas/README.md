@@ -1,8 +1,8 @@
 # Fulcrum-as-SaaS — Deployment Harness
 
-> Status: **design skeleton** — no production code yet. This directory captures
-> the architecture for hosting Fulcrum as a multi-tenant web service under
-> Divinci-AI, and exists to anchor the conversation before implementation.
+> Status: **design, decisions locked**. Implementation not yet started, but the
+> open questions from the first draft have been answered. This doc reflects the
+> architecture Divinci-AI is committing to.
 
 ## The constraint that shapes everything
 
@@ -13,102 +13,102 @@ The single-tenancy audit (2026-05-10) rated five of Fulcrum's subsystems at
 - No auth middleware anywhere in the Hono app
 - 40+ filesystem callsites hard-coded to `~/.fulcrum` / `os.homedir()`
 - PTY manager + WebSocket broadcast are global singletons
-- Background services (`pr-monitor`, `git-watcher`, `googleCalendarManager`)
-  poll the entire database with no tenant filter
+- Background services poll the entire database with no tenant filter
 
-Estimated effort to do that work properly: **6–12 engineer-months**, and the
-risk profile is high — a single missing `WHERE tenantId = ?` is a data-leakage
-incident.
+Estimated effort for an in-process multi-tenant lift: **6–12 engineer-months**,
+with high data-leakage risk on every missing `WHERE tenantId = ?`.
 
-## The shape we adopt instead: container-per-tenant
+## The shape we adopt: container-per-tenant on Divinci-AI infra
 
-Rather than rewrite Fulcrum into a multi-tenant app, **we deploy one Fulcrum
-instance per customer** behind an authenticating gateway.
+Rather than rewrite Fulcrum, **one Fulcrum container per customer org**,
+hosted on Divinci-AI's GCP, fronted by Cloudflare Zero Trust on Divinci-AI's
+Cloudflare account. Each org gets `<slug>.fulcrum.divinci.ai`.
 
 ```
-                     ┌──────────────────────┐
-   acme.fulcrum  ─┐  │                      │  ┌→ fulcrum (Docker container)
-   divinci.ai     │  │  Auth Gateway        │  │   ~/.fulcrum (volume per tenant)
-                  ├──┤  (Cloudflare Zero    ├──┤   SQLite, fnox, worktrees
-   bobsco.fulcrum │  │   Trust or Hono      │  │   Background services
-   divinci.ai    ─┘  │   proxy)             │  └→ fulcrum (Docker container)
-                     │                      │
-                     │  Single Divinci-AI   │  ┌→ ...
-                     │  Google OAuth client │  │
-                     └──────────────────────┘  └→ ...
+  acme.fulcrum.divinci.ai ─┐
+                            │  ┌──────────────────────┐
+  bobsco.fulcrum.divinci.ai├─→│ Cloudflare Zero Trust │
+                            │  │  + cloudflared tunnel │──→ GCE host
+  ... .fulcrum.divinci.ai  ─┘  │  + Access groups (org │     ┌──────────────┐
+                                │    membership = group │     │ fulcrum-acme │
+                                │    membership)        │     │ fulcrum-bob..│
+                                └──────────────────────┘     │ fulcrum-...  │
+                                                              │ (Docker      │
+   ONE Divinci-AI Google OAuth client  ──→  shared via env    │  Compose)    │
+   (CASA-verified once we exceed 100 users)                   └──────────────┘
 ```
 
-### What this buys
+## Decisions (2026-05-10)
 
-| Concern | How this addresses it |
-|---|---|
-| Data isolation | Each tenant has their own filesystem volume + their own SQLite. No shared queries. |
-| Auth | Gateway authenticates and routes; Fulcrum continues to assume "any caller on the port is authorized" since the port is only reachable via the gateway. |
-| PTY/WS isolation | Each tenant's PTYs run in their own container's process space. |
-| Background services | Each tenant's `pr-monitor` etc. only sees their own data. |
-| Google OAuth | One Divinci-AI Google client provisioned via env vars (see Phase 1 branch). Each tenant container reads the same `GOOGLE_CLIENT_ID`/`SECRET` from env. Tokens stored per-tenant in each container's SQLite. |
-| Code changes | **Almost none** in the Fulcrum app itself. Most work is operational. |
+| # | Question | Decision |
+|---|---|---|
+| a | CASA security assessment? | **Yes** — Divinci-AI commits to CASA when user count exceeds Google's 100-test-user cap. Until then, the Divinci-AI OAuth client stays in Testing mode and we onboard customers as test users. Budget $500–$4,500/yr + 2–6 mo lead time. |
+| b | Gateway shape? | **Cloudflare Zero Trust.** Reuses Fulcrum's existing `cloudflared` integration (`cli/src/commands/expose.ts`), no auth code to maintain, free up to 50 users, then $7/user/mo. |
+| c | Subdomain routing? | **`<org-slug>.fulcrum.divinci.ai`**, provisioned via the Cloudflare API. `CLOUDFLARE_API_TOKEN` + `CLOUDFLARE_ACCOUNT_ID` + `CLOUDFLARE_ZONE_ID` exported in operator's `~/.zshrc`. See `provisioning/`. |
+| d | Backup strategy? | **Litestream** continuous SQLite replication to **Cloudflare R2**, plus nightly `restic` snapshots of `~/.fulcrum/uploads/` and `~/.fulcrum/worktrees/`. See `backups/`. |
+| e | Where hosted? | **Divinci-AI's GCP** (single Compute Engine host with Docker Compose to start, GKE when we outgrow it) and **Divinci-AI's Cloudflare account**. No customer infra at all. |
+| f | User/org model? | **One CF Access group per org.** Adding a user = adding their email to the group via Cloudflare API. Removing = removing from group. Fulcrum itself stays unaware of users. See `provisioning/`. |
 
-### What this costs
-
-| Cost | Why |
-|---|---|
-| Per-tenant container overhead | One Fulcrum process + ~50–200 MB RAM idle per tenant. Pause/scale-down policies mitigate. |
-| Operations complexity | Container orchestration, volume management, backup-per-tenant, upgrade rollouts. |
-| Cross-tenant features | Anything truly multi-tenant (admin dashboard, shared search, etc.) needs to live in the gateway, not Fulcrum. |
-
-## The four pieces
+## The five pieces
 
 ### 1. Container image
-Reuse the existing `fulcrum up` server build. Package it as a Docker image
-that respects `FULCRUM_DIR`, `FULCRUM_PORT`, and accepts
-`GOOGLE_CLIENT_ID`/`GOOGLE_CLIENT_SECRET` via env.
+Reuse the existing `fulcrum up` server build. Package as Docker image that:
+- Honors `FULCRUM_DIR=/data/.fulcrum` so every filesystem operation lands in
+  the per-tenant volume (no code changes — `server/lib/settings/paths.ts:86`
+  already reads this env var).
+- Reads `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` for the bundled OAuth
+  (Phase 1 branch enables this UX automatically).
+- Exposes only port 7777 internally; never to the public.
 
-See `Dockerfile` (TBD) — for now, the closest reference is `cli/src/templates/`.
+Dockerfile lives at the repo root (TODO).
 
-### 2. Per-tenant Compose template
-A `docker-compose.tenant.yaml` parameterized by `${TENANT_SLUG}` that mounts
-`./data/${TENANT_SLUG}/.fulcrum` as the volume and exposes only the internal
-container port. See `docker-compose.tenant.template.yaml` for the skeleton.
+### 2. Per-org Compose template
+`docker-compose.tenant.template.yaml` — parameterized by `${ORG_SLUG}`, mounts
+`./data/${ORG_SLUG}/.fulcrum` as the data volume, joins the shared
+`fulcrum-gateway` Docker network.
 
-### 3. The gateway
-Two reasonable shapes — pick one before building:
+### 3. The gateway — Cloudflare Zero Trust
+- One Cloudflare Tunnel on the GCE host, routes
+  `<slug>.fulcrum.divinci.ai → fulcrum-<slug>:7777`.
+- One Cloudflare Access Application per org, gated by an Access Group whose
+  membership is "emails in this org".
+- See `gateway/README.md`.
 
-- **Cloudflare Zero Trust** — auth + routing handled by Cloudflare; tenant
-  containers only need to be reachable from CF Tunnel. Lowest ops, lowest code.
-- **Hono auth proxy** — self-host a small Hono app that validates JWT/session
-  and `fetch`-proxies to the right tenant container. More code, no CF
-  dependency, full control of the auth UX.
+### 4. Provisioning
+`provisioning/` — scripts that wrap the Cloudflare API for org and user
+management:
+- `org create <slug>` — DNS + tunnel rule + Access App + Access Group + Docker stack
+- `org adduser <slug> <email>` — add to Access Group
+- `org rmuser <slug> <email>` — remove from Access Group
+- `org destroy <slug>` — tear it all down (with a confirmation prompt — this is destructive)
 
-See `gateway/README.md` for tradeoffs.
+Uses `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`, `CLOUDFLARE_ZONE_ID` from
+operator's shell env (set in `~/.zshrc`).
 
-### 4. Tenant provisioning
-A small CLI or admin endpoint that:
-1. Creates `./data/<slug>/`
-2. Runs `docker compose -f docker-compose.tenant.template.yaml up -d` with
-   `TENANT_SLUG=<slug>`
-3. Registers the new subdomain with the gateway
-4. Optionally seeds initial admin user / settings
+### 5. Backups
+`backups/` — Litestream continuous replication of every tenant SQLite to
+Cloudflare R2, plus nightly `restic` snapshots of uploads/worktrees volumes.
 
-## What's *not* solved by container-per-tenant
+## What this still doesn't solve
 
-- **Shared billing / admin dashboard** — needs a separate service that reads
-  per-tenant usage and aggregates.
-- **Cross-tenant analytics** — same.
-- **Bursting beyond a single host** — once we have >N tenants on one box, we
-  need k8s or similar. Compose is the bootstrap, not the destination.
-- **Workspace customers with admin-disabled IMAP** — they still need OAuth.
-  Solved by Phase 1's single Divinci-AI client; this directory doesn't change
-  anything about that.
+- **Org-level admin UI** — for v1, the operator runs `org adduser` from their
+  shell. A web admin can come later.
+- **Cross-org analytics** — needs a separate aggregator service (out of scope
+  here).
+- **Bursting beyond one GCE host** — single-host Compose is the bootstrap. When
+  we have ~50+ orgs, migrate the orchestration to GKE; the per-org compose
+  template is already container-native, so the lift is mostly k8s manifests.
+- **Per-org code repos** — each org's Fulcrum container has its own
+  `~/.fulcrum/worktrees`. Mounting org members' personal git repos into a
+  shared container requires a different model and is explicitly out of scope.
 
-## Open questions before we build
+## Implementation order when we're ready to build
 
-1. Does Divinci-AI commit to the CASA security assessment once we exceed
-   Google's 100-test-user cap? ($500–$4,500/yr + 2–6 mo lead time)
-2. Cloudflare Zero Trust vs. self-hosted gateway?
-3. Are tenants on dedicated subdomains (`acme.fulcrum.divinci.ai`) or paths
-   (`fulcrum.divinci.ai/acme`)? Subdomain is simpler for Fulcrum's existing
-   `redirect_uri` logic; paths require rewriting.
-4. Backups: per-tenant volume snapshot, or shipped to an off-host store?
-
-Until those are answered, this directory remains design.
+1. `Dockerfile` for the Fulcrum container (smallest possible image, reuses
+   existing build artifacts).
+2. `provisioning/org-create.sh` for the happy path on one GCE host.
+3. Cloudflare Tunnel + Access setup for a single test org.
+4. Litestream wiring.
+5. The first real customer (one we control, end-to-end).
+6. CASA submission.
+7. Public launch.
