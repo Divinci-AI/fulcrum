@@ -85,6 +85,9 @@ COPY --from=builder /build/dist ./dist
 COPY --from=builder /build/server ./server
 COPY --from=builder /build/shared ./shared
 COPY --from=builder /build/drizzle ./drizzle
+# cli/src/mcp and cli/src/client are imported directly by server/routes/mcp*.ts
+# at runtime (see grep ../../cli/src in server/) — copy the whole cli package.
+COPY --from=builder /build/cli ./cli
 COPY --from=builder /build/package.json ./package.json
 
 # Per-tenant data lives outside the container at /data. fulcrum's FULCRUM_DIR
@@ -92,6 +95,10 @@ COPY --from=builder /build/package.json ./package.json
 ENV FULCRUM_DIR=/data/.fulcrum \
     FULCRUM_SERVER_PORT=7777 \
     NODE_ENV=production \
+    # server/index.ts:34 reads HOST and defaults to "localhost" — which inside
+    # a container would refuse all external traffic. Bind to every interface;
+    # Docker's port mapping does the actual external exposure.
+    HOST=0.0.0.0 \
     # Bun's default tmpdir inside /tmp is fine; explicit so worktrees don't
     # collide if multiple containers shared a host (they don't, but explicit).
     TMPDIR=/tmp
