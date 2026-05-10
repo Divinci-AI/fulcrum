@@ -2,14 +2,15 @@
 #
 # org-create.sh — boot one Fulcrum-per-org container, end-to-end.
 #
-# This is the v0 happy path: it renders the Compose template, brings up the
-# stack, waits for /health, and prints the local URL. Cloudflare DNS, tunnel
-# ingress, and Access Group provisioning are stubbed at the bottom with the
-# exact API endpoints to fill in once we're ready to expose to the public
-# internet.
+# Renders the Compose template, brings up the stack, polls /health, then
+# provisions Cloudflare DNS + tunnel ingress + Access Group + Access App so
+# https://<slug>.<base-domain> is reachable behind SSO.
+#
+# Pass --skip-cloudflare to stop after the container is healthy (useful for
+# local validation before CF creds are configured on the host).
 #
 # Usage:
-#     ./org-create.sh <slug>
+#     ./org-create.sh <slug> [--owner alice@acme.com] [--skip-cloudflare]
 #
 # Environment (set in ~/.zshrc):
 #     GOOGLE_CLIENT_ID            — Divinci-AI Google OAuth client
@@ -18,22 +19,37 @@
 #     FULCRUM_SAAS_IMAGE          — defaults to "divinci-ai/fulcrum:dev"
 #     FULCRUM_SAAS_ROOT           — defaults to "/opt/fulcrum-saas" (on GCE);
 #                                   "./fulcrum-saas-state" for local testing
+#     CLOUDFLARE_API_TOKEN        — required unless --skip-cloudflare
+#     CLOUDFLARE_ACCOUNT_ID       — required unless --skip-cloudflare
+#     CLOUDFLARE_ZONE_ID          — required unless --skip-cloudflare
+#     CLOUDFLARE_TUNNEL_ID        — required unless --skip-cloudflare
 #
 # Exit codes:
 #     0  success
 #     1  bad usage / missing env
 #     2  stack failed to come up
-#     3  Cloudflare API failure (when wired)
+#     3  Cloudflare API failure
 
 set -euo pipefail
 
 # -------- args --------
-if [[ $# -lt 1 ]]; then
-  echo "usage: $0 <slug>" >&2
+OWNER=""
+SKIP_CLOUDFLARE=0
+SLUG=""
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --owner) OWNER="$2"; shift 2 ;;
+    --skip-cloudflare) SKIP_CLOUDFLARE=1; shift ;;
+    --*) echo "unknown flag: $1" >&2; exit 1 ;;
+    *) if [[ -z "$SLUG" ]]; then SLUG="$1"; shift; else echo "extra arg: $1" >&2; exit 1; fi ;;
+  esac
+done
+
+if [[ -z "$SLUG" ]]; then
+  echo "usage: $0 <slug> [--owner alice@acme.com] [--skip-cloudflare]" >&2
   exit 1
 fi
-
-SLUG="$1"
 
 if ! [[ "$SLUG" =~ ^[a-z][a-z0-9-]{1,30}$ ]]; then
   echo "error: slug must match ^[a-z][a-z0-9-]{1,30}$" >&2
@@ -112,36 +128,35 @@ for i in {1..30}; do
   fi
 done
 
-# -------- cloudflare (stub) --------
-echo "[5/6] cloudflare provisioning (not yet wired)"
-cat <<EOF
-      → Skipped. To finish the public exposure when ready, fill in these
-        Cloudflare API calls (creds from ~/.zshrc):
-
-          POST /zones/\${CLOUDFLARE_ZONE_ID}/dns_records
-            { "type": "CNAME", "name": "${SLUG}", "content": "\${CLOUDFLARE_TUNNEL_ID}.cfargotunnel.com", "proxied": true }
-
-          PUT /accounts/\${CLOUDFLARE_ACCOUNT_ID}/cfd_tunnel/\${CLOUDFLARE_TUNNEL_ID}/configurations
-            → append { "hostname": "${HOSTNAME}", "service": "http://${CONTAINER}:7777" }
-
-          POST /accounts/\${CLOUDFLARE_ACCOUNT_ID}/access/groups
-            { "name": "org-${SLUG}", "include": [] }
-
-          POST /accounts/\${CLOUDFLARE_ACCOUNT_ID}/access/apps
-            { "name": "Fulcrum: ${SLUG}", "domain": "${HOSTNAME}",
-              "policies": [{ "decision": "allow", "include": [{ "group": { "id": "<group-id>" } }] }] }
-EOF
+# -------- cloudflare --------
+if [[ "$SKIP_CLOUDFLARE" -eq 1 ]]; then
+  echo "[5/6] cloudflare provisioning — skipped (--skip-cloudflare)"
+else
+  echo "[5/6] cloudflare provisioning"
+  # shellcheck source=./_cf-api.sh
+  source "${SCRIPT_DIR}/_cf-api.sh"
+  cf_dns_ensure_cname "$SLUG"
+  cf_tunnel_ensure_ingress "$SLUG" "$CONTAINER"
+  GROUP_ID=$(cf_access_group_ensure "$SLUG" "$OWNER")
+  cf_access_app_ensure "$SLUG" "$GROUP_ID"
+fi
 
 # -------- done --------
 echo "[6/6] done"
+PUBLIC_URL="https://${HOSTNAME}"
+if [[ "$SKIP_CLOUDFLARE" -eq 1 ]]; then
+  PUBLIC_URL="(skipped — re-run without --skip-cloudflare)"
+fi
+
 cat <<EOF
 
-  Container : $CONTAINER
-  Data dir  : $DATA_DIR
-  Local URL : http://localhost:7777    (only if no other container is on 7777)
-  Public URL: https://${HOSTNAME}      (once CF wiring is added above)
+  Org slug   : $SLUG
+  Container  : $CONTAINER
+  Data dir   : $DATA_DIR
+  Public URL : $PUBLIC_URL
 
-  Inspect:    docker logs -f $CONTAINER
-  Tear down:  docker compose -f $STACK_FILE down -v && rm -rf $DATA_DIR
+  Inspect    : docker logs -f $CONTAINER
+  Add user   : ./org-adduser.sh $SLUG <email>
+  Tear down  : ./org-destroy.sh $SLUG --yes-really
 
 EOF
