@@ -5,6 +5,7 @@ import { homedir } from 'node:os'
 import { resolve, join } from 'node:path'
 import { db, projects, repositories, apps, appServices, terminalTabs, projectRepositories, tasks, tags, projectTags, projectAttachments, projectLinks, mentions } from '../db'
 import { buildMentionText, syncAndNotify } from '../services/mention-service'
+import { grantCreatorAdmin } from '../services/access-control-service'
 import { eq, desc, sql, and, or, inArray } from 'drizzle-orm'
 import type { ProjectWithDetails, ProjectRepositoryDetails, Tag, ProjectAttachment, ProjectLink } from '../../shared/types'
 import type { NewProject } from '../db'
@@ -640,6 +641,11 @@ app.post('/', async (c) => {
     if (!project) {
       return c.json({ error: 'Failed to create project' }, 500)
     }
+
+    // D-5: creator gets admin on the project so they can manage its ACL
+    // + visibility. No-op when there's no current user.
+    const creator = (c.var as { user?: { id?: string } | null }).user
+    grantCreatorAdmin(creator?.id, 'project', project.id)
 
     // D-3.1: parse @mentions from description + notes and dispatch
     // notifications for any users mentioned at creation time.

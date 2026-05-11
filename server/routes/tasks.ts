@@ -16,6 +16,7 @@ import { broadcast } from '../websocket/terminal-ws'
 import { updateTaskStatus } from '../services/task-status'
 import { reindexTaskFTS } from '../services/search-service'
 import { buildMentionText, syncAndNotify } from '../services/mention-service'
+import { grantCreatorAdmin } from '../services/access-control-service'
 import { mentions } from '../db'
 import { log } from '../lib/logger'
 import { createGitWorktree, copyFilesToWorktree } from '../lib/git-utils'
@@ -365,6 +366,12 @@ app.post('/', async (c) => {
 
     const created = db.select().from(tasks).where(eq(tasks.id, newTask.id)).get()
     broadcast({ type: 'task:updated', payload: { taskId: newTask.id } })
+
+    // D-5: creator gets admin on the resource so they can manage its ACL
+    // and visibility going forward. No-op when there's no current user
+    // (anonymous task creation in dev / desktop).
+    const creator = (c.var as { user?: { id?: string } | null }).user
+    grantCreatorAdmin(creator?.id, 'task', newTask.id)
 
     // D-3: parse @mentions from the new task's description + notes and
     // dispatch notifications for any users mentioned at creation time.
