@@ -5,7 +5,7 @@ import { homedir } from 'node:os'
 import { resolve, join } from 'node:path'
 import { db, projects, repositories, apps, appServices, terminalTabs, projectRepositories, tasks, tags, projectTags, projectAttachments, projectLinks, mentions } from '../db'
 import { buildMentionText, syncAndNotify } from '../services/mention-service'
-import { grantCreatorAdmin } from '../services/access-control-service'
+import { grantCreatorAdmin, effectiveRole, roleSatisfies } from '../services/access-control-service'
 import { eq, desc, sql, and, or, inArray } from 'drizzle-orm'
 import type { ProjectWithDetails, ProjectRepositoryDetails, Tag, ProjectAttachment, ProjectLink } from '../../shared/types'
 import type { NewProject } from '../db'
@@ -304,6 +304,9 @@ function buildProjectWithDetails(
 
 // GET /api/projects - List all projects with nested entities
 app.get('/', (c) => {
+  // D-5 PR 3: filter by effectiveRole. Tenant-visible passes for everyone;
+  // restricted requires a grant.
+  const userId = (c.var as { user?: { id?: string } | null }).user?.id ?? null
   const allProjects = db
     .select()
     .from(projects)
@@ -312,6 +315,7 @@ app.get('/', (c) => {
       desc(projects.createdAt)
     )
     .all()
+    .filter((p) => effectiveRole(userId, 'project', p.id) !== null)
 
   const result: ProjectWithDetails[] = allProjects.map((project) => {
     // Get repository if linked
@@ -346,6 +350,11 @@ app.get('/:id', (c) => {
 
   const project = db.select().from(projects).where(eq(projects.id, id)).get()
   if (!project) {
+    return c.json({ error: 'Project not found' }, 404)
+  }
+  // D-5 PR 3: viewer access required to read.
+  const userId = (c.var as { user?: { id?: string } | null }).user?.id ?? null
+  if (!roleSatisfies(effectiveRole(userId, 'project', id), 'viewer')) {
     return c.json({ error: 'Project not found' }, 404)
   }
 
@@ -724,6 +733,13 @@ app.patch('/:id', async (c) => {
       return c.json({ error: 'Project not found' }, 404)
     }
 
+    // D-5 PR 3: editor required to mutate; 404 (not 403) when no read
+    // access either, to avoid leaking restricted-resource existence.
+    const userId = (c.var as { user?: { id?: string } | null }).user?.id ?? null
+    const role = effectiveRole(userId, 'project', id)
+    if (!roleSatisfies(role, 'viewer')) return c.json({ error: 'Project not found' }, 404)
+    if (!roleSatisfies(role, 'editor')) return c.json({ error: 'editor role required' }, 403)
+
     const body = await c.req.json<{
       name?: string
       description?: string | null
@@ -777,6 +793,13 @@ app.delete('/:id', async (c) => {
   if (!existing) {
     return c.json({ error: 'Project not found' }, 404)
   }
+
+  // D-5 PR 3: editor required to delete. Admin only gates ACL +
+  // visibility changes. See tasks.ts DELETE for the rationale.
+  const userId = (c.var as { user?: { id?: string } | null }).user?.id ?? null
+  const role = effectiveRole(userId, 'project', id)
+  if (!roleSatisfies(role, 'viewer')) return c.json({ error: 'Project not found' }, 404)
+  if (!roleSatisfies(role, 'editor')) return c.json({ error: 'editor role required' }, 403)
 
   // Optionally delete app (this will cascade to services/deployments via the apps route logic)
   if (deleteApp && existing.appId) {

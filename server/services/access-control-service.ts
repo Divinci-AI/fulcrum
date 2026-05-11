@@ -57,7 +57,8 @@ function getResourceVisibility(
  * ACL lookup beyond direct user grants to include team grants. Cheap by
  * design — a user typically belongs to a handful of teams at most.
  */
-function getUserTeamIds(userId: string): string[] {
+function getUserTeamIds(userId: string | null): string[] {
+  if (!userId) return []
   return db
     .select({ teamId: teamMembers.teamId })
     .from(teamMembers)
@@ -73,11 +74,14 @@ function getUserTeamIds(userId: string): string[] {
  * them with `maxRole`.
  */
 function getMatchingGrants(
-  userId: string,
+  userId: string | null,
   resourceType: ResourceType,
   resourceId: string
 ): Role[] {
   const teamIds = getUserTeamIds(userId)
+  // No user + no team grants possible → short-circuit. Tenant-visible
+  // resources still grant the default role via combineGrantWithVisibility.
+  if (!userId && teamIds.length === 0) return []
   const rows = db
     .select({
       role: acls.role,
@@ -92,7 +96,7 @@ function getMatchingGrants(
 
   const matched: Role[] = []
   for (const r of rows) {
-    if (r.principalType === 'user' && r.principalId === userId) {
+    if (r.principalType === 'user' && userId && r.principalId === userId) {
       matched.push(r.role as Role)
     } else if (r.principalType === 'team' && teamIds.includes(r.principalId)) {
       matched.push(r.role as Role)
@@ -141,7 +145,7 @@ export function grantCreatorAdmin(
  * branch on the return value.
  */
 export function effectiveRole(
-  userId: string,
+  userId: string | null,
   resourceType: ResourceType,
   resourceId: string
 ): Role | null {

@@ -16,7 +16,7 @@ import { broadcast } from '../websocket/terminal-ws'
 import { updateTaskStatus } from '../services/task-status'
 import { reindexTaskFTS } from '../services/search-service'
 import { buildMentionText, syncAndNotify } from '../services/mention-service'
-import { grantCreatorAdmin } from '../services/access-control-service'
+import { grantCreatorAdmin, effectiveRole, roleSatisfies } from '../services/access-control-service'
 import { mentions } from '../db'
 import { log } from '../lib/logger'
 import { createGitWorktree, copyFilesToWorktree } from '../lib/git-utils'
@@ -180,6 +180,13 @@ app.get('/', (c) => {
       return taskTags.includes(tag)
     })
   }
+
+  // D-5 PR 3: filter by effectiveRole. Tenant-visible tasks pass through
+  // for everyone (incl. anonymous) because the tenant-default role is
+  // editor. Restricted tasks only pass for principals with a matching
+  // grant. N×1 lookup; acceptable at current scale.
+  const userId = (c.var as { user?: { id?: string } | null }).user?.id ?? null
+  allTasks = allTasks.filter((t) => effectiveRole(userId, 'task', t.id) !== null)
 
   return c.json(allTasks.map((t) => toApiResponse(t, true)))
 })
@@ -467,6 +474,12 @@ app.get('/:id', (c) => {
   if (!task) {
     return c.json({ error: 'Task not found' }, 404)
   }
+  // D-5 PR 3: enforce viewer access. Tenant-visible passes for everyone;
+  // restricted requires a grant.
+  const userId = (c.var as { user?: { id?: string } | null }).user?.id ?? null
+  if (!roleSatisfies(effectiveRole(userId, 'task', id), 'viewer')) {
+    return c.json({ error: 'Task not found' }, 404)
+  }
   return c.json(toApiResponse(task, true))
 })
 
@@ -670,6 +683,14 @@ app.patch('/:id', async (c) => {
       return c.json({ error: 'Task not found' }, 404)
     }
 
+    // D-5 PR 3: editor required to mutate. Viewer-only can read but not
+    // change. Returns 404 (not 403) for "no access at all" to avoid
+    // leaking the existence of restricted resources.
+    const userId = (c.var as { user?: { id?: string } | null }).user?.id ?? null
+    const role = effectiveRole(userId, 'task', id)
+    if (!roleSatisfies(role, 'viewer')) return c.json({ error: 'Task not found' }, 404)
+    if (!roleSatisfies(role, 'editor')) return c.json({ error: 'editor role required' }, 403)
+
     const body = await c.req.json<Partial<Task> & { viewState?: unknown }>()
     const now = new Date().toISOString()
 
@@ -758,6 +779,15 @@ app.delete('/:id', (c) => {
   if (!existing) {
     return c.json({ error: 'Task not found' }, 404)
   }
+
+  // D-5 PR 3: editor required to delete. Admin only gates ACL +
+  // visibility changes (things that affect other users); delete is part
+  // of "I can edit this." Tenant-visible (default) means every tenant
+  // member is implicit editor and can therefore delete.
+  const userId = (c.var as { user?: { id?: string } | null }).user?.id ?? null
+  const role = effectiveRole(userId, 'task', id)
+  if (!roleSatisfies(role, 'viewer')) return c.json({ error: 'Task not found' }, 404)
+  if (!roleSatisfies(role, 'editor')) return c.json({ error: 'editor role required' }, 403)
 
   // Handle linked worktree/directory based on deleteLinkedWorktree flag
   if (existing.worktreePath) {
