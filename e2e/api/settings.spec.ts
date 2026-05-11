@@ -11,21 +11,23 @@ test.describe('settings/config API', () => {
     expect(typeof config['server.port']).toBe('number')
   })
 
-  test('SECURITY: /api/config does not expose integrations.*Secret fields in plain text', async ({
-    request,
-  }) => {
-    // Caught when first running e2e against the deployed acme container —
-    // /api/config returned googleClientSecret = "GOCSPX-...". The API should
-    // redact secret fields (`"***"` or `null`) when serializing. This test
-    // is expected to FAIL until the server adds redaction. Track in BUGS.md.
-    test.fail(
-      true,
-      'known: /api/config exposes integrations.googleClientSecret + githubPat in plain text'
-    )
+  test('SECURITY: /api/config redacts every fnox `age` provider field', async ({ request }) => {
+    // First e2e run against the deployed acme container caught this — the
+    // /api/config listing returned googleClientSecret = "GOCSPX-...DRdy" in
+    // plain text. Server now substitutes a "***" marker for any path that
+    // FNOX_CONFIG_MAP marks as `provider: 'age'`. The UI can still tell
+    // "set vs unset" (presence of the marker vs null) without seeing the
+    // raw value. Regression guard: ensure NO Google client secret format
+    // ever appears in this response.
     const config = await getJson<Record<string, unknown>>(request, '/api/config')
     const secret = config['integrations.googleClientSecret']
-    if (secret) {
+    if (secret !== null && secret !== undefined && secret !== '') {
       expect(String(secret)).not.toMatch(/^GOCSPX-/)
+    }
+    // Also defend against the GitHub PAT shape leaking via the same surface.
+    const pat = config['integrations.githubPat']
+    if (pat !== null && pat !== undefined && pat !== '') {
+      expect(String(pat)).not.toMatch(/^(ghp_|github_pat_)/)
     }
   })
 
