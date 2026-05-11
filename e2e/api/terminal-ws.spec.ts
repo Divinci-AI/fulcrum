@@ -1,6 +1,13 @@
 import { expect, test } from '@playwright/test'
 import { WsClient, wsUrl } from '../_lib/ws'
 
+// Serialize the WebSocket terminal tests. They share the server's global
+// PTY manager + terminal name index; running them in parallel can let one
+// test's terminals:list response satisfy another test's predicate, or one
+// test's create/destroy mutate state while another is mid-assert. Serial
+// mode adds ~3s to the suite but eliminates the flake.
+test.describe.configure({ mode: 'serial' })
+
 test.describe('terminal WebSocket protocol', () => {
   test('connection opens cleanly', async () => {
     const ws = new WsClient(wsUrl('/ws/terminal'))

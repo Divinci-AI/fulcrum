@@ -41,6 +41,8 @@ import memoryFileRoutes from './routes/memory-file'
 import searchRoutes from './routes/search'
 import scratchDirsRoutes from './routes/scratch-dirs'
 import serverExposeRoutes from './routes/server-expose'
+import usersRoutes from './routes/users'
+import { currentUser } from './middleware/current-user'
 import { writeEntry } from './lib/logger'
 import type { LogEntry } from '../shared/logger'
 
@@ -78,13 +80,28 @@ export function createApp() {
     cors({
       origin: '*',
       allowMethods: ['GET', 'POST', 'PATCH', 'PUT', 'DELETE', 'OPTIONS'],
-      allowHeaders: ['Content-Type', 'mcp-session-id', 'Last-Event-ID', 'mcp-protocol-version'],
+      allowHeaders: [
+        'Content-Type',
+        'mcp-session-id',
+        'Last-Event-ID',
+        'mcp-protocol-version',
+        // Cloudflare Access injects this on every request behind a CF Access
+        // policy. We trust it because CF verifies the user identity at the
+        // edge; the gateway/README spells out the threat model.
+        'Cf-Access-Authenticated-User-Email',
+        'Cf-Access-Jwt-Assertion',
+      ],
       exposeHeaders: ['mcp-session-id', 'mcp-protocol-version'],
     })
   )
 
+  // Identity resolution — runs before all /api routes so handlers can read
+  // `c.var.user`. Non-enforcing: routes opt in via `requireUser(c)`.
+  app.use('/api/*', currentUser)
+
   // API Routes
   app.route('/health', healthRoutes)
+  app.route('/api/users', usersRoutes)
   app.route('/api/tasks', tasksRoutes)
   app.route('/api/git', gitRoutes)
   app.route('/api/fs', filesystemRoutes)
