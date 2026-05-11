@@ -482,10 +482,13 @@ caldavRoutes.get('/oauth/callback', async (c) => {
   }
 
   if (!googleClientId || !googleClientSecret) {
-    // Fallback to settings
+    // Fallback chain: legacy caldav.* config first (back-compat), then the
+    // primary integrations.* values. The latter respects the GOOGLE_CLIENT_ID
+    // / GOOGLE_CLIENT_SECRET env vars, so hosted Fulcrum deployments
+    // automatically reuse the operator-provided OAuth client for CalDAV.
     const settings = getSettings()
-    googleClientId = googleClientId ?? (settings.caldav.googleClientId || undefined)
-    googleClientSecret = googleClientSecret ?? (settings.caldav.googleClientSecret || undefined)
+    googleClientId = googleClientId ?? (settings.caldav.googleClientId || undefined) ?? (settings.integrations.googleClientId || undefined)
+    googleClientSecret = googleClientSecret ?? (settings.caldav.googleClientSecret || undefined) ?? (settings.integrations.googleClientSecret || undefined)
   }
 
   if (!googleClientId || !googleClientSecret) {

@@ -32,6 +32,7 @@ import {
   useGoogleOAuthUrl,
   useUpdateGoogleAccount,
 } from '@/hooks/use-google'
+import { useGoogleOAuthStatus } from '@/hooks/use-config'
 
 interface GoogleAccountManagerProps {
   clientId: string
@@ -58,6 +59,8 @@ export function GoogleAccountManager({
   const { data: accounts, refetch } = useGoogleAccounts()
   const deleteAccount = useDeleteGoogleAccount()
   const getOAuthUrl = useGoogleOAuthUrl()
+  const { data: oauthStatus } = useGoogleOAuthStatus()
+  const managedByHost = oauthStatus?.managedByHost ?? false
   const updateAccount = useUpdateGoogleAccount()
   const [showAddForm, setShowAddForm] = useState(false)
   const [accountName, setAccountName] = useState('')
@@ -254,65 +257,79 @@ export function GoogleAccountManager({
         </CollapsibleContent>
       </Collapsible>
 
-      {/* OAuth Credentials */}
-      <div className="space-y-4">
-        {/* Client ID */}
-        <div className="space-y-1">
-          <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-            <label className="text-sm text-muted-foreground sm:w-20 sm:shrink-0">
-              {t('fields.google.clientId', 'Google ID')}
-            </label>
-            <div className="flex flex-1 items-center gap-2">
-              <div className="relative flex-1">
-                <Input
-                  value={clientId}
-                  onChange={(e) => onClientIdChange(e.target.value)}
-                  placeholder="your-app.apps.googleusercontent.com"
-                  disabled={isLoading}
-                  className="flex-1 pr-8 font-mono text-sm"
-                />
-                {clientIdSaved && (
-                  <div className="absolute right-2 top-1/2 -translate-y-1/2 text-green-500">
-                    <HugeiconsIcon icon={Tick02Icon} size={14} strokeWidth={2} />
-                  </div>
-                )}
-              </div>
-            </div>
-          </div>
-          <p className="text-xs text-muted-foreground sm:ml-20 sm:pl-2">
-            {t('fields.google.clientIdDescription', 'OAuth Client ID from Google Cloud Console')}
+      {/* OAuth Credentials — hidden when the host provides them via env vars (e.g. Divinci-AI SaaS). */}
+      {managedByHost ? (
+        <div className="rounded-md border border-dashed border-muted-foreground/30 bg-muted/30 px-4 py-3">
+          <p className="text-sm font-medium">
+            {t('fields.google.managedByHost', 'Google OAuth provided by your Fulcrum host')}
+          </p>
+          <p className="mt-1 text-xs text-muted-foreground">
+            {t(
+              'fields.google.managedByHostDescription',
+              'Your hosting provider supplies the Google OAuth client. Click "Add Google Account" to connect — no Google Cloud project setup required.'
+            )}
           </p>
         </div>
+      ) : (
+        <div className="space-y-4">
+          {/* Client ID */}
+          <div className="space-y-1">
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+              <label className="text-sm text-muted-foreground sm:w-20 sm:shrink-0">
+                {t('fields.google.clientId', 'Google ID')}
+              </label>
+              <div className="flex flex-1 items-center gap-2">
+                <div className="relative flex-1">
+                  <Input
+                    value={clientId}
+                    onChange={(e) => onClientIdChange(e.target.value)}
+                    placeholder="your-app.apps.googleusercontent.com"
+                    disabled={isLoading}
+                    className="flex-1 pr-8 font-mono text-sm"
+                  />
+                  {clientIdSaved && (
+                    <div className="absolute right-2 top-1/2 -translate-y-1/2 text-green-500">
+                      <HugeiconsIcon icon={Tick02Icon} size={14} strokeWidth={2} />
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+            <p className="text-xs text-muted-foreground sm:ml-20 sm:pl-2">
+              {t('fields.google.clientIdDescription', 'OAuth Client ID from Google Cloud Console')}
+            </p>
+          </div>
 
-        {/* Client Secret */}
-        <div className="space-y-1">
-          <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-            <label className="text-sm text-muted-foreground sm:w-20 sm:shrink-0">
-              {t('fields.google.clientSecret', 'Google Secret')}
-            </label>
-            <div className="flex flex-1 items-center gap-2">
-              <div className="relative flex-1">
-                <Input
-                  type="password"
-                  value={clientSecret}
-                  onChange={(e) => onClientSecretChange(e.target.value)}
-                  placeholder={t('caldav.googleClientSecretPlaceholder')}
-                  disabled={isLoading}
-                  className="flex-1 pr-8 font-mono text-sm"
-                />
-                {clientSecretSaved && (
-                  <div className="absolute right-2 top-1/2 -translate-y-1/2 text-green-500">
-                    <HugeiconsIcon icon={Tick02Icon} size={14} strokeWidth={2} />
-                  </div>
-                )}
+          {/* Client Secret */}
+          <div className="space-y-1">
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+              <label className="text-sm text-muted-foreground sm:w-20 sm:shrink-0">
+                {t('fields.google.clientSecret', 'Google Secret')}
+              </label>
+              <div className="flex flex-1 items-center gap-2">
+                <div className="relative flex-1">
+                  <Input
+                    type="password"
+                    value={clientSecret}
+                    onChange={(e) => onClientSecretChange(e.target.value)}
+                    placeholder={t('caldav.googleClientSecretPlaceholder')}
+                    disabled={isLoading}
+                    className="flex-1 pr-8 font-mono text-sm"
+                  />
+                  {clientSecretSaved && (
+                    <div className="absolute right-2 top-1/2 -translate-y-1/2 text-green-500">
+                      <HugeiconsIcon icon={Tick02Icon} size={14} strokeWidth={2} />
+                    </div>
+                  )}
+                </div>
               </div>
             </div>
+            <p className="text-xs text-muted-foreground sm:ml-20 sm:pl-2">
+              {t('fields.google.clientSecretDescription', 'OAuth Client Secret for Google Calendar & Gmail')}
+            </p>
           </div>
-          <p className="text-xs text-muted-foreground sm:ml-20 sm:pl-2">
-            {t('fields.google.clientSecretDescription', 'OAuth Client Secret for Google Calendar & Gmail')}
-          </p>
         </div>
-      </div>
+      )}
 
       {/* Account Management */}
       <div className="flex items-center justify-between">

@@ -218,6 +218,23 @@ app.get('/fnox-status', (c) => {
   })
 })
 
+// GET /api/config/google-oauth-status - Report where Google OAuth credentials come from.
+// Hosted Fulcrum deployments (e.g. Divinci-AI) supply GOOGLE_CLIENT_ID/SECRET via env
+// vars so individual users never set up their own GCP project. When that's the case,
+// the Settings UI should hide the input fields and show a "managed by host" message.
+app.get('/google-oauth-status', (c) => {
+  const envClientId = process.env.GOOGLE_CLIENT_ID
+  const envClientSecret = process.env.GOOGLE_CLIENT_SECRET
+  const settings = getSettings()
+  const providerClientId = envClientId ? 'env' : (settings.integrations.googleClientId ? 'fnox' : 'none')
+  const providerClientSecret = envClientSecret ? 'env' : (settings.integrations.googleClientSecret ? 'fnox' : 'none')
+  return c.json({
+    clientId: { provider: providerClientId, configured: providerClientId !== 'none' },
+    clientSecret: { provider: providerClientSecret, configured: providerClientSecret !== 'none' },
+    managedByHost: providerClientId === 'env' && providerClientSecret === 'env',
+  })
+})
+
 // Developer mode routes
 
 // GET /api/config/developer-mode - Check if developer mode is enabled
