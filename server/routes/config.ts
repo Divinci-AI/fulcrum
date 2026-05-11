@@ -18,6 +18,7 @@ import {
   type NotificationSettings,
   type ZAiSettings,
 } from '../lib/settings'
+import { FNOX_CONFIG_MAP } from '../lib/settings/fnox'
 import { spawn } from 'child_process'
 import { testNotificationChannel, sendNotification, type NotificationPayload } from '../services/notification-service'
 import { detectTailscaleIp } from './server-expose'
@@ -79,12 +80,28 @@ function getSettingValue(path: string): unknown {
 
 const app = new Hono()
 
-// GET /api/config - List all config values
+// Settings paths whose values are stored via fnox `age` provider — i.e. they
+// are secrets. The /api/config GET listing must not return raw values for
+// these paths; we substitute a stable redaction marker so the UI can tell
+// "set vs unset" without ever exposing the secret. Derived from the single
+// source of truth (FNOX_CONFIG_MAP).
+const SECRET_PATHS = new Set(
+  Object.entries(FNOX_CONFIG_MAP)
+    .filter(([, entry]) => entry.provider === 'age')
+    .map(([path]) => path)
+)
+const REDACTED = '***'
+
+// GET /api/config - List all config values (secrets redacted)
 app.get('/', (c) => {
   const config: Record<string, unknown> = {}
   for (const [, path] of Object.entries(CONFIG_KEYS)) {
-    const value = getSettingValue(path)
-    config[path] = value ?? getDefaultValue(path)
+    const value = getSettingValue(path) ?? getDefaultValue(path)
+    if (SECRET_PATHS.has(path) && value !== null && value !== undefined && value !== '') {
+      config[path] = REDACTED
+    } else {
+      config[path] = value
+    }
   }
   return c.json(config)
 })

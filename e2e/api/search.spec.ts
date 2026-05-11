@@ -50,15 +50,16 @@ test.describe('search API', () => {
     expect(foundTask, 'created task should appear in search by title').toBeTruthy()
   })
 
-  test('SECURITY: /api/search returns 500 on queries with FTS5 special chars (known bug)', async ({
-    request,
-  }) => {
-    // The search route passes the raw query to SQLite FTS5 without escaping.
-    // FTS5 interprets `-` as a column operator → 500 "no such column: ...".
-    // Same risk class exists for ", *, (, ), :, etc. Real bug, not a test
-    // bug; tracking via test.fail until server-side escaping lands.
-    test.fail(true, 'known: server passes unescaped queries to FTS5 — should sanitize')
-    const res = await request.get('/api/search?q=word-with-dash')
-    expect(res.status()).toBe(200)
+  test('FTS5 special chars in user queries do not crash the route', async ({ request }) => {
+    // First e2e run caught the server passing raw user queries to SQLite
+    // FTS5 — `q=word-with-dash` was returning 500 "no such column: with"
+    // because FTS5 treats `-` as a column operator. Server now wraps each
+    // user-supplied token in FTS5 phrase quotes via escapeFts5Query() so
+    // the input is matched literally. This regression-guards the full
+    // class: -, *, ", :, ^, +, parens.
+    for (const q of ['word-with-dash', 'a*b', 'foo:bar', 'parens(test)']) {
+      const res = await request.get(`/api/search?q=${encodeURIComponent(q)}`)
+      expect(res.status(), `query: ${q}`).toBe(200)
+    }
   })
 })

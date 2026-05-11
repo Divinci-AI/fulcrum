@@ -37,25 +37,48 @@ export interface SearchResult {
 // Gmail is opt-in only — not included in default searches to avoid latency/rate-limit impact
 const ALL_ENTITIES: SearchOptions['entities'] = ['tasks', 'projects', 'messages', 'events', 'memories', 'conversations']
 
+/**
+ * Escape a user-provided search string so SQLite FTS5 treats it as a literal
+ * phrase rather than parsing it for operators. FTS5's MATCH operator
+ * interprets special characters (-, *, ", :, ^, +, parentheses) as query
+ * syntax — feeding raw user input causes 500s like "no such column: <suffix>"
+ * when the input contains a dash.
+ *
+ * Strategy: split on whitespace, wrap each token in double quotes, and
+ * double any embedded double quotes (FTS5's quote-escape rule). This forces
+ * each token to be matched as a literal phrase. Single-token queries become
+ * "foo-bar"; multi-token become "foo" "bar". For literal phrase matching of
+ * multi-word inputs the join with space is still an AND across tokens —
+ * which is what users typically expect from a basic search box.
+ */
+export function escapeFts5Query(raw: string): string {
+  const tokens = raw.split(/\s+/).filter(Boolean)
+  if (tokens.length === 0) return '""'
+  return tokens.map((t) => `"${t.replace(/"/g, '""')}"`).join(' ')
+}
+
 export async function search(options: SearchOptions): Promise<SearchResult[]> {
   const entities = options.entities?.length ? options.entities : ALL_ENTITIES
   const limit = options.limit ?? 10
+  const safeQuery = escapeFts5Query(options.query)
 
   const searches = entities!.map((entity) => {
     switch (entity) {
       case 'tasks':
-        return searchTasks(options.query, { status: options.taskStatus }, limit)
+        return searchTasks(safeQuery, { status: options.taskStatus }, limit)
       case 'projects':
-        return searchProjects(options.query, { status: options.projectStatus }, limit)
+        return searchProjects(safeQuery, { status: options.projectStatus }, limit)
       case 'messages':
-        return searchMessages(options.query, { channel: options.messageChannel, direction: options.messageDirection }, limit)
+        return searchMessages(safeQuery, { channel: options.messageChannel, direction: options.messageDirection }, limit)
       case 'events':
-        return searchEvents(options.query, { from: options.eventFrom, to: options.eventTo }, limit)
+        return searchEvents(safeQuery, { from: options.eventFrom, to: options.eventTo }, limit)
       case 'memories':
-        return searchMemories(options.query, { tags: options.memoryTags }, limit)
+        return searchMemories(safeQuery, { tags: options.memoryTags }, limit)
       case 'conversations':
-        return searchConversations(options.query, { role: options.conversationRole, provider: options.conversationProvider, projectId: options.conversationProjectId }, limit)
+        return searchConversations(safeQuery, { role: options.conversationRole, provider: options.conversationProvider, projectId: options.conversationProjectId }, limit)
       case 'gmail':
+        // Gmail search uses the Google API directly (not FTS5); pass the raw
+        // query so users can use Gmail's own operators (from:, to:, etc).
         return searchGmail(options.query, { from: options.gmailFrom, to: options.gmailTo, after: options.gmailAfter, before: options.gmailBefore }, limit)
     }
   })
