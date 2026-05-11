@@ -88,6 +88,15 @@ mise run test:file server/routes/config.test.ts  # Run specific test file
 
 The mise test tasks set `HOME` and `FULCRUM_DIR` to temp directories **before** Bun starts. This is necessary because Bun caches `os.homedir()` at process startup, before any JavaScript runs. Without this isolation, tests that write to settings files would corrupt production `~/.fulcrum/settings.json` and `~/.claude/settings.json`.
 
+If mise is not installed, replicate the isolation manually before invoking `bun test`:
+
+```bash
+export HOME_BACKUP="$HOME"
+export HOME=$(mktemp -d -t fulcrum-test-home-XXXXXX)
+export FULCRUM_DIR=$(mktemp -d -t fulcrum-test-dir-XXXXXX)
+bun test server/services/mention-service.test.ts
+```
+
 ## CLI
 
 The `fulcrum` package provides a global CLI:

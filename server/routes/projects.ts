@@ -4,9 +4,10 @@ import { existsSync, rmSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { resolve, join } from 'node:path'
 import { db, projects, repositories, apps, appServices, terminalTabs, projectRepositories, tasks, tags, projectTags, projectAttachments, projectLinks, mentions } from '../db'
-import { syncMentionsForSource, notifyMentions } from '../services/mention-service'
+import { buildMentionText, syncAndNotify } from '../services/mention-service'
 import { eq, desc, sql, and, or, inArray } from 'drizzle-orm'
 import type { ProjectWithDetails, ProjectRepositoryDetails, Tag, ProjectAttachment, ProjectLink } from '../../shared/types'
+import type { NewProject } from '../db'
 import { detectLinkType } from '../lib/link-utils'
 import { getFulcrumDir } from '../lib/settings'
 import * as fs from 'fs'
@@ -371,18 +372,22 @@ app.get('/:id', (c) => {
 // For backwards compatibility: also accepts repositoryId, path, or url
 app.post('/', async (c) => {
   try {
-    const body = await c.req.json<{
-      name: string
-      description?: string
-      notes?: string | null
-      tags?: string[] // Tag names to add
-      // Optional - for backwards compatibility
-      repositoryId?: string
-      path?: string
-      url?: string
-      targetDir?: string
-      folderName?: string
-    }>()
+    // Body shape is derived from the schema's `NewProject` insert type so
+    // schema additions automatically surface here as optional fields. The
+    // hand-listed extras (`tags`, `path`, `url`, etc.) are inputs the route
+    // consumes but doesn't persist directly. Matches the same pattern used
+    // by POST /api/tasks.
+    const body = await c.req.json<
+      Omit<NewProject, 'id' | 'createdAt' | 'updatedAt' | 'lastAccessedAt' | 'status'> & {
+        tags?: string[]
+        // Optional - for backwards compatibility
+        repositoryId?: string
+        path?: string
+        url?: string
+        targetDir?: string
+        folderName?: string
+      }
+    >()
 
     if (!body.name) {
       return c.json({ error: 'name is required' }, 400)
@@ -638,13 +643,11 @@ app.post('/', async (c) => {
 
     // D-3.1: parse @mentions from description + notes and dispatch
     // notifications for any users mentioned at creation time.
-    const mentionText = `${project.description ?? ''}\n${project.notes ?? ''}`
-    const result = syncMentionsForSource('project', project.id, mentionText)
-    notifyMentions({
-      added: result.added,
+    syncAndNotify({
       sourceType: 'project',
       sourceId: project.id,
       sourceTitle: project.name,
+      text: buildMentionText(project),
       authorEmail: (c.var as { user?: { email?: string } | null }).user?.email,
     })
 
@@ -733,16 +736,22 @@ app.patch('/:id', async (c) => {
     const project = db.select().from(projects).where(eq(projects.id, id)).get()!
     const { repo, appRow, services, tab } = fetchProjectRelations(project)
 
-    // D-3.1: re-sync @mentions after the project text changed.
-    const mentionText = `${project.description ?? ''}\n${project.notes ?? ''}`
-    const result = syncMentionsForSource('project', project.id, mentionText)
-    notifyMentions({
-      added: result.added,
-      sourceType: 'project',
-      sourceId: project.id,
-      sourceTitle: project.name,
-      authorEmail: (c.var as { user?: { email?: string } | null }).user?.email,
-    })
+    // D-3.2: only re-sync mentions when the caller actually touched
+    // description or notes. Skipping the re-parse otherwise preserves
+    // mentions across unrelated PATCH calls (rename, status change, etc.)
+    // even if a mentioned user's displayName has changed in the meantime.
+    const textChanged =
+      (body as { description?: unknown }).description !== undefined ||
+      (body as { notes?: unknown }).notes !== undefined
+    if (textChanged) {
+      syncAndNotify({
+        sourceType: 'project',
+        sourceId: project.id,
+        sourceTitle: project.name,
+        text: buildMentionText(project),
+        authorEmail: (c.var as { user?: { email?: string } | null }).user?.email,
+      })
+    }
 
     return c.json(buildProjectWithDetails(project, repo, appRow, services, tab))
   } catch (err) {
