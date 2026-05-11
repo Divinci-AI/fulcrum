@@ -3,7 +3,8 @@ import { nanoid } from 'nanoid'
 import { existsSync, rmSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { resolve, join } from 'node:path'
-import { db, projects, repositories, apps, appServices, terminalTabs, projectRepositories, tasks, tags, projectTags, projectAttachments, projectLinks } from '../db'
+import { db, projects, repositories, apps, appServices, terminalTabs, projectRepositories, tasks, tags, projectTags, projectAttachments, projectLinks, mentions } from '../db'
+import { syncMentionsForSource, notifyMentions } from '../services/mention-service'
 import { eq, desc, sql, and, or, inArray } from 'drizzle-orm'
 import type { ProjectWithDetails, ProjectRepositoryDetails, Tag, ProjectAttachment, ProjectLink } from '../../shared/types'
 import { detectLinkType } from '../lib/link-utils'
@@ -373,6 +374,7 @@ app.post('/', async (c) => {
     const body = await c.req.json<{
       name: string
       description?: string
+      notes?: string | null
       tags?: string[] // Tag names to add
       // Optional - for backwards compatibility
       repositoryId?: string
@@ -570,6 +572,7 @@ app.post('/', async (c) => {
         id: projectId,
         name: body.name,
         description: body.description ?? null,
+        notes: body.notes ?? null,
         repositoryId: repo?.id ?? null,
         appId: linkedApp?.id ?? null,
         terminalTabId: null,
@@ -632,6 +635,18 @@ app.post('/', async (c) => {
     if (!project) {
       return c.json({ error: 'Failed to create project' }, 500)
     }
+
+    // D-3.1: parse @mentions from description + notes and dispatch
+    // notifications for any users mentioned at creation time.
+    const mentionText = `${project.description ?? ''}\n${project.notes ?? ''}`
+    const result = syncMentionsForSource('project', project.id, mentionText)
+    notifyMentions({
+      added: result.added,
+      sourceType: 'project',
+      sourceId: project.id,
+      sourceTitle: project.name,
+      authorEmail: (c.var as { user?: { email?: string } | null }).user?.email,
+    })
 
     const services = linkedApp
       ? db.select().from(appServices).where(eq(appServices.appId, linkedApp.id)).all()
@@ -718,6 +733,17 @@ app.patch('/:id', async (c) => {
     const project = db.select().from(projects).where(eq(projects.id, id)).get()!
     const { repo, appRow, services, tab } = fetchProjectRelations(project)
 
+    // D-3.1: re-sync @mentions after the project text changed.
+    const mentionText = `${project.description ?? ''}\n${project.notes ?? ''}`
+    const result = syncMentionsForSource('project', project.id, mentionText)
+    notifyMentions({
+      added: result.added,
+      sourceType: 'project',
+      sourceId: project.id,
+      sourceTitle: project.name,
+      authorEmail: (c.var as { user?: { email?: string } | null }).user?.email,
+    })
+
     return c.json(buildProjectWithDetails(project, repo, appRow, services, tab))
   } catch (err) {
     return c.json({ error: err instanceof Error ? err.message : 'Failed to update project' }, 400)
@@ -800,6 +826,11 @@ app.delete('/:id', async (c) => {
   db.delete(projectRepositories).where(eq(projectRepositories.projectId, id)).run()
 
   // Delete project
+  // D-3.1: drop mentions pointing at this project
+  db.delete(mentions)
+    .where(and(eq(mentions.sourceType, 'project'), eq(mentions.sourceId, id)))
+    .run()
+
   db.delete(projects).where(eq(projects.id, id)).run()
 
   return c.json({

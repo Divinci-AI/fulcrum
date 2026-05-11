@@ -15,11 +15,11 @@ import { db, mentions, users, type Mention, type User } from '../db'
 import { sendNotification } from './notification-service'
 import { getSettings } from '../lib/settings'
 import { createLogger } from '../lib/logger'
-import { parseMentions } from './mention-parser'
+import { parseMentions, parseDisplayNameMentions } from './mention-parser'
 
 const logger = createLogger('MentionService')
 
-export { parseMentions }
+export { parseMentions, parseDisplayNameMentions }
 
 export type MentionSourceType = 'task' | 'project' | 'comment'
 
@@ -44,9 +44,26 @@ export function syncMentionsForSource(
   text: string | null | undefined
 ): SyncResult {
   const emails = parseMentions(text)
-  const matchedUsers: User[] = emails.length
-    ? db.select().from(users).all().filter((u) => emails.includes(u.email))
-    : []
+  const names = parseDisplayNameMentions(text)
+  const allUsers = emails.length || names.length ? db.select().from(users).all() : []
+
+  // Email lookup is exact (case-insensitive — emails were lowercased on
+  // upsert). Display-name lookup is case-insensitive too, but ONLY counts
+  // when the name resolves to a single user — ambiguous names (e.g. two
+  // "Bob"s) silently no-op rather than mention both.
+  const matchedSet = new Map<string, User>()
+  for (const u of allUsers) {
+    if (emails.includes(u.email)) matchedSet.set(u.id, u)
+  }
+  for (const name of names) {
+    const candidates = allUsers.filter(
+      (u) => (u.displayName ?? '').toLowerCase() === name.toLowerCase()
+    )
+    if (candidates.length === 1) {
+      matchedSet.set(candidates[0].id, candidates[0])
+    }
+  }
+  const matchedUsers: User[] = Array.from(matchedSet.values())
 
   const currentRows = db
     .select()
