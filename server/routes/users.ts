@@ -1,5 +1,5 @@
 import { Hono } from 'hono'
-import { getUserById, listUsers } from '../services/user-service'
+import { getUserById, listUsers, updateUserProfile } from '../services/user-service'
 import { listMentionsForUser } from '../services/mention-service'
 import type { CurrentUserContext } from '../middleware/current-user'
 
@@ -18,6 +18,17 @@ app.get('/me/mentions', (c) => {
   const user = c.var.user
   if (!user) return c.json({ error: 'Authentication required' }, 401)
   return c.json({ mentions: listMentionsForUser(user.id) })
+})
+
+// PATCH /api/users/me — update the current user's profile fields
+// (displayName, avatarUrl). 401 when there's no current user. Returns the
+// updated user. Empty string for a field clears it.
+app.patch('/me', async (c) => {
+  const user = c.var.user
+  if (!user) return c.json({ error: 'Authentication required' }, 401)
+  const body = await c.req.json<{ displayName?: string | null; avatarUrl?: string | null }>()
+  const updated = updateUserProfile(user.id, body)
+  return c.json({ user: updated })
 })
 
 // GET /api/users — list every user who has ever signed into this Fulcrum

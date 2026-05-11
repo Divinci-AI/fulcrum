@@ -60,3 +60,26 @@ export function getUserById(id: string): User | null {
 export function listUsers(): User[] {
   return db.select().from(users).all()
 }
+
+/**
+ * Update the mutable profile fields of a user. Returns the new row.
+ * Pass `null` (or undefined fields) to leave a field unchanged; pass an
+ * empty string for displayName to clear it.
+ */
+export function updateUserProfile(
+  id: string,
+  patch: { displayName?: string | null; avatarUrl?: string | null }
+): User | null {
+  const now = new Date().toISOString()
+  const updates: Record<string, unknown> = { updatedAt: now }
+  if (Object.prototype.hasOwnProperty.call(patch, 'displayName')) {
+    const v = patch.displayName
+    updates.displayName = typeof v === 'string' && v.trim() !== '' ? v.trim() : null
+  }
+  if (Object.prototype.hasOwnProperty.call(patch, 'avatarUrl')) {
+    const v = patch.avatarUrl
+    updates.avatarUrl = typeof v === 'string' && v.trim() !== '' ? v.trim() : null
+  }
+  db.update(users).set(updates).where(eq(users.id, id)).run()
+  return db.select().from(users).where(eq(users.id, id)).get() ?? null
+}

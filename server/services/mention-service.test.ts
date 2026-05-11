@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test'
 // Import from the pure-function module so this test doesn't drag in the
 // DB-touching imports of mention-service.ts (which would trip the test-mode
 // FULCRUM_DIR guard on module load).
-import { parseMentions } from './mention-parser'
+import { parseMentions, parseDisplayNameMentions } from './mention-parser'
 
 describe('parseMentions', () => {
   test('extracts a single @email mention at start of string', () => {
@@ -39,5 +39,50 @@ describe('parseMentions', () => {
   test('mention pattern requires a TLD with at least 2 letters', () => {
     expect(parseMentions('@x@a.b')).toEqual([])     // 1-letter TLD rejected
     expect(parseMentions('@x@a.co')).toEqual(['x@a.co']) // 2-letter TLD accepted
+  })
+})
+
+describe('parseDisplayNameMentions', () => {
+  test('extracts a single @name mention at start of string', () => {
+    expect(parseDisplayNameMentions('@alice please review')).toEqual(['alice'])
+  })
+
+  test('extracts a name preceded by whitespace', () => {
+    expect(parseDisplayNameMentions('hey @bob can you look')).toEqual(['bob'])
+  })
+
+  test('does NOT extract @email — that is the email parser\'s job', () => {
+    // The "@bob" prefix here is followed by "@", which signals an email mention.
+    // parseDisplayNameMentions must skip it so we don't double-mention.
+    expect(parseDisplayNameMentions('cc @bob@example.com please')).toEqual([])
+  })
+
+  test('extracts multiple distinct names and dedupes', () => {
+    expect(parseDisplayNameMentions('@alice and @bob and @alice again')).toEqual([
+      'alice',
+      'bob',
+    ])
+  })
+
+  test('null / empty input returns empty array', () => {
+    expect(parseDisplayNameMentions(null)).toEqual([])
+    expect(parseDisplayNameMentions(undefined)).toEqual([])
+    expect(parseDisplayNameMentions('')).toEqual([])
+  })
+
+  test('skips tokens with no letters (e.g. @123 or @...)', () => {
+    expect(parseDisplayNameMentions('see @123 and @...')).toEqual([])
+  })
+
+  test('handles tab + newline as preceding whitespace', () => {
+    expect(parseDisplayNameMentions('hello\n@carol')).toEqual(['carol'])
+    expect(parseDisplayNameMentions('\t@dave')).toEqual(['dave'])
+  })
+
+  test('does NOT match @-anchored inside a word like "email@bob"', () => {
+    // The leading-`@` rule is preceded-by-start-or-whitespace, so an `@`
+    // mid-word does NOT trigger a mention. Avoids the "info@example" false
+    // positive when prose includes addresses inline.
+    expect(parseDisplayNameMentions('info@bob is the contact')).toEqual([])
   })
 })
