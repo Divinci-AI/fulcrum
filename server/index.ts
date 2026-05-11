@@ -3,7 +3,7 @@ import { createNodeWebSocket } from '@hono/node-ws'
 import { createApp } from './app'
 import { initPTYManager, setBroadcastDestroyed } from './terminal/pty-instance'
 import {
-  terminalWebSocketHandlers,
+  makeTerminalWebSocketHandlers,
   broadcast,
   broadcastToTerminal,
 } from './websocket/terminal-ws'
@@ -136,7 +136,10 @@ const app = createApp()
 const { injectWebSocket, upgradeWebSocket } = createNodeWebSocket({ app })
 
 // Add WebSocket route
-app.get('/ws/terminal', upgradeWebSocket(() => terminalWebSocketHandlers))
+// D-4: pass the request context to the handler factory so the upgraded
+// socket can be tagged with the user identity resolved by the currentUser
+// middleware (registered on /ws/* in app.ts).
+app.get('/ws/terminal', upgradeWebSocket((c) => makeTerminalWebSocketHandlers(c)))
 
 // Start server
 const server = serve(

@@ -176,6 +176,17 @@ export interface ThemeSyncMessage {
   }
 }
 
+// D-4 subscription messages — let a connected client opt into specific
+// event topics (task:*, task:<id>, project:*, project:<id>, me, or *).
+export interface SubscribeMessage {
+  type: 'subscribe'
+  payload: { topics: string[] }
+}
+export interface UnsubscribeMessage {
+  type: 'unsubscribe'
+  payload: { topics: string[] }
+}
+
 export type ClientMessage =
   | TerminalCreateMessage
   | TerminalDestroyMessage
@@ -192,6 +203,8 @@ export type ClientMessage =
   | TabReorderMessage
   | TabsListMessage
   | ThemeSyncMessage
+  | SubscribeMessage
+  | UnsubscribeMessage
 
 // Server -> Client messages
 
@@ -398,6 +411,26 @@ export interface MessagingDisplayNameMessage {
   }
 }
 
+// D-4 events. Existing call sites already emit `project:updated` and
+// `repositories:updated`; this is the first place they're typed.
+export interface ProjectUpdatedMessage {
+  type: 'project:updated'
+  payload: { projectId: string }
+}
+export interface RepositoriesUpdatedMessage {
+  type: 'repositories:updated'
+}
+
+/**
+ * D-4 subscription acknowledgement. Sent in response to a `subscribe` or
+ * `unsubscribe` ClientMessage so the client knows its topics took effect.
+ * `topics` echoes the post-change membership for that socket.
+ */
+export interface SubscriptionAckMessage {
+  type: 'subscription:ack'
+  payload: { topics: string[] }
+}
+
 export type ServerMessage =
   | TerminalCreatedMessage
   | TerminalOutputMessage
@@ -421,3 +454,6 @@ export type ServerMessage =
   | MessagingStatusMessage
   | MessagingQRMessage
   | MessagingDisplayNameMessage
+  | ProjectUpdatedMessage
+  | RepositoriesUpdatedMessage
+  | SubscriptionAckMessage
