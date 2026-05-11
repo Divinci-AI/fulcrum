@@ -77,9 +77,19 @@ RUN set -e; \
 # uv — Python package manager, used by templates and copier flows
 RUN curl -LsSf https://astral.sh/uv/install.sh | env UV_INSTALL_DIR=/usr/local/bin sh
 
-# claude — primary AI agent runtime. Installed as a non-root step into a known
-# path; we drop privileges before the container actually runs the agent.
-RUN curl -fsSL https://claude.ai/install.sh | bash -s -- --install-dir /usr/local/bin || true
+# claude — primary AI agent runtime. The @anthropic-ai/claude-agent-sdk
+# Bun package already bundles the binary at
+# /app/node_modules/@anthropic-ai/claude-agent-sdk-linux-x64-musl/claude,
+# but Fulcrum's dependency check (cli/src/utils/install.ts) does
+# `isCommandInstalled('claude')` which expects `claude` on PATH. Symlink
+# the bundled binary into /usr/local/bin so detection passes without a
+# second copy of the 225 MB binary. The path is created AFTER the
+# COPY --from=builder ... node_modules step below, so we do it in the
+# same layer as the data-dir setup at the end of this stage.
+#
+# (Previous attempt used `curl claude.ai/install.sh | bash -s -- --install-dir`
+# but that flag is unsupported by the install script; left the binary
+# absent and the SDK couldn't run agents.)
 
 # App layout
 WORKDIR /app
@@ -112,7 +122,11 @@ ENV FULCRUM_DIR=/data/.fulcrum \
 
 # Prepare the data mountpoint. The compose template mounts ./data/<slug>:/data
 # but the directory must exist for bun to chdir into it for fnox state.
-RUN mkdir -p /data/.fulcrum && chown -R bun:bun /data /app
+# Also symlink the bundled claude binary into PATH so Fulcrum's dependency
+# check (which runs `which claude`) finds it.
+RUN mkdir -p /data/.fulcrum \
+    && ln -sf /app/node_modules/@anthropic-ai/claude-agent-sdk-linux-x64-musl/claude /usr/local/bin/claude \
+    && chown -R bun:bun /data /app
 
 USER bun
 
