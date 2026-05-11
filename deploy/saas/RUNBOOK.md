@@ -241,6 +241,98 @@ Adding a user requires no Fulcrum-side change.
 
 ---
 
+## §7 — Redeploy an existing tenant on a new image build
+
+After merging changes to main, push the new image and recreate each
+tenant's container against it. The data bind-mount is preserved across
+recreate (the bind source is on the host filesystem, outside the
+container layer), so SQLite + fnox config survive.
+
+### Step 1: get the image onto the host
+
+**Preferred — registry pull:**
+
+```sh
+# On dev machine, after `docker build`:
+docker tag divinci-ai/fulcrum:dev ghcr.io/divinci-ai/fulcrum:dev
+docker tag divinci-ai/fulcrum:dev ghcr.io/divinci-ai/fulcrum:v$(jq -r .version package.json)
+docker push ghcr.io/divinci-ai/fulcrum:dev
+docker push ghcr.io/divinci-ai/fulcrum:v$(jq -r .version package.json)
+
+# On the GCE host:
+docker pull ghcr.io/divinci-ai/fulcrum:dev
+docker tag ghcr.io/divinci-ai/fulcrum:dev divinci-ai/fulcrum:dev
+```
+
+The retag preserves the un-namespaced reference the compose template
+expects. **Caveat**: the host needs read access to the GHCR package —
+either make the package public, or put a PAT with `read:packages` into
+`~/.docker/config.json` on the host (`docker login ghcr.io -u <user>
+--password-stdin <<< $PAT`).
+
+**Fallback — stream the image directly (no registry):**
+
+When the host can't pull (auth gap, registry outage, large diff over
+expensive egress), stream from dev to host:
+
+```sh
+docker save divinci-ai/fulcrum:dev | gzip -1 \
+  | gcloud compute ssh fulcrum-saas-1 --zone=us-central1-a \
+      --command='gunzip | docker load'
+```
+
+Takes a while (~30 min for a 3 GB compressed image over residential
+upload). The image rehydrates with a *new* image ID on the host — the
+content digest (`sha256:...` from `docker push` output) is the only
+stable cross-host identifier. Track that, not the ID.
+
+### Step 2: recreate the tenant container
+
+```sh
+docker stop fulcrum-<slug>
+docker rm   fulcrum-<slug>
+FULCRUM_SAAS_ROOT=/opt/fulcrum-saas \
+  docker compose -p fulcrum-saas --project-directory /opt/fulcrum-saas \
+      -f /opt/fulcrum-saas/stacks/<slug>.yaml up -d
+
+# Wait for health (server runs DB migrations on startup, can take ~10s):
+for i in {1..15}; do
+  s=$(docker inspect -f '{{.State.Health.Status}}' fulcrum-<slug> 2>/dev/null)
+  echo "$i: $s"; [ "$s" = "healthy" ] && break; sleep 2
+done
+
+curl -fsS http://127.0.0.1:7777/health   # local probe
+```
+
+`--project-directory` is no longer strictly required because the
+template now uses absolute paths (PR #14+), but pass it anyway for
+backward-compat with older rendered stacks/*.yaml files.
+
+### Step 3: rollback if needed
+
+Docker keeps the previous image as a dangling reference until pruned.
+Find its ID and retag:
+
+```sh
+docker images divinci-ai/fulcrum --filter dangling=true \
+    --format '{{.ID}} {{.CreatedSince}}'
+# e.g.  2771ae667330  11 hours ago
+docker tag 2771ae667330 divinci-ai/fulcrum:dev   # alias back to the old build
+# Then repeat Step 2's stop/rm/up cycle.
+```
+
+### Step 4: prune (after you're sure the new image works)
+
+```sh
+docker image prune -f                           # remove dangling images
+docker image prune -a --filter "until=168h" -f  # 7-day TTL on older builds
+```
+
+Skip this until at least one full day of successful operation — keeps
+rollback cheap.
+
+---
+
 ## What's still missing (post-§6)
 
 - **Litestream sidecar** for continuous SQLite replication to R2. Design is
