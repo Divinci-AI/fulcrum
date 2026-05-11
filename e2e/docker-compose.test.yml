@@ -1,0 +1,37 @@
+# Local-only ephemeral Fulcrum for Playwright tests. Run with:
+#
+#     docker compose -f e2e/docker-compose.test.yml up -d --wait
+#     bunx playwright test --project=local
+#     docker compose -f e2e/docker-compose.test.yml down -v
+#
+# All Cloudflare / Google integration env vars use harmless stub values so
+# the container boots without external creds. Tests that exercise OAuth
+# flows are skipped on the local target.
+
+services:
+  fulcrum:
+    image: divinci-ai/fulcrum:dev
+    # If the image isn't pre-built, `bun run e2e:build` (defined in package.json
+    # by this branch) does `docker buildx build --platform linux/amd64 --load
+    # -t divinci-ai/fulcrum:dev .` first.
+    container_name: fulcrum-e2e
+    ports:
+      - "127.0.0.1:17777:7777"
+    environment:
+      FULCRUM_DIR: /data/.fulcrum
+      FULCRUM_SERVER_PORT: "7777"
+      HOST: 0.0.0.0
+      # Stubs so the container boots; tests requiring real OAuth are skipped.
+      GOOGLE_CLIENT_ID: "e2e-stub.apps.googleusercontent.com"
+      GOOGLE_CLIENT_SECRET: "e2e-stub-secret"
+    volumes:
+      - fulcrum-e2e-data:/data
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:7777/health"]
+      interval: 3s
+      timeout: 2s
+      retries: 20
+      start_period: 5s
+
+volumes:
+  fulcrum-e2e-data:
