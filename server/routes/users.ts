@@ -1,5 +1,6 @@
 import { Hono } from 'hono'
 import { getUserById, listUsers } from '../services/user-service'
+import { listMentionsForUser } from '../services/mention-service'
 import type { CurrentUserContext } from '../middleware/current-user'
 
 const app = new Hono<CurrentUserContext>()
@@ -9,6 +10,14 @@ const app = new Hono<CurrentUserContext>()
 app.get('/me', (c) => {
   const user = c.var.user
   return c.json({ user })
+})
+
+// GET /api/users/me/mentions — every place the current user has been
+// `@email`-mentioned (Phase D-3). 401 when there's no current user.
+app.get('/me/mentions', (c) => {
+  const user = c.var.user
+  if (!user) return c.json({ error: 'Authentication required' }, 401)
+  return c.json({ mentions: listMentionsForUser(user.id) })
 })
 
 // GET /api/users — list every user who has ever signed into this Fulcrum

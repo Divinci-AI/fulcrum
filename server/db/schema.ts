@@ -561,6 +561,19 @@ export const observerInvocations = sqliteTable('observer_invocations', {
   createdAt: text('created_at').notNull(),
 })
 
+// Mentions (Phase D-3). One row per (source, mentioned user) pair. A
+// "source" is any entity that has free-form text where someone can write
+// `@<email>` — tasks and projects today, comments tomorrow. The pair is
+// UNIQUE so re-saving the same text doesn't pile up duplicates; the
+// mention-service syncs the table to match the parsed mention set.
+export const mentions = sqliteTable('mentions', {
+  id: text('id').primaryKey(),
+  sourceType: text('source_type').notNull(), // 'task' | 'project' | future: 'comment'
+  sourceId: text('source_id').notNull(),
+  userId: text('user_id').notNull(),         // FK → users.id
+  createdAt: text('created_at').notNull(),
+})
+
 // Users — identities that have signed into this Fulcrum instance. Populated
 // from the `Cf-Access-Authenticated-User-Email` header set by Cloudflare
 // Access at the gateway. The CF Access policy gates *who* can reach the
@@ -666,3 +679,5 @@ export type GmailDraft = typeof gmailDrafts.$inferSelect
 export type NewGmailDraft = typeof gmailDrafts.$inferInsert
 export type User = typeof users.$inferSelect
 export type NewUser = typeof users.$inferInsert
+export type Mention = typeof mentions.$inferSelect
+export type NewMention = typeof mentions.$inferInsert

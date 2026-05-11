@@ -533,6 +533,13 @@
       "when": 1778510000000,
       "tag": "0075_add_task_assignee",
       "breakpoints": true
+    },
+    {
+      "idx": 76,
+      "version": "6",
+      "when": 1778520000000,
+      "tag": "0076_add_mentions_table",
+      "breakpoints": true
     }
   ]
 }
