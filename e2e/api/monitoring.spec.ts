@@ -22,17 +22,18 @@ test.describe('monitoring API', () => {
     expect(Array.isArray(arr)).toBe(true)
   })
 
-  test('GET /api/system/dependencies reports the required tool list', async ({ request }) => {
-    const deps = await getJson<{ name: string; installed: boolean }[]>(
+  test('GET /api/system/dependencies surfaces the required tools', async ({ request }) => {
+    // Real shape: {claudeCode: {installed, path}, openCode: {installed}, dtach: {installed, path}}
+    const deps = await getJson<Record<string, { installed: boolean; path?: string }>>(
       request,
       '/api/system/dependencies'
     )
-    expect(Array.isArray(deps)).toBe(true)
-    // The runtime container always has these; this guards against a regression
-    // where the dependencies route forgets to surface a required dep.
-    const names = deps.map((d) => d.name)
-    expect(names).toContain('bun')
-    expect(names).toContain('dtach')
-    expect(names).toContain('git')
+    expect(typeof deps).toBe('object')
+    // dtach is required for terminal persistence (CLAUDE.md "Terminal Architecture")
+    expect(deps).toHaveProperty('dtach')
+    expect(deps.dtach.installed).toBe(true)
+    // Claude Code is required for the assistant feature
+    expect(deps).toHaveProperty('claudeCode')
+    expect(deps.claudeCode.installed).toBe(true)
   })
 })

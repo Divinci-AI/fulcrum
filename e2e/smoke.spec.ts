@@ -12,12 +12,20 @@ test('/health returns 200 with status:ok', async ({ request }) => {
   expect(typeof body.uptime).toBe('number')
 })
 
-test('Settings page renders without erroring', async ({ page }) => {
+test('Settings page hydrates (SPA loads and React renders)', async ({ page }) => {
   await page.goto('/settings')
-  // We're not testing exact copy, just that the SPA hydrates and shows the
-  // top-level Settings heading. Failure mode this guards against: backend
-  // boot errors that leave the page blank.
-  await expect(page.getByRole('heading', { name: /settings/i })).toBeVisible({ timeout: 15_000 })
+  // The SPA serves the same HTML shell for every route — Fulcrum doesn't
+  // render a literal "Settings" h1. Verify hydration by waiting for the
+  // React root to populate. This guards against the failure mode that
+  // matters (backend boot errors, broken SPA bundle, redirect loop) without
+  // depending on specific copy that's likely to change.
+  await page.waitForFunction(
+    () => {
+      const root = document.getElementById('root')
+      return root !== null && root.children.length > 0 && document.body.innerText.length > 200
+    },
+    { timeout: 15_000 }
+  )
 })
 
 test('GET /api/config/google-oauth-status returns expected shape', async ({ request }) => {
@@ -28,14 +36,21 @@ test('GET /api/config/google-oauth-status returns expected shape', async ({ requ
   // the merge lands and the response shape regresses.
   const res = await request.get('/api/config/google-oauth-status')
   // Either endpoint is present (Phase 1 image) and we validate the shape,
-  // or it's absent (pre-Phase-1 image) and we just note the skip.
+  // or it's absent (pre-Phase-1 image) and we just note the skip. The
+  // 404 response from this build has shape {error: "Unknown config key"}
+  // — that's because the path is being interpreted as a /:key fallback in
+  // server/routes/config.ts. When Phase 1 ships in the image, the explicit
+  // /google-oauth-status route handler catches first.
   if (res.status() === 404) {
     test.skip(true, 'google-oauth-status endpoint not present in this build')
   }
   expect(res.status()).toBe(200)
-  const body = await res.json()
-  expect(body).toHaveProperty('clientId.provider')
-  expect(body).toHaveProperty('clientSecret.provider')
-  expect(body).toHaveProperty('managedByHost')
+  const body = (await res.json()) as {
+    clientId?: { provider: string }
+    clientSecret?: { provider: string }
+    managedByHost?: boolean
+  }
+  expect(body.clientId?.provider).toBeTruthy()
+  expect(body.clientSecret?.provider).toBeTruthy()
   expect(typeof body.managedByHost).toBe('boolean')
 })

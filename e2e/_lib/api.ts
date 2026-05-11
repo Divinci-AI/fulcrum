@@ -42,3 +42,13 @@ export async function del(request: APIRequestContext, path: string): Promise<voi
 export function uniq(prefix = 't'): string {
   return `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
 }
+
+/**
+ * Search-safe variant: alphanumeric + underscore only. Use for values that get
+ * passed to FTS5 search endpoints. The default uniq() includes dashes, which
+ * SQLite FTS5 parses as a column operator and rejects with "no such column".
+ * (Tracked as a server-side bug — when fixed, the regular uniq() works.)
+ */
+export function uniqAlnum(prefix = 't'): string {
+  return `${prefix}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`
+}

@@ -2,11 +2,31 @@ import { expect, test } from '@playwright/test'
 import { getJson } from '../_lib/api'
 
 test.describe('settings/config API', () => {
-  test('GET /api/config returns a flat object of nested keys', async ({ request }) => {
+  test('GET /api/config returns a flat object of dotted-string keys', async ({ request }) => {
     const config = await getJson<Record<string, unknown>>(request, '/api/config')
     expect(typeof config).toBe('object')
-    // Should at least have the well-known server keys
-    expect(config).toHaveProperty('server.port')
+    // `toHaveProperty('server.port')` would treat the dot as nested access;
+    // the real keys ARE literally "server.port" strings, so check via in/[].
+    expect('server.port' in config).toBe(true)
+    expect(typeof config['server.port']).toBe('number')
+  })
+
+  test('SECURITY: /api/config does not expose integrations.*Secret fields in plain text', async ({
+    request,
+  }) => {
+    // Caught when first running e2e against the deployed acme container —
+    // /api/config returned googleClientSecret = "GOCSPX-...". The API should
+    // redact secret fields (`"***"` or `null`) when serializing. This test
+    // is expected to FAIL until the server adds redaction. Track in BUGS.md.
+    test.fail(
+      true,
+      'known: /api/config exposes integrations.googleClientSecret + githubPat in plain text'
+    )
+    const config = await getJson<Record<string, unknown>>(request, '/api/config')
+    const secret = config['integrations.googleClientSecret']
+    if (secret) {
+      expect(String(secret)).not.toMatch(/^GOCSPX-/)
+    }
   })
 
   test('GET /api/config/fnox-status reports fnox availability', async ({ request }) => {
@@ -21,11 +41,19 @@ test.describe('settings/config API', () => {
   test('GET /api/config/google-oauth-status returns the managed-by-host envelope', async ({
     request,
   }) => {
-    const status = await getJson<{
+    // This endpoint was added on the Phase 1 branch. Older builds (pre-Phase-1)
+    // 404 on it — handled here by skipping. Once a Phase-1-inclusive image is
+    // deployed, the assertions run and lock the shape in.
+    const res = await request.get('/api/config/google-oauth-status')
+    if (res.status() === 404) {
+      test.skip(true, 'endpoint not present in this build (pre-Phase-1 image)')
+    }
+    expect(res.status()).toBe(200)
+    const status = (await res.json()) as {
       clientId: { provider: string; configured: boolean }
       clientSecret: { provider: string; configured: boolean }
       managedByHost: boolean
-    }>(request, '/api/config/google-oauth-status')
+    }
     expect(typeof status.managedByHost).toBe('boolean')
     expect(['env', 'fnox', 'none']).toContain(status.clientId.provider)
     expect(['env', 'fnox', 'none']).toContain(status.clientSecret.provider)

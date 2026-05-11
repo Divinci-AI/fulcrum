@@ -7,13 +7,17 @@ interface Job {
 }
 
 test.describe('jobs API (systemd/launchd timer surface)', () => {
-  test('GET /api/jobs/available returns the list of installable jobs', async ({ request }) => {
-    const list = await getJson<unknown>(request, '/api/jobs/available')
-    // Either array or `{jobs: [...]}` — accept both.
-    const arr = Array.isArray(list)
-      ? list
-      : ((list as { jobs?: Job[] }).jobs ?? (list as { available?: Job[] }).available ?? [])
-    expect(Array.isArray(arr)).toBe(true)
+  test('GET /api/jobs/available reports platform job-scheduler availability', async ({ request }) => {
+    // Real shape: {available: bool, canCreate: bool, platform: "systemd" | "launchd" | null}
+    // This is a CAPABILITY probe, not a list of installable jobs.
+    const status = await getJson<{
+      available: boolean
+      canCreate: boolean
+      platform: string | null
+    }>(request, '/api/jobs/available')
+    expect(typeof status.available).toBe('boolean')
+    expect(typeof status.canCreate).toBe('boolean')
+    expect(status.platform === null || typeof status.platform === 'string').toBe(true)
   })
 
   test('GET /api/jobs returns currently installed jobs (array)', async ({ request }) => {
