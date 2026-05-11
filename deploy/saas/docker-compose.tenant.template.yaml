@@ -46,9 +46,17 @@ services:
       # outside the container for backup / debug.
       - ./data/${TENANT_SLUG}:/data
 
-    # No `ports:` block — the container is only reachable from the gateway
-    # via the internal docker network. The gateway adds the tenant to its
-    # routing table.
+    # cloudflared runs as a systemd service on the host (not in a docker
+    # container), so it can't resolve `fulcrum-<slug>` hostnames on the
+    # internal docker network. Publish to host loopback so cloudflared's
+    # tunnel ingress can route to http://localhost:7777.
+    #
+    # Caveat: this collides when N>1 tenants share a host. Allocate unique
+    # host ports per tenant in org-create.sh OR move cloudflared into the
+    # docker network as a sibling container. Single-tenant works as-is.
+    ports:
+      - "127.0.0.1:7777:7777"
+
     networks:
       - fulcrum-gateway
 

@@ -60,10 +60,16 @@ fi
 : "${GOOGLE_CLIENT_ID:?must be set — see deploy/saas/provisioning/README.md}"
 : "${GOOGLE_CLIENT_SECRET:?must be set — see deploy/saas/provisioning/README.md}"
 
-BASE_DOMAIN="${FULCRUM_SAAS_BASE_DOMAIN:-fulcrum.divinci.ai}"
+BASE_DOMAIN="${FULCRUM_SAAS_BASE_DOMAIN:-divinci.ai}"
 IMAGE="${FULCRUM_SAAS_IMAGE:-divinci-ai/fulcrum:dev}"
 ROOT="${FULCRUM_SAAS_ROOT:-/opt/fulcrum-saas}"
-HOSTNAME="${SLUG}.${BASE_DOMAIN}"
+# Per-org hostnames are flat — `fulcrum-<slug>.divinci.ai`. The two-level
+# scheme `<slug>.fulcrum.divinci.ai` is more readable but requires
+# Cloudflare Advanced Certificate Manager ($10/mo per zone) since free
+# Universal SSL only covers `*.divinci.ai` (one level deep). Flat naming
+# stays inside the free cert and avoids per-tenant cert ops.
+PUBLIC_SUBDOMAIN="fulcrum-${SLUG}"
+HOSTNAME="${PUBLIC_SUBDOMAIN}.${BASE_DOMAIN}"
 CONTAINER="fulcrum-${SLUG}"
 STACK_FILE="${ROOT}/stacks/${SLUG}.yaml"
 DATA_DIR="${ROOT}/data/${SLUG}"
@@ -92,11 +98,17 @@ fi
 # -------- render --------
 echo "[2/6] rendering compose template → $STACK_FILE"
 mkdir -p "${ROOT}/stacks" "$DATA_DIR"
+# The Fulcrum container runs as the `bun` user (UID 1000 inside the image).
+# When the host data dir is created here by root (via sudo), the in-container
+# bun process can't mkdir /data/.fulcrum and crashes on first boot. Chown the
+# host directory to the container's UID so the bind mount works.
+chown -R 1000:1000 "$DATA_DIR"
 ORG_SLUG="$SLUG" \
 GOOGLE_CLIENT_ID="$GOOGLE_CLIENT_ID" \
 GOOGLE_CLIENT_SECRET="$GOOGLE_CLIENT_SECRET" \
 TENANT_SLUG="$SLUG" \
-  envsubst '${ORG_SLUG} ${TENANT_SLUG} ${GOOGLE_CLIENT_ID} ${GOOGLE_CLIENT_SECRET}' \
+PUBLIC_HOSTNAME="$HOSTNAME" \
+  envsubst '${ORG_SLUG} ${TENANT_SLUG} ${GOOGLE_CLIENT_ID} ${GOOGLE_CLIENT_SECRET} ${PUBLIC_HOSTNAME}' \
   < "$TEMPLATE" \
   > "$STACK_FILE"
 
@@ -135,10 +147,17 @@ else
   echo "[5/6] cloudflare provisioning"
   # shellcheck source=./_cf-api.sh
   source "${SCRIPT_DIR}/_cf-api.sh"
-  cf_dns_ensure_cname "$SLUG"
-  cf_tunnel_ensure_ingress "$SLUG" "$CONTAINER"
-  GROUP_ID=$(cf_access_group_ensure "$SLUG" "$OWNER")
-  cf_access_app_ensure "$SLUG" "$GROUP_ID"
+  if [[ -z "$OWNER" ]]; then
+    echo "error: --owner <email> is required when not using --skip-cloudflare" >&2
+    exit 1
+  fi
+  # CF helpers compute hostname as `${arg1}.${FULCRUM_SAAS_BASE_DOMAIN}`, so
+  # we pass PUBLIC_SUBDOMAIN (e.g. "fulcrum-acme") not the bare slug.
+  cf_dns_ensure_cname "$PUBLIC_SUBDOMAIN"
+  cf_tunnel_ensure_ingress "$PUBLIC_SUBDOMAIN" "$CONTAINER"
+  # cf_access_app_ensure now takes the owner email directly (see _cf-api.sh
+  # for why we skip Groups). Multi-member orgs become a follow-up.
+  cf_access_app_ensure "$PUBLIC_SUBDOMAIN" "$OWNER"
 fi
 
 # -------- done --------

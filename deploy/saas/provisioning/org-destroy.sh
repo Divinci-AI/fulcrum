@@ -104,11 +104,12 @@ else
   SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
   # shellcheck source=./_cf-api.sh
   source "${SCRIPT_DIR}/_cf-api.sh"
-  BASE="${FULCRUM_SAAS_BASE_DOMAIN:-fulcrum.divinci.ai}"
-  cf_access_app_delete "$SLUG"
-  cf_access_group_delete "$SLUG"
-  cf_tunnel_remove_ingress "$SLUG"
-  cf_dns_delete "${SLUG}.${BASE}"
+  BASE="${FULCRUM_SAAS_BASE_DOMAIN:-divinci.ai}"
+  PUBLIC_SUBDOMAIN="fulcrum-${SLUG}"
+  cf_access_app_delete "$PUBLIC_SUBDOMAIN"
+  cf_access_group_delete "$PUBLIC_SUBDOMAIN"
+  cf_tunnel_remove_ingress "$PUBLIC_SUBDOMAIN"
+  cf_dns_delete "${PUBLIC_SUBDOMAIN}.${BASE}"
 fi
 
 # -------- filesystem --------

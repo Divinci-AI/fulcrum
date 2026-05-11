@@ -74,9 +74,23 @@ mkdir -p /opt/fulcrum-saas/{stacks,data,backups/destroyed,tunnel}
 chown -R ubuntu:ubuntu /opt/fulcrum-saas
 
 # Clone the Fulcrum repo so the provisioning scripts are available on-host.
-# Read-only; we never push from the host. Token-less HTTPS works as long as
-# the Divinci-AI/fulcrum repo is public or the user runs `gh auth login` later.
-sudo -u ubuntu git clone https://github.com/Divinci-AI/fulcrum.git /opt/fulcrum-saas-src || true
+# Read-only; we never push from the host.
+#
+# IMPORTANT: Divinci-AI/fulcrum is PRIVATE. Token-less HTTPS clone WILL
+# FAIL. Either (a) make the repo public, or (b) supply a deploy token via
+# the instance metadata `fulcrum-deploy-token` and uncomment the
+# token-based URL below. Caught the hard way: the first deploy used
+# `git archive | ssh tar -xz` from the operator's laptop as a workaround.
+#
+# Failure here is fatal — provisioning scripts depend on the cloned repo.
+# No `|| true` mask: an unconfigured clone should fail loudly at boot.
+DEPLOY_TOKEN=$(curl -fsS -H "Metadata-Flavor: Google" \
+  "http://metadata.google.internal/computeMetadata/v1/instance/attributes/fulcrum-deploy-token" 2>/dev/null || true)
+if [[ -n "$DEPLOY_TOKEN" ]]; then
+  sudo -u ubuntu git clone "https://x-access-token:${DEPLOY_TOKEN}@github.com/Divinci-AI/fulcrum.git" /opt/fulcrum-saas-src
+else
+  sudo -u ubuntu git clone https://github.com/Divinci-AI/fulcrum.git /opt/fulcrum-saas-src
+fi
 
 # Stable path for the scripts, in case the repo is moved later.
 ln -sf /opt/fulcrum-saas-src/deploy/saas/provisioning /usr/local/lib/fulcrum-provisioning

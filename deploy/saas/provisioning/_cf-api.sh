@@ -98,8 +98,11 @@ cf_dns_ensure_cname() {
     return 0
   fi
   local body
+  # POST with the FULL hostname, not just the subdomain. If we pass just
+  # "acme" with a zone of "divinci.ai", Cloudflare creates `acme.divinci.ai`
+  # — not `acme.fulcrum.divinci.ai`. Caught in the first end-to-end deploy.
   body=$(jq -nc \
-    --arg name "$subdomain" \
+    --arg name "$hostname" \
     --arg content "${CLOUDFLARE_TUNNEL_ID}.cfargotunnel.com" \
     '{type: "CNAME", name: $name, content: $content, proxied: true}')
   _cf POST "/zones/${CLOUDFLARE_ZONE_ID}/dns_records" "$body" >/dev/null
@@ -337,34 +340,52 @@ cf_access_app_get_id() {
 }
 
 cf_access_app_ensure() {
-  # cf_access_app_ensure <slug> <group-id>
-  local slug="$1"
-  local group_id="$2"
-  local domain="${slug}.${FULCRUM_SAAS_BASE_DOMAIN}"
-  local existing
-  existing=$(cf_access_app_get_id "$domain")
-  if [[ -n "$existing" ]]; then
-    echo "      Access App: $domain already exists ($existing) — skipping"
+  # cf_access_app_ensure <subdomain> <owner-email>
+  #
+  # Note: we deliberately do NOT use an Access Group here even though that's
+  # the prettier abstraction. The "Access: Apps and Policies" permission in
+  # Cloudflare's API token UI grants Apps but NOT Groups in current CF
+  # tokens — Groups require a separate permission that the token UI may not
+  # expose cleanly. Inlining email(s) in the policy avoids the dependency.
+  # When we need real groups (>1 user per org with cleaner mgmt), grant the
+  # token the missing scope and revert to group-based policies.
+  local subdomain="$1"
+  local owner_email="$2"
+  local domain="${subdomain}.${FULCRUM_SAAS_BASE_DOMAIN}"
+  local existing_id
+  existing_id=$(cf_access_app_get_id "$domain")
+
+  local app_id
+  if [[ -n "$existing_id" ]]; then
+    app_id="$existing_id"
+    echo "      Access App: $domain already exists ($app_id) — reusing"
+  else
+    local app_body
+    app_body=$(jq -nc \
+      --arg name "Fulcrum: ${subdomain}" \
+      --arg domain "$domain" \
+      '{name: $name, domain: $domain, type: "self_hosted", session_duration: "24h"}')
+    app_id=$(_cf POST "/accounts/${CLOUDFLARE_ACCOUNT_ID}/access/apps" "$app_body" \
+              | jq -r '.result.id')
+    echo "      Access App: created $domain ($app_id)"
+  fi
+
+  # Idempotent: only add the policy if no policy with this owner exists yet.
+  local existing_policies
+  existing_policies=$(_cf GET "/accounts/${CLOUDFLARE_ACCOUNT_ID}/access/apps/${app_id}/policies")
+  if echo "$existing_policies" \
+       | jq -e --arg e "$owner_email" '.result[]? | select(.include[]?.email.email == $e)' >/dev/null; then
+    echo "      Access App policy: $owner_email already allowed — skipping"
     return 0
   fi
 
-  # Two-step: create app, then create its policy. CF supports inline policies
-  # on create but the schema is fiddly and varies by app type — splitting
-  # the request is more reliable.
-  local app_body app_id policy_body
-  app_body=$(jq -nc \
-    --arg name "Fulcrum: ${slug}" \
-    --arg domain "$domain" \
-    '{name: $name, domain: $domain, type: "self_hosted", session_duration: "24h"}')
-  app_id=$(_cf POST "/accounts/${CLOUDFLARE_ACCOUNT_ID}/access/apps" "$app_body" \
-            | jq -r '.result.id')
-
+  local policy_body
   policy_body=$(jq -nc \
-    --arg name "Members of org-${slug}" \
-    --arg group "$group_id" \
-    '{name: $name, decision: "allow", include: [{group: {id: $group}}]}')
+    --arg name "Allow ${owner_email}" \
+    --arg email "$owner_email" \
+    '{name: $name, decision: "allow", include: [{email: {email: $email}}]}')
   _cf POST "/accounts/${CLOUDFLARE_ACCOUNT_ID}/access/apps/${app_id}/policies" "$policy_body" >/dev/null
-  echo "      Access App: created $domain ($app_id) gated by org-${slug}"
+  echo "      Access App policy: added allow for $owner_email"
 }
 
 cf_access_app_delete() {

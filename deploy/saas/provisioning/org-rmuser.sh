@@ -32,4 +32,4 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=./_cf-api.sh
 source "${SCRIPT_DIR}/_cf-api.sh"
 
-cf_access_group_remove_email "$SLUG" "$EMAIL"
+cf_access_group_remove_email "fulcrum-$SLUG" "$EMAIL"
