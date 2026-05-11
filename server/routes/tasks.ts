@@ -15,7 +15,7 @@ import {
 import { broadcast } from '../websocket/terminal-ws'
 import { updateTaskStatus } from '../services/task-status'
 import { reindexTaskFTS } from '../services/search-service'
-import { syncMentionsForSource, notifyMentions } from '../services/mention-service'
+import { buildMentionText, syncAndNotify } from '../services/mention-service'
 import { mentions } from '../db'
 import { log } from '../lib/logger'
 import { createGitWorktree, copyFilesToWorktree } from '../lib/git-utils'
@@ -369,13 +369,11 @@ app.post('/', async (c) => {
     // D-3: parse @mentions from the new task's description + notes and
     // dispatch notifications for any users mentioned at creation time.
     if (created) {
-      const mentionText = `${created.description ?? ''}\n${created.notes ?? ''}`
-      const result = syncMentionsForSource('task', created.id, mentionText)
-      notifyMentions({
-        added: result.added,
+      syncAndNotify({
         sourceType: 'task',
         sourceId: created.id,
         sourceTitle: created.title,
+        text: buildMentionText(created),
         authorEmail: (c.var as { user?: { email?: string } | null }).user?.email,
       })
     }
@@ -721,17 +719,19 @@ app.patch('/:id', async (c) => {
 
     const updated = db.select().from(tasks).where(eq(tasks.id, id)).get()
 
-    // D-3: re-parse @mentions from description + notes, sync the table, and
-    // notify newly mentioned users. Touching the row even without changing
-    // description/notes is fine — the diff is a no-op.
-    if (updated) {
-      const mentionText = `${updated.description ?? ''}\n${updated.notes ?? ''}`
-      const result = syncMentionsForSource('task', id, mentionText)
-      notifyMentions({
-        added: result.added,
+    // D-3.2: only re-sync mentions when the caller actually touched the
+    // mention-bearing text fields. Otherwise a PATCH that only renames
+    // the task would re-parse and silently drop mentions of users whose
+    // displayName changed since the original mention was recorded.
+    const textChanged =
+      (body as { description?: unknown }).description !== undefined ||
+      (body as { notes?: unknown }).notes !== undefined
+    if (updated && textChanged) {
+      syncAndNotify({
         sourceType: 'task',
         sourceId: id,
         sourceTitle: updated.title,
+        text: buildMentionText(updated),
         authorEmail: (c.var as { user?: { email?: string } | null }).user?.email,
       })
     }

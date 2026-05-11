@@ -145,6 +145,42 @@ export function notifyMentions(opts: {
   }
 }
 
+/**
+ * Build the `text` blob fed to `syncMentionsForSource` from a source row.
+ * Concatenates `description` + `notes` (each may be null). Centralized so
+ * every caller is consistent and any future change (e.g. adding a third
+ * field, or stripping markdown) lands in exactly one place.
+ */
+export function buildMentionText(source: {
+  description?: string | null
+  notes?: string | null
+}): string {
+  return `${source.description ?? ''}\n${source.notes ?? ''}`
+}
+
+/**
+ * One-shot helper: sync the mention table for a source and dispatch
+ * notifications for any newly mentioned users. Wraps the
+ * sync-then-notify pair that every route used to repeat by hand.
+ */
+export function syncAndNotify(opts: {
+  sourceType: MentionSourceType
+  sourceId: string
+  sourceTitle: string
+  text: string | null | undefined
+  authorEmail?: string | null
+}): SyncResult {
+  const result = syncMentionsForSource(opts.sourceType, opts.sourceId, opts.text)
+  notifyMentions({
+    added: result.added,
+    sourceType: opts.sourceType,
+    sourceId: opts.sourceId,
+    sourceTitle: opts.sourceTitle,
+    authorEmail: opts.authorEmail,
+  })
+  return result
+}
+
 /** List every mention for a given user, newest first. */
 export function listMentionsForUser(userId: string): Mention[] {
   return db
