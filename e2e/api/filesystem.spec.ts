@@ -19,13 +19,25 @@ test.describe('filesystem API (sandboxed read surface)', () => {
     }
   })
 
-  test('GET /api/fs/file-stat for /etc/hostname returns metadata', async ({ request }) => {
-    const res = await request.get('/api/fs/file-stat?path=%2Fetc%2Fhostname')
-    expect([200, 403, 404]).toContain(res.status())
-    if (res.status() === 200) {
-      const body = await res.json()
-      expect(body).toHaveProperty('size')
-    }
+  test('GET /api/fs/file-stat requires BOTH root and path query params', async ({ request }) => {
+    // Real signature (see server/routes/filesystem.ts): the endpoint takes
+    // a `root` directory + a `path` relative to it. Both required. The
+    // resolved path must stay inside root (security guard).
+
+    // Missing root → 400 "root parameter is required"
+    const onlyPath = await request.get('/api/fs/file-stat?path=hostname')
+    expect(onlyPath.status()).toBe(400)
+    expect(((await onlyPath.json()) as { error?: string }).error).toMatch(/root parameter/i)
+
+    // Missing path → 400 "path parameter is required"
+    const onlyRoot = await request.get('/api/fs/file-stat?root=%2Fetc')
+    expect(onlyRoot.status()).toBe(400)
+    expect(((await onlyRoot.json()) as { error?: string }).error).toMatch(/path parameter/i)
+
+    // Both present → either 200 or 403 (security guard if root resolves
+    // outside the allowed sandbox).
+    const both = await request.get('/api/fs/file-stat?root=%2Fetc&path=hostname')
+    expect([200, 403, 404]).toContain(both.status())
   })
 
   test('GET /api/fs/read with no path returns 400', async ({ request }) => {

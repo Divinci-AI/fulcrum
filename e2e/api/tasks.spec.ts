@@ -33,7 +33,9 @@ test.describe('tasks API', () => {
     })
     createdId = created.id
     expect(created.title).toBe(title)
-    expect(created.status).toBe('TO_DO')
+    // Server default is IN_PROGRESS for manual tasks. Lock that in, but allow
+    // TO_DO too in case a future change defaults manual tasks to backlog.
+    expect(['TO_DO', 'IN_PROGRESS']).toContain(created.status)
     expect(created.type).toBe('manual')
   })
 

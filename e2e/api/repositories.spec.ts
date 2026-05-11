@@ -21,8 +21,12 @@ test.describe('repositories API', () => {
   let tempRepoPath: string | undefined
 
   test.beforeEach(async () => {
-    if (process.env.PLAYWRIGHT_TEST_BASE_URL?.includes('divinci.ai')) {
-      test.skip(true, 'repo-creation test requires writable host filesystem; skip on prod')
+    // Skip when the Fulcrum target isn't on the same filesystem as the test
+    // runner — registering a repo by path requires the Fulcrum process to be
+    // able to stat that path. Set FULCRUM_E2E_LOCAL_FS=1 to opt in (when
+    // Fulcrum is running locally or in a container with shared volume).
+    if (!process.env.FULCRUM_E2E_LOCAL_FS) {
+      test.skip(true, 'requires writable filesystem shared with Fulcrum process — set FULCRUM_E2E_LOCAL_FS=1')
     }
     tempRepoPath = fs.mkdtempSync(path.join(os.tmpdir(), 'fulcrum-e2e-repo-'))
     git(tempRepoPath, ['init', '-q'])
