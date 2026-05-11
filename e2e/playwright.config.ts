@@ -13,6 +13,9 @@ const HAS_PROD_AUTH = Boolean(CF_ACCESS_CLIENT_ID && CF_ACCESS_CLIENT_SECRET)
 
 export default defineConfig({
   testDir: '.',
+  // smoke.spec.ts at top level + api/*.spec.ts feature matrix (headless API).
+  // UI specs (browser-driven Playwright) land in ui/*.spec.ts when wired.
+  testMatch: ['*.spec.ts', 'api/*.spec.ts', 'ui/*.spec.ts'],
   // Tests are independent — parallelize across files.
   fullyParallel: true,
   forbidOnly: !!process.env.CI,
