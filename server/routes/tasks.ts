@@ -138,6 +138,14 @@ app.get('/', (c) => {
   const orphans = c.req.query('orphans') === 'true'
   const tag = c.req.query('tag')
   const status = c.req.query('status')
+  // D-2: filter by assignee. `assigneeId=me` resolves to the current user's
+  // id (when one was derived from CF Access header / dev fallback); otherwise
+  // resolves to the exact user id provided. `assigneeId=unassigned` returns
+  // tasks with no assignee (assignee_user_id IS NULL).
+  const rawAssigneeId = c.req.query('assigneeId')
+  const currentUserId = (c.var as { user?: { id?: string } | null }).user?.id
+  const assigneeFilter =
+    rawAssigneeId === 'me' ? currentUserId ?? '__no_current_user__' : rawAssigneeId
 
   const query = db.select().from(tasks).orderBy(asc(tasks.position))
 
@@ -154,6 +162,12 @@ app.get('/', (c) => {
     allTasks = allTasks.filter((t) => t.projectId === projectId)
   } else if (orphans) {
     allTasks = allTasks.filter((t) => t.projectId === null)
+  }
+
+  if (assigneeFilter === 'unassigned') {
+    allTasks = allTasks.filter((t) => t.assigneeUserId === null)
+  } else if (assigneeFilter) {
+    allTasks = allTasks.filter((t) => t.assigneeUserId === assigneeFilter)
   }
 
   // Filter by tag if specified
@@ -226,6 +240,11 @@ app.post('/', async (c) => {
       recurrenceEndDate: body.recurrenceEndDate || null,
       recurrenceSourceTaskId: null,
       pinned: body.pinned ?? false,
+      // D-2: optional assignee at creation time.
+      assigneeUserId:
+        typeof body.assigneeUserId === 'string' && body.assigneeUserId.trim() !== ''
+          ? body.assigneeUserId
+          : null,
       createdAt: now,
       updatedAt: now,
     }
@@ -582,6 +601,9 @@ const TASK_PATCH_FIELDS: Record<string, (v: unknown) => unknown> = {
   recurrenceEndDate: (v) => v,
   projectId: (v) => v,
   repositoryId: (v) => v,
+  // D-2: Task assignee. Empty string is normalized to null so callers can
+  // unassign via either explicit null or "" without surprise.
+  assigneeUserId: (v) => (typeof v === 'string' && v.trim() !== '' ? v : null),
   agent: (v) => v,
   aiMode: (v) => v,
   opencodeModel: (v) => v,
