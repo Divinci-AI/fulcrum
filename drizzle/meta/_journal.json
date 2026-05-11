@@ -526,6 +526,13 @@
       "when": 1778500000000,
       "tag": "0074_add_users_table",
       "breakpoints": true
+    },
+    {
+      "idx": 75,
+      "version": "6",
+      "when": 1778510000000,
+      "tag": "0075_add_task_assignee",
+      "breakpoints": true
     }
   ]
 }

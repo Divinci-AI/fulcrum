@@ -34,6 +34,11 @@ export const tasks = sqliteTable('tasks', {
   recurrenceSourceTaskId: text('recurrence_source_task_id'), // FK to parent task (lineage chain)
   type: text('type'), // 'worktree' | 'scratch' | null (null = manual/legacy)
   notes: text('notes'), // Free-form notes/comments
+  // Multi-user assignment (Phase D-2). Nullable FK → users.id. Tasks created
+  // before this column was added stay unassigned (NULL) until someone touches
+  // them. Cleared on user delete via app logic (no FK ON DELETE in SQLite-by-
+  // convention here; would need to ALTER TABLE to add a real constraint).
+  assigneeUserId: text('assignee_user_id'),
   createdAt: text('created_at').notNull(),
   updatedAt: text('updated_at').notNull(),
 })
