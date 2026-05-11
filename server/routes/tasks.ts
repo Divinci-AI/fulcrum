@@ -15,6 +15,8 @@ import {
 import { broadcast } from '../websocket/terminal-ws'
 import { updateTaskStatus } from '../services/task-status'
 import { reindexTaskFTS } from '../services/search-service'
+import { syncMentionsForSource, notifyMentions } from '../services/mention-service'
+import { mentions } from '../db'
 import { log } from '../lib/logger'
 import { createGitWorktree, copyFilesToWorktree } from '../lib/git-utils'
 
@@ -245,6 +247,9 @@ app.post('/', async (c) => {
         typeof body.assigneeUserId === 'string' && body.assigneeUserId.trim() !== ''
           ? body.assigneeUserId
           : null,
+      // D-3: free-form notes accepted at creation so @mentions in `notes` are
+      // parsed by the post-insert mention sync. Previously dropped silently.
+      notes: body.notes ?? null,
       createdAt: now,
       updatedAt: now,
     }
@@ -360,6 +365,21 @@ app.post('/', async (c) => {
 
     const created = db.select().from(tasks).where(eq(tasks.id, newTask.id)).get()
     broadcast({ type: 'task:updated', payload: { taskId: newTask.id } })
+
+    // D-3: parse @mentions from the new task's description + notes and
+    // dispatch notifications for any users mentioned at creation time.
+    if (created) {
+      const mentionText = `${created.description ?? ''}\n${created.notes ?? ''}`
+      const result = syncMentionsForSource('task', created.id, mentionText)
+      notifyMentions({
+        added: result.added,
+        sourceType: 'task',
+        sourceId: created.id,
+        sourceTitle: created.title,
+        authorEmail: (c.var as { user?: { email?: string } | null }).user?.email,
+      })
+    }
+
     return c.json(created ? toApiResponse(created, true) : null, 201)
   } catch (err) {
     return c.json({ error: err instanceof Error ? err.message : 'Failed to create task' }, 400)
@@ -418,6 +438,11 @@ app.delete('/bulk', async (c) => {
 
       // Delete associated attachments (files and DB records)
       deleteTaskAttachments(id)
+
+      // D-3: drop mentions pointing at this task
+      db.delete(mentions)
+        .where(and(eq(mentions.sourceType, 'task'), eq(mentions.sourceId, id)))
+        .run()
 
       db.delete(tasks).where(eq(tasks.id, id)).run()
       broadcast({ type: 'task:updated', payload: { taskId: id } })
@@ -695,6 +720,22 @@ app.patch('/:id', async (c) => {
     }
 
     const updated = db.select().from(tasks).where(eq(tasks.id, id)).get()
+
+    // D-3: re-parse @mentions from description + notes, sync the table, and
+    // notify newly mentioned users. Touching the row even without changing
+    // description/notes is fine — the diff is a no-op.
+    if (updated) {
+      const mentionText = `${updated.description ?? ''}\n${updated.notes ?? ''}`
+      const result = syncMentionsForSource('task', id, mentionText)
+      notifyMentions({
+        added: result.added,
+        sourceType: 'task',
+        sourceId: id,
+        sourceTitle: updated.title,
+        authorEmail: (c.var as { user?: { email?: string } | null }).user?.email,
+      })
+    }
+
     return c.json(updated ? toApiResponse(updated, true) : null)
   } catch (err) {
     return c.json({ error: err instanceof Error ? err.message : 'Failed to update task' }, 400)
@@ -749,6 +790,11 @@ app.delete('/:id', (c) => {
 
   // Delete associated attachments (files and DB records)
   deleteTaskAttachments(id)
+
+  // D-3: drop mentions pointing at this task
+  db.delete(mentions)
+    .where(and(eq(mentions.sourceType, 'task'), eq(mentions.sourceId, id)))
+    .run()
 
   db.delete(tasks).where(eq(tasks.id, id)).run()
   broadcast({ type: 'task:updated', payload: { taskId: id } })

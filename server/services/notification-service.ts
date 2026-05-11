@@ -19,7 +19,7 @@ export interface NotificationPayload {
   taskTitle?: string
   appId?: string
   appName?: string
-  type: 'task_status_change' | 'pr_merged' | 'plan_complete' | 'deployment_success' | 'deployment_failed'
+  type: 'task_status_change' | 'pr_merged' | 'plan_complete' | 'deployment_success' | 'deployment_failed' | 'mention'
   url?: string
 }
 
