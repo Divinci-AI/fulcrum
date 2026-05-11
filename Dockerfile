@@ -1,0 +1,137 @@
+# Multi-stage Dockerfile for the Fulcrum SaaS container.
+#
+# Build:    docker build -t divinci-ai/fulcrum:dev .
+# Run:      docker run --rm -p 7777:7777 -v $(pwd)/data:/data divinci-ai/fulcrum:dev
+#
+# The runtime image contains every binary Fulcrum needs at runtime — bun,
+# dtach, git, fnox, age, uv, claude — so a tenant container can boot, run
+# agents, and persist secrets without touching the host.
+
+# -------------------- builder --------------------
+FROM oven/bun:1-debian AS builder
+
+WORKDIR /build
+
+# Install build deps. node is needed because some npm packages still compile
+# native modules through node-gyp during install.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        ca-certificates \
+        python3 \
+        make \
+        g++ \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy dependency manifests first so bun install caches across source changes.
+COPY package.json bun.lock ./
+RUN bun install --frozen-lockfile
+
+# Copy the rest of the source.
+COPY . .
+
+# Frontend bundle + tsc type emit. Server runs from source via bun, no JS bundle needed.
+RUN bun run build
+
+# -------------------- runtime --------------------
+FROM oven/bun:1-debian AS runtime
+
+# Runtime system deps:
+#   - dtach: persistent terminal sessions (CLAUDE.md "Terminal Architecture")
+#   - git: worktree creation in server/services/task-service.ts
+#   - age: encryption key generation for fnox
+#   - ca-certificates: HTTPS to Google/GitHub/etc.
+#   - curl, tar, xz-utils: fetching binaries that aren't in apt (fnox, uv, claude)
+#   - wget: healthcheck in docker-compose.tenant.template.yaml
+#   - tini: PID 1 + signal handling for the bun process
+#   - musl: provides /lib/ld-musl-x86_64.so.1 so the musl-linked
+#       @anthropic-ai/claude-agent-sdk-linux-x64-musl/claude binary that npm
+#       installs into node_modules can execute on this glibc Debian base.
+#       Without this, every agent launch fails with
+#       "Claude Code native binary not found at /app/node_modules/..." even
+#       though the binary file exists — the loader is the missing piece.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        dtach \
+        git \
+        age \
+        ca-certificates \
+        curl \
+        tar \
+        xz-utils \
+        wget \
+        tini \
+        musl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Binaries not in apt — pin to a known platform target. The image targets
+# linux/amd64 by default; multi-arch can be added via buildx later.
+ARG TARGETARCH=amd64
+ARG FNOX_VERSION=latest
+
+# fnox — encrypted secrets, every Fulcrum config value lives here at runtime
+RUN set -e; \
+    arch=$(uname -m | sed 's/aarch64/aarch64/;s/x86_64/x86_64/'); \
+    curl -fsSL "https://github.com/jdx/fnox/releases/${FNOX_VERSION}/download/fnox-${arch}-unknown-linux-gnu.tar.gz" \
+      | tar -xz -C /tmp; \
+    install -m 0755 /tmp/fnox /usr/local/bin/fnox; \
+    rm -f /tmp/fnox
+
+# uv — Python package manager, used by templates and copier flows
+RUN curl -LsSf https://astral.sh/uv/install.sh | env UV_INSTALL_DIR=/usr/local/bin sh
+
+# claude — primary AI agent runtime. The @anthropic-ai/claude-agent-sdk
+# Bun package already bundles the binary at
+# /app/node_modules/@anthropic-ai/claude-agent-sdk-linux-x64-musl/claude,
+# but Fulcrum's dependency check (cli/src/utils/install.ts) does
+# `isCommandInstalled('claude')` which expects `claude` on PATH. Symlink
+# the bundled binary into /usr/local/bin so detection passes without a
+# second copy of the 225 MB binary. The path is created AFTER the
+# COPY --from=builder ... node_modules step below, so we do it in the
+# same layer as the data-dir setup at the end of this stage.
+#
+# (Previous attempt used `curl claude.ai/install.sh | bash -s -- --install-dir`
+# but that flag is unsupported by the install script; left the binary
+# absent and the SDK couldn't run agents.)
+
+# App layout
+WORKDIR /app
+
+# Copy node_modules and built artifacts from builder. node_modules is
+# Bun-managed (no native rebuild required at runtime) so a straight copy
+# works.
+COPY --from=builder /build/node_modules ./node_modules
+COPY --from=builder /build/dist ./dist
+COPY --from=builder /build/server ./server
+COPY --from=builder /build/shared ./shared
+COPY --from=builder /build/drizzle ./drizzle
+# cli/src/mcp and cli/src/client are imported directly by server/routes/mcp*.ts
+# at runtime (see grep ../../cli/src in server/) — copy the whole cli package.
+COPY --from=builder /build/cli ./cli
+COPY --from=builder /build/package.json ./package.json
+
+# Per-tenant data lives outside the container at /data. fulcrum's FULCRUM_DIR
+# env var (server/lib/settings/paths.ts:86) controls every filesystem path.
+ENV FULCRUM_DIR=/data/.fulcrum \
+    FULCRUM_SERVER_PORT=7777 \
+    NODE_ENV=production \
+    # server/index.ts:34 reads HOST and defaults to "localhost" — which inside
+    # a container would refuse all external traffic. Bind to every interface;
+    # Docker's port mapping does the actual external exposure.
+    HOST=0.0.0.0 \
+    # Bun's default tmpdir inside /tmp is fine; explicit so worktrees don't
+    # collide if multiple containers shared a host (they don't, but explicit).
+    TMPDIR=/tmp
+
+# Prepare the data mountpoint. The compose template mounts ./data/<slug>:/data
+# but the directory must exist for bun to chdir into it for fnox state.
+# Also symlink the bundled claude binary into PATH so Fulcrum's dependency
+# check (which runs `which claude`) finds it.
+RUN mkdir -p /data/.fulcrum \
+    && ln -sf /app/node_modules/@anthropic-ai/claude-agent-sdk-linux-x64-musl/claude /usr/local/bin/claude \
+    && chown -R bun:bun /data /app
+
+USER bun
+
+EXPOSE 7777
+
+# tini handles SIGTERM and reaps zombies (PTY children create lots).
+ENTRYPOINT ["/usr/bin/tini", "--"]
+CMD ["bun", "run", "server/index.ts"]
