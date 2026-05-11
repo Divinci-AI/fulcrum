@@ -42,6 +42,12 @@ FROM oven/bun:1-debian AS runtime
 #   - curl, tar, xz-utils: fetching binaries that aren't in apt (fnox, uv, claude)
 #   - wget: healthcheck in docker-compose.tenant.template.yaml
 #   - tini: PID 1 + signal handling for the bun process
+#   - musl: provides /lib/ld-musl-x86_64.so.1 so the musl-linked
+#       @anthropic-ai/claude-agent-sdk-linux-x64-musl/claude binary that npm
+#       installs into node_modules can execute on this glibc Debian base.
+#       Without this, every agent launch fails with
+#       "Claude Code native binary not found at /app/node_modules/..." even
+#       though the binary file exists — the loader is the missing piece.
 RUN apt-get update && apt-get install -y --no-install-recommends \
         dtach \
         git \
@@ -52,6 +58,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         xz-utils \
         wget \
         tini \
+        musl \
     && rm -rf /var/lib/apt/lists/*
 
 # Binaries not in apt — pin to a known platform target. The image targets
