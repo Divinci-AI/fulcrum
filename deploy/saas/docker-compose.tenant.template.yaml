@@ -1,0 +1,65 @@
+# Skeleton compose template — one stack per tenant.
+#
+# Render with envsubst or a small wrapper script before `docker compose up`:
+#     TENANT_SLUG=acme \
+#     GOOGLE_CLIENT_ID=... \
+#     GOOGLE_CLIENT_SECRET=... \
+#     envsubst < docker-compose.tenant.template.yaml > stacks/acme.yaml
+#     docker compose -f stacks/acme.yaml up -d
+#
+# This file is not wired into anything yet — it's a starting point.
+
+services:
+  fulcrum:
+    # TODO: replace with the Divinci-AI fork's published image once built.
+    # For now, build locally from the repo root: `docker build -t divinci-ai/fulcrum:dev .`
+    image: divinci-ai/fulcrum:dev
+    container_name: fulcrum-${TENANT_SLUG}
+    restart: unless-stopped
+
+    environment:
+      # --- Tenant identity ---
+      FULCRUM_TENANT_SLUG: ${TENANT_SLUG}
+
+      # --- Storage isolation ---
+      # FULCRUM_DIR is the one knob that already controls every filesystem
+      # callsite Fulcrum makes (server/lib/settings/paths.ts:86-104). Setting
+      # it per-container is what gives each tenant their own SQLite, fnox
+      # config, worktrees, scratch dirs, and uploads.
+      FULCRUM_DIR: /data/.fulcrum
+
+      # --- Bundled Google OAuth (Phase 1 branch) ---
+      # When both are set, the Settings UI hides the credential inputs and
+      # users connect Google accounts directly. One Divinci-AI client backs
+      # every tenant.
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET}
+
+      # --- Server ---
+      FULCRUM_SERVER_PORT: "7777"
+      # The public domain the gateway will route to this container at. Used
+      # by Google OAuth as the redirect URI base.
+      FULCRUM_SERVER_PUBLIC_DOMAIN: ${TENANT_SLUG}.fulcrum.divinci.ai
+
+    volumes:
+      # Per-tenant data volume. The host path keeps tenant data inspectable
+      # outside the container for backup / debug.
+      - ./data/${TENANT_SLUG}:/data
+
+    # No `ports:` block — the container is only reachable from the gateway
+    # via the internal docker network. The gateway adds the tenant to its
+    # routing table.
+    networks:
+      - fulcrum-gateway
+
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:7777/api/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+
+networks:
+  fulcrum-gateway:
+    external: true
+    name: fulcrum-gateway
