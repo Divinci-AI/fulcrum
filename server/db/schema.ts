@@ -556,6 +556,25 @@ export const observerInvocations = sqliteTable('observer_invocations', {
   createdAt: text('created_at').notNull(),
 })
 
+// Users — identities that have signed into this Fulcrum instance. Populated
+// from the `Cf-Access-Authenticated-User-Email` header set by Cloudflare
+// Access at the gateway. The CF Access policy gates *who* can reach the
+// container; this table gives those identities a stable id so other rows
+// (task assignees, mentions, audit) can reference them.
+//
+// One row per unique email ever seen. Email is the natural key (CF Access
+// guarantees uniqueness within an identity provider). The id is a UUID we
+// generate ourselves so callers don't have to round-trip an email.
+export const users = sqliteTable('users', {
+  id: text('id').primaryKey(),
+  email: text('email').notNull().unique(),
+  displayName: text('display_name'), // optional; derive from email when null
+  avatarUrl: text('avatar_url'),     // optional; future — CF Access doesn't surface this
+  createdAt: text('created_at').notNull(),
+  updatedAt: text('updated_at').notNull(),
+  lastSeenAt: text('last_seen_at'),  // touched by the current-user middleware on each request
+})
+
 // Observer action record type for JSON storage
 export type ObserverActionRecord = {
   type: 'create_task' | 'store_memory'
@@ -640,3 +659,5 @@ export type GoogleAccount = typeof googleAccounts.$inferSelect
 export type NewGoogleAccount = typeof googleAccounts.$inferInsert
 export type GmailDraft = typeof gmailDrafts.$inferSelect
 export type NewGmailDraft = typeof gmailDrafts.$inferInsert
+export type User = typeof users.$inferSelect
+export type NewUser = typeof users.$inferInsert
