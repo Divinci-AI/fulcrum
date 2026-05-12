@@ -42,6 +42,8 @@ import searchRoutes from './routes/search'
 import scratchDirsRoutes from './routes/scratch-dirs'
 import serverExposeRoutes from './routes/server-expose'
 import usersRoutes from './routes/users'
+import teamsRoutes from './routes/teams'
+import aclsRoutes from './routes/acls'
 import { currentUser } from './middleware/current-user'
 import { writeEntry } from './lib/logger'
 import type { LogEntry } from '../shared/logger'
@@ -126,6 +128,8 @@ export function createApp() {
   app.route('/api/task-dependencies', taskDependenciesRoutes)
   app.route('/api/tags', tagsRoutes)
   app.route('/api/version', versionRoutes)
+  app.route('/api/teams', teamsRoutes)
+  app.route('/api/acls', aclsRoutes)
 
   // MCP HTTP transport endpoints
   app.route('/mcp/observer', mcpObserverRoutes)

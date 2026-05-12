@@ -102,6 +102,36 @@ function getMatchingGrants(
 }
 
 /**
+ * Insert an admin grant for the resource creator. Called by POST handlers
+ * after a task/project is created so the creator can manage the resource's
+ * ACL going forward — without this, the creator only has editor by default
+ * (the tenant-visible role) and can't change visibility or grant access.
+ *
+ * No-op for anonymous creators (no user); the resource ends up admin-less
+ * which is a documented footgun but lets anonymous task creation keep
+ * working in dev / desktop builds.
+ */
+export function grantCreatorAdmin(
+  userId: string | null | undefined,
+  resourceType: ResourceType,
+  resourceId: string
+): void {
+  if (!userId) return
+  db.insert(acls)
+    .values({
+      id: crypto.randomUUID(),
+      resourceType,
+      resourceId,
+      principalType: 'user',
+      principalId: userId,
+      role: 'admin',
+      grantedAt: new Date().toISOString(),
+      grantedBy: userId,
+    })
+    .run()
+}
+
+/**
  * Compute the effective role a user has on a specific resource. Returns
  * null when the user has no access (resource doesn't exist, or it's
  * `restricted` and the user has no matching grant).
