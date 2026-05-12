@@ -12,7 +12,7 @@
  * actually invisible to non-grantees) lands in D-5 PR 3.
  */
 import { expect, test } from '@playwright/test'
-import { del, getJson, postJson, uniq, uniqAlnum } from '../_lib/api'
+import { del, postJson, uniq, uniqAlnum } from '../_lib/api'
 import type { APIRequestContext } from '@playwright/test'
 
 interface User {
@@ -276,11 +276,16 @@ test.describe('ACL grants (D-5)', () => {
     expect(flip.ok()).toBe(true)
     expect((await flip.json()).visibility).toBe('restricted')
 
-    // Verify on the task row directly.
-    const t = await getJson<Task & { visibility: string }>(request, `/api/tasks/${task.id}`)
+    // Verify on the task row directly. Owner must pass their header now
+    // that the task is restricted — without it the read-path filter (PR 3)
+    // would 404 even on a real existing resource.
+    const verifyRes = await request.get(`/api/tasks/${task.id}`, {
+      headers: cf(owner.email),
+    })
+    const t = (await verifyRes.json()) as Task & { visibility: string }
     expect(t.visibility).toBe('restricted')
 
-    await del(request, `/api/tasks/${task.id}`)
+    await request.delete(`/api/tasks/${task.id}`, { headers: cf(owner.email) })
   })
 
   test('project creator gets admin too (parity check)', async ({ request }) => {
