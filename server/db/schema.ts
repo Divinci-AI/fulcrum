@@ -39,6 +39,10 @@ export const tasks = sqliteTable('tasks', {
   // them. Cleared on user delete via app logic (no FK ON DELETE in SQLite-by-
   // convention here; would need to ALTER TABLE to add a real constraint).
   assigneeUserId: text('assignee_user_id'),
+  // D-5: per-resource visibility. 'tenant' = every authenticated tenant member
+  // gets the tenant-default role (editor) plus whatever ACL elevates them to.
+  // 'restricted' = only principals named on the resource's ACL can access it.
+  visibility: text('visibility').notNull().default('tenant'),
   createdAt: text('created_at').notNull(),
   updatedAt: text('updated_at').notNull(),
 })
@@ -234,6 +238,8 @@ export const projects = sqliteTable('projects', {
   opencodeModel: text('opencode_model'), // OpenCode model in format 'provider/model' - null means use global default
   startupScript: text('startup_script'), // Commands to run before agent invocation
   lastAccessedAt: text('last_accessed_at'),
+  // D-5: per-resource visibility (see `tasks.visibility` for the model).
+  visibility: text('visibility').notNull().default('tenant'),
   createdAt: text('created_at').notNull(),
   updatedAt: text('updated_at').notNull(),
 })
@@ -593,6 +599,49 @@ export const users = sqliteTable('users', {
   lastSeenAt: text('last_seen_at'),  // touched by the current-user middleware on each request
 })
 
+// Teams (Phase D-5). First-class principal for ACL grants. A tenant's team
+// list is small (think: "engineering", "design", "ops") and lives entirely
+// inside one container — there's no cross-tenant team concept.
+export const teams = sqliteTable('teams', {
+  id: text('id').primaryKey(),
+  name: text('name').notNull().unique(),
+  description: text('description'),
+  createdAt: text('created_at').notNull(),
+  updatedAt: text('updated_at').notNull(),
+})
+
+// Team membership (Phase D-5). Tracks which users belong to which teams and
+// at what team-level role. Team-level role is **distinct** from resource
+// role: a team admin can manage team membership but isn't automatically an
+// admin on resources the team has been granted to.
+export const teamMembers = sqliteTable('team_members', {
+  id: text('id').primaryKey(),
+  teamId: text('team_id').notNull(), // FK → teams.id
+  userId: text('user_id').notNull(), // FK → users.id
+  role: text('role').notNull().default('member'), // 'admin' | 'member'
+  joinedAt: text('joined_at').notNull(),
+})
+
+// Access Control List (Phase D-5). One row per (resource, principal) grant.
+// `principalType` discriminates user vs. team grants. `role` is the access
+// level granted to that principal on that resource. With visibility=tenant
+// the row *elevates* the principal above the tenant default; with
+// visibility=restricted the row is the *only* source of access.
+//
+// UNIQUE INDEX on (resource_type, resource_id, principal_type, principal_id)
+// is added in the migration — no double-granting the same principal at
+// different roles. (Want to change the role? Update the existing row.)
+export const acls = sqliteTable('acls', {
+  id: text('id').primaryKey(),
+  resourceType: text('resource_type').notNull(), // 'task' | 'project'
+  resourceId: text('resource_id').notNull(),
+  principalType: text('principal_type').notNull(), // 'user' | 'team'
+  principalId: text('principal_id').notNull(),
+  role: text('role').notNull(), // 'viewer' | 'editor' | 'admin'
+  grantedAt: text('granted_at').notNull(),
+  grantedBy: text('granted_by').notNull(), // userId of the admin who granted
+})
+
 // Observer action record type for JSON storage
 export type ObserverActionRecord = {
   type: 'create_task' | 'store_memory'
@@ -681,3 +730,9 @@ export type User = typeof users.$inferSelect
 export type NewUser = typeof users.$inferInsert
 export type Mention = typeof mentions.$inferSelect
 export type NewMention = typeof mentions.$inferInsert
+export type Team = typeof teams.$inferSelect
+export type NewTeam = typeof teams.$inferInsert
+export type TeamMember = typeof teamMembers.$inferSelect
+export type NewTeamMember = typeof teamMembers.$inferInsert
+export type Acl = typeof acls.$inferSelect
+export type NewAcl = typeof acls.$inferInsert
