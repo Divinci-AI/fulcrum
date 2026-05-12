@@ -44,7 +44,16 @@ services:
     volumes:
       # Per-tenant data volume. The host path keeps tenant data inspectable
       # outside the container for backup / debug.
-      - ./data/${TENANT_SLUG}:/data
+      #
+      # Absolute path is load-bearing — `docker compose` resolves a relative
+      # source like `./data/${TENANT_SLUG}` against the **YAML's directory**
+      # by default, not the project root. We render this file into
+      # /opt/fulcrum-saas/stacks/, so a relative path would mount
+      # /opt/fulcrum-saas/stacks/data/<slug> instead of
+      # /opt/fulcrum-saas/data/<slug> on any redeploy that doesn't pass
+      # `--project-directory /opt/fulcrum-saas`. Absolute path makes the
+      # mount invariant under invocation style.
+      - ${FULCRUM_SAAS_ROOT:-/opt/fulcrum-saas}/data/${TENANT_SLUG}:/data
 
     # cloudflared runs as a systemd service on the host (not in a docker
     # container), so it can't resolve `fulcrum-<slug>` hostnames on the

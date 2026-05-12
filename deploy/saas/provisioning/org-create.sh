@@ -121,9 +121,12 @@ fi
 
 # -------- boot --------
 echo "[3/6] docker compose up -d"
-# --project-directory keeps the relative ./data/<slug> mount in the template
-# resolving against $ROOT, not the script's cwd.
-docker compose -f "$STACK_FILE" --project-directory "$ROOT" up -d
+# --project-directory is still passed for belt-and-suspenders, but as of
+# 2026-05-11 the template uses an absolute volume source (anchored on
+# FULCRUM_SAAS_ROOT) so the mount is invariant under invocation style.
+# Future redeploys via `docker compose up -d` from any directory will mount
+# the same host path. Don't revert to a relative source.
+FULCRUM_SAAS_ROOT="$ROOT" docker compose -f "$STACK_FILE" --project-directory "$ROOT" up -d
 
 # -------- health --------
 echo "[4/6] waiting for /health on $CONTAINER (60s max)"
