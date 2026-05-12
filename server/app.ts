@@ -99,7 +99,10 @@ export function createApp() {
 
   // Identity resolution — runs before all /api routes so handlers can read
   // `c.var.user`. Non-enforcing: routes opt in via `requireUser(c)`.
+  // Also runs on /ws/* upgrades (D-4) so the WS factory can tag the socket
+  // with its identity at connection time.
   app.use('/api/*', currentUser)
+  app.use('/ws/*', currentUser)
 
   // API Routes
   app.route('/health', healthRoutes)

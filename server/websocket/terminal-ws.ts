@@ -1,13 +1,25 @@
+import type { Context } from 'hono'
 import type { WSContext, WSEvents } from 'hono/ws'
 import type { ClientMessage, ServerMessage } from '../types'
 import { getPTYManager } from '../terminal/pty-instance'
 import { getTabManager } from '../terminal/tab-manager'
 import { getWorktreeBasePath, getSettings, updateSettingByPath } from '../lib/settings'
 import { log } from '../lib/logger'
+import { anyTopicMatches } from './topic-matcher'
+import type { CurrentUserContext } from '../middleware/current-user'
 
 interface ClientData {
   id: string
   attachedTerminals: Set<string>
+  // D-4: identity tagged at connect time. null when no CF Access header was
+  // present and no FULCRUM_DEV_USER_EMAIL fallback was set. Anonymous sockets
+  // still receive everything via `broadcast()` (legacy blast-to-all) but can't
+  // receive `me`-targeted events from `broadcastToTopic`.
+  userId: string | null
+  userEmail: string | null
+  // D-4: topics this socket has subscribed to. Empty by default —
+  // subscribers explicitly opt in via the `subscribe` ClientMessage.
+  subscriptions: Set<string>
 }
 
 // Store client data keyed by WSContext
@@ -22,6 +34,56 @@ export function broadcast(message: ServerMessage): void {
       // Client might be disconnected
     }
   }
+}
+
+/**
+ * D-4 topic-aware broadcast. Sends the message only to clients whose
+ * subscription set matches the given event topic. Optionally also targets
+ * specific user IDs via the `me` subscription convention — clients
+ * subscribed to `me` receive the message iff their `userId` appears in
+ * the optional `toUserIds` set.
+ *
+ * Wildcard subscriptions (`*` and prefix wildcards like `task:*`) are
+ * matched via the pure `anyTopicMatches` helper.
+ *
+ * Substrate-only in D-4 PR 1 — no call sites yet. D-4 PR 2 wires this
+ * into the route layer for mention / assign / update events.
+ */
+export function broadcastToTopic(
+  topic: string,
+  message: ServerMessage,
+  options: { toUserIds?: ReadonlySet<string> } = {}
+): void {
+  const json = JSON.stringify(message)
+  const { toUserIds } = options
+  for (const [ws, data] of clients.entries()) {
+    const matchesTopic = anyTopicMatches(data.subscriptions, topic)
+    const matchesMe =
+      toUserIds !== undefined &&
+      data.userId !== null &&
+      toUserIds.has(data.userId) &&
+      data.subscriptions.has('me')
+    if (!matchesTopic && !matchesMe) continue
+    try {
+      ws.send(json)
+    } catch {
+      // Client might be disconnected
+    }
+  }
+}
+
+/**
+ * Extract identity from a Hono context resolved by the `currentUser`
+ * middleware. Exported as a factory shape because the WS upgrade
+ * machinery passes the context to a factory that returns the handlers.
+ */
+export function makeTerminalWebSocketHandlers(c: Context<CurrentUserContext>): WSEvents {
+  const user = c.var.user
+  const identity = {
+    userId: user?.id ?? null,
+    userEmail: user?.email ?? null,
+  }
+  return buildHandlers(identity)
 }
 
 export function broadcastToTerminal(terminalId: string, message: ServerMessage): void {
@@ -61,14 +123,27 @@ function sendTo(ws: WSContext, message: ServerMessage): void {
   }
 }
 
-export const terminalWebSocketHandlers: WSEvents = {
+interface SocketIdentity {
+  userId: string | null
+  userEmail: string | null
+}
+
+function buildHandlers(identity: SocketIdentity): WSEvents {
+  return {
   onOpen(evt, ws) {
     const clientData: ClientData = {
       id: crypto.randomUUID(),
       attachedTerminals: new Set(),
+      userId: identity.userId,
+      userEmail: identity.userEmail,
+      subscriptions: new Set(),
     }
     clients.set(ws, clientData)
-    log.ws.info('Client connected', { totalClients: clients.size })
+    log.ws.info('Client connected', {
+      totalClients: clients.size,
+      userId: clientData.userId,
+      userEmail: clientData.userEmail,
+    })
 
     // Send list of existing terminals and tabs
     const ptyManager = getPTYManager()
@@ -550,6 +625,35 @@ export const terminalWebSocketHandlers: WSEvents = {
           })
           break
         }
+
+        // D-4: per-socket topic subscription. Client tells the server which
+        // event topics it cares about; subsequent `broadcastToTopic` calls
+        // dispatch only to matching sockets. Empty / unknown topics are
+        // ignored. Server echoes the post-change topic set so the client
+        // can confirm what's now active.
+        case 'subscribe': {
+          for (const topic of message.payload.topics) {
+            if (typeof topic === 'string' && topic.trim() !== '') {
+              clientData.subscriptions.add(topic)
+            }
+          }
+          sendTo(ws, {
+            type: 'subscription:ack',
+            payload: { topics: Array.from(clientData.subscriptions) },
+          })
+          break
+        }
+
+        case 'unsubscribe': {
+          for (const topic of message.payload.topics) {
+            clientData.subscriptions.delete(topic)
+          }
+          sendTo(ws, {
+            type: 'subscription:ack',
+            payload: { topics: Array.from(clientData.subscriptions) },
+          })
+          break
+        }
       }
     } catch (error) {
       log.ws.error('Failed to handle message', { error: String(error) })
@@ -565,4 +669,16 @@ export const terminalWebSocketHandlers: WSEvents = {
     log.ws.error('WebSocket error', { error: String(evt) })
     clients.delete(ws)
   },
+  }
 }
+
+/**
+ * Legacy export — kept so server/index.ts can register the handlers
+ * without an identity-aware factory while we transition. New code
+ * should use `makeTerminalWebSocketHandlers(c)` from the upgrade factory
+ * so the socket can be tagged with the current user.
+ */
+export const terminalWebSocketHandlers: WSEvents = buildHandlers({
+  userId: null,
+  userEmail: null,
+})

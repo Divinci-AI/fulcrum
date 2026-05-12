@@ -3,6 +3,7 @@
  * WebSocket global with promise-based send + a typed message queue so tests
  * can `await ws.next('terminal:created')` instead of writing event handlers.
  */
+import { WebSocket as WsWithHeaders } from 'ws'
 
 export interface WsMessage {
   type: string
@@ -17,15 +18,30 @@ export function wsUrl(path = '/ws/terminal'): string {
   return base.replace(/^http/, 'ws') + path
 }
 
+export interface WsClientOptions {
+  /** Optional headers to set on the WS handshake. Requires the Node `ws`
+   * package since the standard WebSocket API doesn't expose headers.
+   * Use for `Cf-Access-Authenticated-User-Email` and similar identity
+   * headers the server reads on upgrade. */
+  headers?: Record<string, string>
+}
+
 export class WsClient {
-  private ws: WebSocket
+  private ws: WebSocket | import('ws').WebSocket
   private queue: WsMessage[] = []
   private waiters: Array<{ predicate: (m: WsMessage) => boolean; resolve: (m: WsMessage) => void }> =
     []
   readonly opened: Promise<void>
 
-  constructor(url: string) {
-    this.ws = new WebSocket(url)
+  constructor(url: string, options: WsClientOptions = {}) {
+    if (options.headers && Object.keys(options.headers).length > 0) {
+      // Headers require the `ws` package — the standard WebSocket API
+      // doesn't expose handshake headers. Use ws-with-headers only when the
+      // caller asked for them so the common path stays on the built-in.
+      this.ws = new WsWithHeaders(url, { headers: options.headers })
+    } else {
+      this.ws = new WebSocket(url)
+    }
     this.opened = new Promise<void>((resolve, reject) => {
       this.ws.addEventListener('open', () => resolve(), { once: true })
       this.ws.addEventListener('error', (e) => reject(e), { once: true })
