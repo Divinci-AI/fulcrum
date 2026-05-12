@@ -12,7 +12,7 @@ import {
   destroyTerminalAndBroadcast,
   killClaudeInTerminalsForWorktree,
 } from '../terminal/pty-instance'
-import { broadcast } from '../websocket/terminal-ws'
+import { broadcast, broadcastToTopic } from '../websocket/terminal-ws'
 import { updateTaskStatus } from '../services/task-status'
 import { reindexTaskFTS } from '../services/search-service'
 import { buildMentionText, syncAndNotify } from '../services/mention-service'
@@ -379,6 +379,24 @@ app.post('/', async (c) => {
     // (anonymous task creation in dev / desktop).
     const creator = (c.var as { user?: { id?: string } | null }).user
     grantCreatorAdmin(creator?.id, 'task', newTask.id)
+
+    // D-4 PR 2: if the task was created with an assignee, fan out
+    // task:assigned to the assignee's `me`-subscribed sockets so they
+    // see "you were assigned" without waiting for a refetch.
+    if (created && created.assigneeUserId) {
+      broadcastToTopic(
+        `task:${created.id}`,
+        {
+          type: 'task:assigned',
+          payload: {
+            taskId: created.id,
+            assigneeUserId: created.assigneeUserId,
+            previousAssigneeUserId: null,
+          },
+        },
+        { toUserIds: new Set([created.assigneeUserId]) }
+      )
+    }
 
     // D-3: parse @mentions from the new task's description + notes and
     // dispatch notifications for any users mentioned at creation time.
@@ -762,6 +780,28 @@ app.patch('/:id', async (c) => {
         text: buildMentionText(updated),
         authorEmail: (c.var as { user?: { email?: string } | null }).user?.email,
       })
+    }
+
+    // D-4 PR 2: fan out task:assigned when the assignee actually changed.
+    // Targets both the resource topic and `me` for the old + new assignee
+    // so both sides get notified ("you were unassigned", "you were
+    // assigned"). Skipped when neither id is non-null (no-op assigns).
+    if (updated && updated.assigneeUserId !== existing.assigneeUserId) {
+      const meUserIds = new Set<string>()
+      if (existing.assigneeUserId) meUserIds.add(existing.assigneeUserId)
+      if (updated.assigneeUserId) meUserIds.add(updated.assigneeUserId)
+      broadcastToTopic(
+        `task:${id}`,
+        {
+          type: 'task:assigned',
+          payload: {
+            taskId: id,
+            assigneeUserId: updated.assigneeUserId,
+            previousAssigneeUserId: existing.assigneeUserId,
+          },
+        },
+        { toUserIds: meUserIds }
+      )
     }
 
     return c.json(updated ? toApiResponse(updated, true) : null)

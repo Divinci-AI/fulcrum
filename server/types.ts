@@ -431,6 +431,27 @@ export interface SubscriptionAckMessage {
   payload: { topics: string[] }
 }
 
+// D-4 PR 2 social events. Fanned out via broadcastToTopic with both a
+// resource-scoped topic (`task:<id>` / `project:<id>`) and the `me`
+// convention (per-user targeting). Clients subscribed to either receive
+// the event.
+export interface TaskMentionedMessage {
+  type: 'task:mentioned'
+  payload: { taskId: string; mentionedUserId: string; authorEmail: string | null }
+}
+export interface TaskAssignedMessage {
+  type: 'task:assigned'
+  payload: {
+    taskId: string
+    assigneeUserId: string | null
+    previousAssigneeUserId: string | null
+  }
+}
+export interface ProjectMentionedMessage {
+  type: 'project:mentioned'
+  payload: { projectId: string; mentionedUserId: string; authorEmail: string | null }
+}
+
 export type ServerMessage =
   | TerminalCreatedMessage
   | TerminalOutputMessage
@@ -457,3 +478,6 @@ export type ServerMessage =
   | ProjectUpdatedMessage
   | RepositoriesUpdatedMessage
   | SubscriptionAckMessage
+  | TaskMentionedMessage
+  | TaskAssignedMessage
+  | ProjectMentionedMessage

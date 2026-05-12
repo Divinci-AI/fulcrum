@@ -16,6 +16,7 @@ import { sendNotification } from './notification-service'
 import { getSettings } from '../lib/settings'
 import { createLogger } from '../lib/logger'
 import { parseMentions, parseDisplayNameMentions } from './mention-parser'
+import { broadcastToTopic } from '../websocket/terminal-ws'
 
 const logger = createLogger('MentionService')
 
@@ -125,6 +126,42 @@ export function notifyMentions(opts: {
   const path = opts.sourceType === 'task' ? `/tasks/${opts.sourceId}` : `/projects/${opts.sourceId}`
   const url = baseUrl ? `${baseUrl}${path}` : undefined
   const by = opts.authorEmail ? ` by ${opts.authorEmail}` : ''
+
+  // D-4 PR 2: fan out a typed WS event per mention so subscribed clients
+  // light up the UI without waiting for the user to navigate. Each event
+  // targets the resource topic (task:<id> / project:<id>) AND the `me`
+  // topic (delivered iff the recipient socket has `me` subscribed and
+  // userId matches). Notifications below (Slack/Discord/Gmail/etc.) keep
+  // running in parallel — overlap is acceptable.
+  for (const u of opts.added) {
+    if (opts.sourceType === 'task') {
+      broadcastToTopic(
+        `task:${opts.sourceId}`,
+        {
+          type: 'task:mentioned',
+          payload: {
+            taskId: opts.sourceId,
+            mentionedUserId: u.id,
+            authorEmail: opts.authorEmail ?? null,
+          },
+        },
+        { toUserIds: new Set([u.id]) }
+      )
+    } else if (opts.sourceType === 'project') {
+      broadcastToTopic(
+        `project:${opts.sourceId}`,
+        {
+          type: 'project:mentioned',
+          payload: {
+            projectId: opts.sourceId,
+            mentionedUserId: u.id,
+            authorEmail: opts.authorEmail ?? null,
+          },
+        },
+        { toUserIds: new Set([u.id]) }
+      )
+    }
+  }
 
   for (const u of opts.added) {
     sendNotification({
