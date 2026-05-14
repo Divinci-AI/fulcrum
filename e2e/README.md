@@ -77,6 +77,34 @@ bunx playwright test --config=e2e/playwright.config.ts --project=prod
 
 CI does this via repo secrets — see `.github/workflows/e2e.yml`.
 
+### Why `.prod.spec.ts` and not the full matrix
+
+Cloudflare Access at the edge **overwrites** the
+`Cf-Access-Authenticated-User-Email` header with the service token's policy
+email before requests reach the origin. The local matrix fabricates
+distinct identities by setting that header per-request (see
+`provisionUser` in `_lib/`), which works locally because the test
+container trusts the header but **collapses through CF Access** — every
+request resolves to the same identity.
+
+The prod project therefore restricts itself to `*.prod.spec.ts` specs
+designed for single-user verification: reachability, persistence
+round-trips, route registration. Multi-user collab assertions (mention
+fan-out to specific recipients, ACL enforcement across grant boundaries,
+team membership effects) remain in the local-only matrix.
+
+What the prod set covers today:
+
+| Spec | What regresses if it fails |
+|---|---|
+| `smoke.prod.spec.ts` | Gateway routing, SPA bundle, `/api/users/me` envelope |
+| `api/tasks.prod.spec.ts` | Task POST persists all fields; PATCH writes; GET list includes it |
+| `api/projects.prod.spec.ts` | Project POST persists description + notes; GET list |
+| `api/d5-reachability.prod.spec.ts` | D-5 migration applied, ACL/teams routes registered |
+| `api/ws-substrate.prod.spec.ts` | WS upgrade succeeds through CF, subscribe/ack works |
+
+Want to verify a fresh deploy? `--project=prod` after the recreate.
+
 ## What this catches today
 
 | Spec | Regression it prevents |

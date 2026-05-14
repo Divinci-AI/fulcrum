@@ -18,6 +18,7 @@
  */
 import { createMiddleware } from 'hono/factory'
 import type { Context } from 'hono'
+import { HTTPException } from 'hono/http-exception'
 import { ensureUserByEmail } from '../services/user-service'
 import type { User } from '../db'
 
@@ -52,13 +53,20 @@ export const currentUser = createMiddleware<CurrentUserContext>(async (c, next) 
 /**
  * Throw a 401 when the route requires an authenticated user. Routes that
  * need auth should call this at the top of their handler.
+ *
+ * Implementation note: we throw `HTTPException` (Hono's first-class error
+ * type) rather than a bare `Response`. Bare-Response throws aren't caught
+ * by Hono's default machinery and bubble up to Bun as 500s; HTTPException
+ * is rendered into the configured response automatically.
  */
 export function requireUser(c: Context<CurrentUserContext>): User {
   const user = c.var.user
   if (!user) {
-    throw new Response(JSON.stringify({ error: 'Authentication required' }), {
-      status: 401,
-      headers: { 'Content-Type': 'application/json' },
+    throw new HTTPException(401, {
+      res: new Response(JSON.stringify({ error: 'Authentication required' }), {
+        status: 401,
+        headers: { 'Content-Type': 'application/json' },
+      }),
     })
   }
   return user
