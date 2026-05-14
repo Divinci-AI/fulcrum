@@ -45,8 +45,16 @@ export default defineConfig({
           // Prod probe: hits the real fulcrum-acme.divinci.ai. Authenticates
           // via Cloudflare Access service token (extraHTTPHeaders), bypassing
           // the SSO redirect.
+          //
+          // testMatch is restricted to `*.prod.spec.ts` because CF Access at
+          // the edge OVERWRITES the `Cf-Access-Authenticated-User-Email`
+          // header with the service token's policy email — the multi-user
+          // patterns used by the local matrix can't fabricate distinct
+          // identities through the gateway. The .prod.spec.ts suffix marks
+          // specs designed for single-user prod verification (smoke,
+          // round-trip, reachability).
           name: 'prod',
-          testMatch: /.*\.spec\.ts/,
+          testMatch: /.*\.prod\.spec\.ts/,
           use: {
             ...devices['Desktop Chrome'],
             baseURL: PROD_BASE,
