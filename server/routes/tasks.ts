@@ -383,7 +383,16 @@ app.post('/', async (c) => {
     // D-4 PR 2: if the task was created with an assignee, fan out
     // task:assigned to the assignee's `me`-subscribed sockets so they
     // see "you were assigned" without waiting for a refetch.
-    if (created && created.assigneeUserId) {
+    //
+    // D-4 PR 4: filter by effectiveRole — on a tenant-visible task the
+    // assignee always has access; for a restricted task created via
+    // PATCH→restrict the assignee may not. We don't fire the event in
+    // that case (the toast would dead-end on a 404 click-through).
+    if (
+      created &&
+      created.assigneeUserId &&
+      effectiveRole(created.assigneeUserId, 'task', created.id) !== null
+    ) {
       broadcastToTopic(
         `task:${created.id}`,
         {
@@ -786,22 +795,34 @@ app.patch('/:id', async (c) => {
     // Targets both the resource topic and `me` for the old + new assignee
     // so both sides get notified ("you were unassigned", "you were
     // assigned"). Skipped when neither id is non-null (no-op assigns).
+    //
+    // D-4 PR 4: filter recipients by effectiveRole so users without
+    // access don't get a toast that 404s on click-through. The new
+    // assignee always passes (D-5 PR 4 auto-grants viewer); the
+    // previous assignee passes iff they still have a grant (they
+    // typically do, since auto-grants are sticky).
     if (updated && updated.assigneeUserId !== existing.assigneeUserId) {
       const meUserIds = new Set<string>()
-      if (existing.assigneeUserId) meUserIds.add(existing.assigneeUserId)
-      if (updated.assigneeUserId) meUserIds.add(updated.assigneeUserId)
-      broadcastToTopic(
-        `task:${id}`,
-        {
-          type: 'task:assigned',
-          payload: {
-            taskId: id,
-            assigneeUserId: updated.assigneeUserId,
-            previousAssigneeUserId: existing.assigneeUserId,
+      if (existing.assigneeUserId && effectiveRole(existing.assigneeUserId, 'task', id) !== null) {
+        meUserIds.add(existing.assigneeUserId)
+      }
+      if (updated.assigneeUserId && effectiveRole(updated.assigneeUserId, 'task', id) !== null) {
+        meUserIds.add(updated.assigneeUserId)
+      }
+      if (meUserIds.size > 0) {
+        broadcastToTopic(
+          `task:${id}`,
+          {
+            type: 'task:assigned',
+            payload: {
+              taskId: id,
+              assigneeUserId: updated.assigneeUserId,
+              previousAssigneeUserId: existing.assigneeUserId,
+            },
           },
-        },
-        { toUserIds: meUserIds }
-      )
+          { toUserIds: meUserIds }
+        )
+      }
     }
 
     return c.json(updated ? toApiResponse(updated, true) : null)

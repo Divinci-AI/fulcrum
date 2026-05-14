@@ -17,6 +17,7 @@ import { getSettings } from '../lib/settings'
 import { createLogger } from '../lib/logger'
 import { parseMentions, parseDisplayNameMentions } from './mention-parser'
 import { broadcastToTopic } from '../websocket/terminal-ws'
+import { effectiveRole } from './access-control-service'
 
 const logger = createLogger('MentionService')
 
@@ -133,7 +134,18 @@ export function notifyMentions(opts: {
   // topic (delivered iff the recipient socket has `me` subscribed and
   // userId matches). Notifications below (Slack/Discord/Gmail/etc.) keep
   // running in parallel — overlap is acceptable.
+  //
+  // D-4 PR 4: skip the WS broadcast for users who can't actually see the
+  // source (restricted resource, no grant). Same user is still notified
+  // via the external channels below — those are out-of-band by design
+  // ("Slack told me I was mentioned somewhere I can't access"). But the
+  // in-app toast would dead-end on a 404 click-through, so we suppress.
+  const skipResourceType = opts.sourceType === 'comment' ? null : opts.sourceType
   for (const u of opts.added) {
+    if (skipResourceType !== null) {
+      const role = effectiveRole(u.id, skipResourceType, opts.sourceId)
+      if (role === null) continue
+    }
     if (opts.sourceType === 'task') {
       broadcastToTopic(
         `task:${opts.sourceId}`,
