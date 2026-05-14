@@ -16,7 +16,7 @@ import { broadcast, broadcastToTopic } from '../websocket/terminal-ws'
 import { updateTaskStatus } from '../services/task-status'
 import { reindexTaskFTS } from '../services/search-service'
 import { buildMentionText, syncAndNotify } from '../services/mention-service'
-import { grantCreatorAdmin, effectiveRole, roleSatisfies } from '../services/access-control-service'
+import { grantCreatorAdmin, ensureAssigneeViewer, effectiveRole, roleSatisfies } from '../services/access-control-service'
 import { mentions } from '../db'
 import { log } from '../lib/logger'
 import { createGitWorktree, copyFilesToWorktree } from '../lib/git-utils'
@@ -379,6 +379,14 @@ app.post('/', async (c) => {
     // (anonymous task creation in dev / desktop).
     const creator = (c.var as { user?: { id?: string } | null }).user
     grantCreatorAdmin(creator?.id, 'task', newTask.id)
+
+    // D-5 PR 4: if the task was created with an assignee, ensure the
+    // assignee has at least viewer access — otherwise they'd see the
+    // "you were assigned" toast (D-4 PR 3) but 404 on click-through
+    // for restricted tasks.
+    if (created && created.assigneeUserId) {
+      ensureAssigneeViewer(created.assigneeUserId, 'task', created.id, creator?.id)
+    }
 
     // D-4 PR 2: if the task was created with an assignee, fan out
     // task:assigned to the assignee's `me`-subscribed sockets so they
@@ -780,6 +788,16 @@ app.patch('/:id', async (c) => {
         text: buildMentionText(updated),
         authorEmail: (c.var as { user?: { email?: string } | null }).user?.email,
       })
+    }
+
+    // D-5 PR 4: when the assignee changes to a new user, ensure that
+    // user has at least viewer access. Same rationale as the POST path:
+    // toast says "you were assigned" but click-through 404s without a
+    // grant. The previous assignee's grant is left alone — they may
+    // still want to see the task they were unassigned from.
+    if (updated && updated.assigneeUserId && updated.assigneeUserId !== existing.assigneeUserId) {
+      const actor = (c.var as { user?: { id?: string } | null }).user?.id ?? null
+      ensureAssigneeViewer(updated.assigneeUserId, 'task', id, actor)
     }
 
     // D-4 PR 2: fan out task:assigned when the assignee actually changed.

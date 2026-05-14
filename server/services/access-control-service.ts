@@ -136,6 +136,58 @@ export function grantCreatorAdmin(
 }
 
 /**
+ * Ensure an assignee has at least viewer access on a resource. Idempotent
+ * by virtue of the (resource, principal) UNIQUE index on `acls` — already
+ * higher-privilege rows aren't touched.
+ *
+ * Called from the task POST/PATCH handlers when assigneeUserId is set,
+ * so the assignee can see what they were assigned even on a restricted
+ * resource. Without this, you could assign Bob to a restricted task he
+ * has no grant on; Bob would see "you were assigned" in the toast but
+ * `GET /api/tasks/:id` would 404.
+ *
+ * `grantedBy` is the actor who triggered the assignment (typically the
+ * caller of the PATCH/POST). null when anonymous; in that case we skip
+ * inserting because we can't attribute the grant.
+ */
+export function ensureAssigneeViewer(
+  assigneeUserId: string | null | undefined,
+  resourceType: ResourceType,
+  resourceId: string,
+  grantedBy: string | null | undefined
+): void {
+  if (!assigneeUserId || !grantedBy) return
+  // If a row already exists for this (resource, user), leave it alone —
+  // the existing role (viewer or higher) suffices.
+  const existing = db
+    .select({ id: acls.id })
+    .from(acls)
+    .where(
+      and(
+        eq(acls.resourceType, resourceType),
+        eq(acls.resourceId, resourceId),
+        eq(acls.principalType, 'user'),
+        eq(acls.principalId, assigneeUserId)
+      )
+    )
+    .get()
+  if (existing) return
+
+  db.insert(acls)
+    .values({
+      id: crypto.randomUUID(),
+      resourceType,
+      resourceId,
+      principalType: 'user',
+      principalId: assigneeUserId,
+      role: 'viewer',
+      grantedAt: new Date().toISOString(),
+      grantedBy,
+    })
+    .run()
+}
+
+/**
  * Compute the effective role a user has on a specific resource. Returns
  * null when the user has no access (resource doesn't exist, or it's
  * `restricted` and the user has no matching grant).
