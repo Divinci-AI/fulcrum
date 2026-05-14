@@ -2,6 +2,7 @@ import { useEffect, useRef, useCallback } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from '@tanstack/react-router'
 import { toast } from 'sonner'
+import { useCurrentUser } from './use-current-user'
 
 interface TaskUpdatedMessage {
   type: 'task:updated'
@@ -23,7 +24,33 @@ interface NotificationMessage {
   }
 }
 
-type ServerMessage = TaskUpdatedMessage | NotificationMessage | { type: string }
+// D-4 PR 2 social events. Server fans these out to sockets subscribed
+// to `me` whose userId matches the targeted recipient — so receipt
+// alone implies relevance.
+interface TaskMentionedMessage {
+  type: 'task:mentioned'
+  payload: { taskId: string; mentionedUserId: string; authorEmail: string | null }
+}
+interface TaskAssignedMessage {
+  type: 'task:assigned'
+  payload: {
+    taskId: string
+    assigneeUserId: string | null
+    previousAssigneeUserId: string | null
+  }
+}
+interface ProjectMentionedMessage {
+  type: 'project:mentioned'
+  payload: { projectId: string; mentionedUserId: string; authorEmail: string | null }
+}
+
+type ServerMessage =
+  | TaskUpdatedMessage
+  | NotificationMessage
+  | TaskMentionedMessage
+  | TaskAssignedMessage
+  | ProjectMentionedMessage
+  | { type: string }
 
 function getWsUrl(): string {
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
@@ -36,6 +63,12 @@ const RECONNECT_INTERVAL = 2000
 export function useTaskSync() {
   const queryClient = useQueryClient()
   const navigate = useNavigate()
+  const { data: currentUser } = useCurrentUser()
+  // Keep the userId in a ref so the message handler reads the latest value
+  // without re-creating itself (and tearing the WS) every time the user
+  // mutation hook resolves.
+  const userIdRef = useRef<string | null>(null)
+  userIdRef.current = currentUser?.id ?? null
   const wsRef = useRef<WebSocket | null>(null)
   const reconnectTimeoutRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   const reconnectAttemptsRef = useRef(0)
@@ -46,6 +79,50 @@ export function useTaskSync() {
       try {
         const message: ServerMessage = JSON.parse(event.data)
         if (message.type === 'task:updated') {
+          queryClient.invalidateQueries({ queryKey: ['tasks'] })
+        } else if (message.type === 'task:mentioned' && 'payload' in message) {
+          // D-4 PR 3: server already filtered this to the right recipient
+          // (us). Show a toast + invalidate tasks so the list reflects any
+          // new mention state.
+          const { taskId, authorEmail } = (message as TaskMentionedMessage).payload
+          const by = authorEmail ? ` by ${authorEmail}` : ''
+          toast.info(`You were mentioned${by}`, {
+            description: 'Task',
+            action: {
+              label: 'View',
+              onClick: () => navigate({ to: '/tasks/$taskId', params: { taskId } }),
+            },
+          })
+          queryClient.invalidateQueries({ queryKey: ['tasks'] })
+        } else if (message.type === 'project:mentioned' && 'payload' in message) {
+          const { projectId, authorEmail } = (message as ProjectMentionedMessage).payload
+          const by = authorEmail ? ` by ${authorEmail}` : ''
+          toast.info(`You were mentioned${by}`, {
+            description: 'Project',
+            action: {
+              label: 'View',
+              onClick: () => navigate({ to: '/projects/$projectId', params: { projectId } }),
+            },
+          })
+          queryClient.invalidateQueries({ queryKey: ['projects'] })
+        } else if (message.type === 'task:assigned' && 'payload' in message) {
+          // D-4 PR 3: distinguish "assigned to me" vs "unassigned from me".
+          // The server delivers this event to both the previous and new
+          // assignees; we compare against the current user's id to pick
+          // the right toast copy.
+          const { taskId, assigneeUserId, previousAssigneeUserId } = (
+            message as TaskAssignedMessage
+          ).payload
+          const me = userIdRef.current
+          const toView = {
+            label: 'View',
+            onClick: () => navigate({ to: '/tasks/$taskId', params: { taskId } }),
+          }
+          if (me && assigneeUserId === me) {
+            toast.info('You were assigned a task', { action: toView })
+          } else if (me && previousAssigneeUserId === me) {
+            toast.info('You were unassigned from a task', { action: toView })
+          }
           queryClient.invalidateQueries({ queryKey: ['tasks'] })
         } else if (message.type === 'notification' && 'payload' in message) {
           const { id, title, message: description, notificationType, taskId, showToast, showDesktop, playSound, isCustomSound } = (message as NotificationMessage).payload
@@ -206,6 +283,16 @@ export function useTaskSync() {
 
     newWs.onopen = () => {
       reconnectAttemptsRef.current = 0
+      // D-4 PR 3: subscribe to `me` so social events (mentions, assigns)
+      // routed for the current user reach this socket. The server gates
+      // each event by recipient userId; subscribing to `me` is the
+      // client's opt-in for that fan-out.
+      try {
+        newWs.send(JSON.stringify({ type: 'subscribe', payload: { topics: ['me'] } }))
+      } catch {
+        // Best-effort; if the socket closed between open and here, the
+        // reconnect path will re-subscribe on the next open.
+      }
     }
 
     newWs.onmessage = handleMessage
