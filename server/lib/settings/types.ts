@@ -112,6 +112,13 @@ export interface Settings {
     sshPort: number
   }
   integrations: {
+    /**
+     * @deprecated D-6 PR 2 — GitHub PATs are now per-user in the
+     * `github_accounts` table. The legacy tenant-level setting stays
+     * readable for one release so the boot-time bootstrap can move it
+     * into a `github_accounts` row labeled "imported". D-6 PR 3 removes
+     * this field entirely.
+     */
     githubPat: string | null
     cloudflareApiToken: string | null
     cloudflareAccountId: string | null

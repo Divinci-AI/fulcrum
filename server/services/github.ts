@@ -1,5 +1,10 @@
 import { Octokit } from '@octokit/rest'
-import { getSetting } from '../lib/settings'
+import type { GithubAccount } from '../db'
+import {
+  listGithubAccountsForUser,
+  getGithubAccountForUser,
+  readPatForAccount,
+} from './github-account-service'
 import { log } from '../lib/logger'
 
 export interface GitHubIssue {
@@ -39,20 +44,52 @@ export interface GitHubOrg {
 export type PRFilter = 'all' | 'created' | 'assigned' | 'review_requested' | 'mentioned'
 export type IssueFilter = 'assigned' | 'created' | 'mentioned'
 
-let octokitClient: Octokit | null = null
-let cachedPat: string | null = null
+// D-6 PR 2: Octokit clients are now per-account. Keyed by github_accounts.id.
+// Each account's PAT is read from fnox on first use and the client is held in
+// this map until the PAT rotates (handled by deleting the cache entry from
+// `rotateGithubAccountPat` callers — for now we just re-read on every call,
+// since the cost of Octokit construction is trivial).
+const octokitByAccount = new Map<string, Octokit>()
 
-function getOctokit(): Octokit | null {
-  const pat = getSetting('integrations.githubPat')
-  if (!pat) return null
-
-  // Recreate client if PAT changed
-  if (pat !== cachedPat) {
-    octokitClient = new Octokit({ auth: pat })
-    cachedPat = pat
+// Resolves the active account for a user. If `accountId` is provided, that
+// specific account is used after an ownership check; otherwise the user's
+// first (earliest-created) account is used. Returns null when the user has
+// no accounts — callers treat that as "GitHub not connected for this user".
+function resolveAccount(userId: string, accountId?: string): GithubAccount | null {
+  if (accountId) {
+    return getGithubAccountForUser(accountId, userId) ?? null
   }
+  const accounts = listGithubAccountsForUser(userId)
+  return accounts[0] ?? null
+}
 
-  return octokitClient
+export function getOctokitForUser(userId: string, accountId?: string): Octokit | null {
+  const account = resolveAccount(userId, accountId)
+  if (!account) return null
+  const cached = octokitByAccount.get(account.id)
+  if (cached) return cached
+  const pat = readPatForAccount(account)
+  if (!pat) {
+    log.github.warn('GitHub account row exists but PAT secret is missing', {
+      accountId: account.id,
+    })
+    return null
+  }
+  const client = new Octokit({ auth: pat })
+  octokitByAccount.set(account.id, client)
+  return client
+}
+
+// Clear cached Octokit clients for an account. Callers MUST invoke this
+// after rotating or deleting an account so a stale client doesn't keep
+// using the old PAT.
+export function invalidateGithubAccountCache(accountId: string): void {
+  octokitByAccount.delete(accountId)
+}
+
+// Test/dev seam: drop every cached client. Wired into the test env reset.
+export function clearAllGithubCaches(): void {
+  octokitByAccount.clear()
 }
 
 // Parse GitHub remote URL to extract owner/repo
@@ -73,8 +110,11 @@ export function parseGitHubRemoteUrl(url: string): { owner: string; repo: string
   return null
 }
 
-export async function getAuthenticatedUser(): Promise<GitHubUser | null> {
-  const octokit = getOctokit()
+export async function getAuthenticatedUser(
+  userId: string,
+  accountId?: string
+): Promise<GitHubUser | null> {
+  const octokit = getOctokitForUser(userId, accountId)
   if (!octokit) return null
 
   try {
@@ -88,8 +128,8 @@ export async function getAuthenticatedUser(): Promise<GitHubUser | null> {
   }
 }
 
-export async function fetchUserOrgs(): Promise<GitHubOrg[]> {
-  const octokit = getOctokit()
+export async function fetchUserOrgs(userId: string, accountId?: string): Promise<GitHubOrg[]> {
+  const octokit = getOctokitForUser(userId, accountId)
   if (!octokit) return []
 
   try {
@@ -107,11 +147,13 @@ export async function fetchUserOrgs(): Promise<GitHubOrg[]> {
 }
 
 export async function fetchUserIssues(
+  userId: string,
   filter: IssueFilter = 'assigned',
   repoFilters?: { owner: string; repo: string }[],
-  org?: string
+  org?: string,
+  accountId?: string
 ): Promise<GitHubIssue[]> {
-  const octokit = getOctokit()
+  const octokit = getOctokitForUser(userId, accountId)
   if (!octokit) return []
 
   try {
@@ -173,11 +215,13 @@ export async function fetchUserIssues(
 }
 
 export async function fetchUserPRs(
+  userId: string,
   filter: PRFilter,
   repoFilters?: { owner: string; repo: string }[],
-  org?: string
+  org?: string,
+  accountId?: string
 ): Promise<GitHubPR[]> {
-  const octokit = getOctokit()
+  const octokit = getOctokitForUser(userId, accountId)
   if (!octokit) return []
 
   try {

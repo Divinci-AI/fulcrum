@@ -8,6 +8,7 @@ import {
   broadcastToTerminal,
 } from './websocket/terminal-ws'
 import { ensureFnoxBootstrap, ensureLatestConfig, getSettingByKey, initFnoxConfig } from './lib/settings'
+import { bootstrapLegacyGithubPat } from './services/github-account-service'
 import { startPRMonitor, stopPRMonitor } from './services/pr-monitor'
 import { startMetricsCollector, stopMetricsCollector } from './services/metrics-collector'
 import { startGitWatcher, stopGitWatcher } from './services/git-watcher'
@@ -29,6 +30,18 @@ initFnoxConfig()
 
 // Ensure config is up-to-date (runs settings.json → fnox migration if needed)
 ensureLatestConfig()
+
+// D-6 PR 2: one-shot bootstrap of the legacy tenant-level
+// `integrations.githubPat` setting into the new per-user `github_accounts`
+// table. No-op when the table already has rows or no legacy PAT exists.
+// Idempotent; safe to run every boot. Triggers lazy DB init.
+try {
+  bootstrapLegacyGithubPat()
+} catch (err) {
+  log.github.warn('GitHub PAT bootstrap failed; continuing without it', {
+    error: err instanceof Error ? err.message : String(err),
+  })
+}
 
 const PORT = getSettingByKey('port')
 const HOST = process.env.HOST || 'localhost'
