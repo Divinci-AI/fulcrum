@@ -436,6 +436,10 @@ export const googleAccounts = sqliteTable('google_accounts', {
   lastGmailHistoryId: text('last_gmail_history_id'), // Persisted Gmail history ID for incremental polling
   sendAsEmail: text('send_as_email'), // Selected "From:" address for drafts (from Gmail send-as aliases)
   needsReauth: integer('needs_reauth', { mode: 'boolean' }).default(false),
+  // D-6 PR 1: owning user for per-user scoping. Nullable for one release so a
+  // backfilled NULL row stays visible to every user (legacy behavior). After
+  // the transition release, flip to NOT NULL.
+  ownerUserId: text('owner_user_id'),
   createdAt: text('created_at').notNull(),
   updatedAt: text('updated_at').notNull(),
 })
