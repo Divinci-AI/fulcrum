@@ -561,6 +561,13 @@
       "when": 1778994800000,
       "tag": "0079_add_github_accounts",
       "breakpoints": true
+    },
+    {
+      "idx": 80,
+      "version": "6",
+      "when": 1778994900000,
+      "tag": "0080_google_owner_user_id_not_null",
+      "breakpoints": true
     }
   ]
 }

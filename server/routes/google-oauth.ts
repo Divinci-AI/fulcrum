@@ -6,8 +6,8 @@
  */
 
 import { Hono } from 'hono'
-import { asc, eq } from 'drizzle-orm'
-import { db, googleAccounts, users } from '../db'
+import { eq } from 'drizzle-orm'
+import { db, googleAccounts } from '../db'
 import { googleCalendarManager } from '../services/google/google-calendar-manager'
 import { getSettings } from '../lib/settings'
 import {
@@ -217,18 +217,26 @@ app.get('/callback', async (c) => {
         })
       }
     } else {
-      // New account. D-6 PR 1: record the owning user so subsequent route
-      // calls can scope visibility. `c.var.user` is set by the global
-      // currentUser middleware from the CF Access header on this callback
-      // (Google's redirect returns to the same hostname, so CF Access
-      // gates it and rewrites the header). If somehow absent — e.g. local
-      // dev without FULCRUM_DEV_USER_EMAIL — fall back to the tenant's
-      // first user so the account isn't created orphaned, matching the
-      // migration backfill behavior.
-      const callerUserId =
-        c.var.user?.id ??
-        db.select({ id: users.id }).from(users).orderBy(asc(users.createdAt)).limit(1).get()?.id ??
-        null
+      // New account. D-6 PR 1b: `ownerUserId` is NOT NULL — record the
+      // caller's user id so subsequent route calls can scope visibility.
+      // `c.var.user` is set by the global currentUser middleware from the
+      // CF Access header on this callback (Google's redirect returns to
+      // the same hostname, so CF Access gates it and the header survives).
+      // Absent identity = refuse to create the account rather than orphan
+      // it; this would mean the deployment isn't behind CF Access AND no
+      // FULCRUM_DEV_USER_EMAIL fallback is set, which is a misconfiguration
+      // we want to surface, not paper over.
+      const callerUserId = c.var.user?.id
+      if (!callerUserId) {
+        logger.error('OAuth callback succeeded but no caller identity is available — refusing to create orphan account', {
+          accountName: state.accountName,
+          email,
+        })
+        return c.html(
+          '<html><body><h2>Authorization Failed</h2><p>Could not determine the user this Google account belongs to. Make sure you are signed in.</p><script>setTimeout(()=>window.close(),5000)</script></body></html>',
+          401
+        )
+      }
 
       const accountId = crypto.randomUUID()
       db.insert(googleAccounts)

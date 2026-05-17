@@ -4,7 +4,7 @@
  * CRUD for Google accounts and lifecycle management.
  */
 
-import { eq, isNull, or } from 'drizzle-orm'
+import { eq } from 'drizzle-orm'
 import { db, googleAccounts, caldavCalendars, caldavEvents } from '../../db'
 import type { GoogleAccount } from '../../db'
 import { googleCalendarManager } from './google-calendar-manager'
@@ -22,17 +22,14 @@ export function listGoogleAccounts(): GoogleAccount[] {
   return db.select().from(googleAccounts).all()
 }
 
-// D-6 PR 1: returns Google accounts visible to `userId`. Includes accounts
-// the user owns plus legacy accounts whose `ownerUserId` is still NULL
-// (one-release transition; rows are backfilled to the tenant's first user
-// by migration 0078, but accounts connected before the upgrade may be
-// re-visible to multiple users until they're re-linked). In the next
-// release this fallback drops and the column flips to NOT NULL.
+// D-6 PR 1b: returns Google accounts owned by `userId`. After migration
+// 0079, `ownerUserId` is NOT NULL — the NULL-fallback that lived here
+// during the 0078 transition is gone. A user only sees accounts they own.
 export function listGoogleAccountsForUser(userId: string): GoogleAccount[] {
   return db
     .select()
     .from(googleAccounts)
-    .where(or(eq(googleAccounts.ownerUserId, userId), isNull(googleAccounts.ownerUserId)))
+    .where(eq(googleAccounts.ownerUserId, userId))
     .all()
 }
 
@@ -40,15 +37,14 @@ export function getGoogleAccount(id: string): GoogleAccount | undefined {
   return db.select().from(googleAccounts).where(eq(googleAccounts.id, id)).get()
 }
 
-// D-6 PR 1: like `getGoogleAccount` but returns the account only when it's
-// visible to `userId`. Visibility = the user owns it, OR `ownerUserId` is
-// still NULL (legacy transition). Routes use this to gate ID-addressed
-// operations (PATCH/DELETE/enable/disable/sync) so guessing an account ID
-// can't reach another user's connection.
+// D-6 PR 1b: per-user version of `getGoogleAccount`. Returns the row only
+// when the caller owns it. Used by ID-addressed handlers
+// (PATCH/DELETE/enable/disable/sync) to gate ownership at the route layer.
+// Returns undefined for "not found OR not yours" so existence isn't leaked.
 export function getGoogleAccountForUser(id: string, userId: string): GoogleAccount | undefined {
   const account = getGoogleAccount(id)
   if (!account) return undefined
-  if (account.ownerUserId !== null && account.ownerUserId !== userId) return undefined
+  if (account.ownerUserId !== userId) return undefined
   return account
 }
 

@@ -3,9 +3,10 @@ import { setupTestEnv, type TestEnv } from '../../__tests__/utils/env'
 import { db, googleAccounts, users } from '../../db'
 import { listGoogleAccountsForUser, getGoogleAccountForUser } from './google-calendar-service'
 
-// D-6 PR 1: per-user filtering for Google accounts. Covers the new
-// `listGoogleAccountsForUser` + `getGoogleAccountForUser` helpers and the
-// one-release NULL-owner transition compatibility.
+// D-6 PR 1b: per-user filtering for Google accounts AFTER the NOT NULL flip.
+// The NULL-owner "visible to all" fallback that existed during the 0078
+// transition is gone; the column is now mandatory and a user only sees rows
+// they own.
 
 describe('listGoogleAccountsForUser', () => {
   let env: TestEnv
@@ -20,7 +21,7 @@ describe('listGoogleAccountsForUser', () => {
     db.insert(users).values({ id, email, createdAt: now, updatedAt: now }).run()
     return id
   }
-  function insertAccount(name: string, ownerUserId: string | null): string {
+  function insertAccount(name: string, ownerUserId: string): string {
     const id = crypto.randomUUID()
     const now = new Date().toISOString()
     db.insert(googleAccounts)
@@ -29,29 +30,20 @@ describe('listGoogleAccountsForUser', () => {
     return id
   }
 
-  test('returns only the calling user\'s accounts plus NULL-owner legacy rows', () => {
+  test('returns only the calling user\'s accounts', () => {
     const alice = insertUser('alice@example.com')
     const bob = insertUser('bob@example.com')
     const aliceAcct = insertAccount('alice work', alice)
     const bobAcct = insertAccount('bob work', bob)
-    const legacyAcct = insertAccount('legacy shared', null)
 
-    const aliceSees = listGoogleAccountsForUser(alice).map((a) => a.id).sort()
-    const bobSees = listGoogleAccountsForUser(bob).map((a) => a.id).sort()
-
-    expect(aliceSees).toEqual([aliceAcct, legacyAcct].sort())
-    expect(bobSees).toEqual([bobAcct, legacyAcct].sort())
-    expect(aliceSees).not.toContain(bobAcct)
-    expect(bobSees).not.toContain(aliceAcct)
+    expect(listGoogleAccountsForUser(alice).map((a) => a.id)).toEqual([aliceAcct])
+    expect(listGoogleAccountsForUser(bob).map((a) => a.id)).toEqual([bobAcct])
   })
 
-  test('returns only NULL-owner rows for a user with no owned accounts', () => {
-    const newUser = insertUser('new@example.com')
-    const legacyAcct = insertAccount('legacy', null)
+  test('returns empty array when the user owns nothing', () => {
+    const alice = insertUser('alice@example.com')
     insertAccount('someone-elses', insertUser('other@example.com'))
-
-    const seen = listGoogleAccountsForUser(newUser).map((a) => a.id)
-    expect(seen).toEqual([legacyAcct])
+    expect(listGoogleAccountsForUser(alice)).toEqual([])
   })
 
   test('returns empty array when no accounts exist', () => {
@@ -73,7 +65,7 @@ describe('getGoogleAccountForUser', () => {
     db.insert(users).values({ id, email, createdAt: now, updatedAt: now }).run()
     return id
   }
-  function insertAccount(name: string, ownerUserId: string | null): string {
+  function insertAccount(name: string, ownerUserId: string): string {
     const id = crypto.randomUUID()
     const now = new Date().toISOString()
     db.insert(googleAccounts)
@@ -92,18 +84,9 @@ describe('getGoogleAccountForUser', () => {
     const alice = insertUser('alice@example.com')
     const bob = insertUser('bob@example.com')
     const bobAcct = insertAccount('bob work', bob)
-    // The privacy guarantee: probing Bob's account ID as Alice yields
-    // undefined (route layer turns this into a 404 — same response as
-    // "doesn't exist", so existence isn't leaked).
+    // Probing Bob's account ID as Alice yields undefined — the route layer
+    // turns this into a 404 so existence isn't leaked.
     expect(getGoogleAccountForUser(bobAcct, alice)).toBeUndefined()
-  })
-
-  test('returns the account when ownerUserId is NULL (legacy transition)', () => {
-    const alice = insertUser('alice@example.com')
-    const bob = insertUser('bob@example.com')
-    const legacyAcct = insertAccount('legacy shared', null)
-    expect(getGoogleAccountForUser(legacyAcct, alice)?.id).toBe(legacyAcct)
-    expect(getGoogleAccountForUser(legacyAcct, bob)?.id).toBe(legacyAcct)
   })
 
   test('returns undefined for an unknown account ID', () => {
