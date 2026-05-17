@@ -6,11 +6,15 @@ import {
   type PushoverNotificationConfig,
   type GmailNotificationConfig,
 } from '../lib/settings'
-import { broadcast } from '../websocket/terminal-ws'
+import { broadcast, broadcastToTopic } from '../websocket/terminal-ws'
 import { log } from '../lib/logger'
 import { sendNotificationViaMessaging } from './notification-messaging'
 import { eq } from 'drizzle-orm'
 import { db, googleAccounts } from '../db'
+import {
+  getPreferencesForUser,
+  getPushoverUserKeyForUser,
+} from './notification-preferences-service'
 
 export interface NotificationPayload {
   title: string
@@ -284,21 +288,101 @@ function getChannelDispatchers(
   return dispatchers
 }
 
-// Send notification to all enabled channels
-export async function sendNotification(payload: NotificationPayload): Promise<NotificationResult[]> {
-  const settings = getNotificationSettings()
+// D-7 PR 1: merge tenant defaults with a user's per-user preferences. Each
+// boolean toggle in the prefs row is tri-state: NULL = inherit tenant
+// default; true/false = override. For Pushover, if the user has stored a
+// personal user key it replaces the tenant userKey (the appToken stays
+// tenant-wide since it's per-app, not per-recipient).
+function mergeForRecipient(
+  settings: NotificationSettings,
+  userId: string
+): NotificationSettings {
+  const prefs = getPreferencesForUser(userId)
+  if (!prefs) return settings
 
-  if (!settings.enabled) {
+  const merged: NotificationSettings = {
+    ...settings,
+    toast: {
+      ...settings.toast,
+      enabled: prefs.toastEnabled ?? settings.toast?.enabled ?? true,
+    },
+    desktop: {
+      ...settings.desktop,
+      enabled: prefs.desktopEnabled ?? settings.desktop?.enabled ?? true,
+    },
+    sound: {
+      ...settings.sound,
+      enabled: prefs.soundEnabled ?? settings.sound?.enabled ?? false,
+    },
+    pushover: {
+      ...settings.pushover,
+      enabled: prefs.pushoverEnabled ?? settings.pushover?.enabled ?? false,
+    },
+  }
+
+  if (prefs.pushoverUserKeyFnox) {
+    const userKey = getPushoverUserKeyForUser(userId)
+    if (userKey) {
+      merged.pushover = { ...merged.pushover, userKey }
+    }
+  }
+
+  return merged
+}
+
+// Send notification to all enabled channels.
+//
+// D-7 PR 1: when `options.recipientUserId` is set, the dispatcher merges
+// the tenant-wide settings with that user's per-user preferences (stored
+// by D-6 PR 4) and routes the UI broadcast to the recipient's WS
+// connections only — other users no longer see toasts/desktop pings for
+// notifications addressed to someone else. When the parameter is absent
+// the behavior is unchanged from before.
+export async function sendNotification(
+  payload: NotificationPayload,
+  options?: { recipientUserId?: string }
+): Promise<NotificationResult[]> {
+  const tenantSettings = getNotificationSettings()
+
+  if (!tenantSettings.enabled) {
     return []
   }
 
-  // Always broadcast to UI (frontend will respect showToast/showDesktop flags)
-  broadcastUINotification(payload, {
-    showToast: settings.toast?.enabled ?? true,
-    showDesktop: settings.desktop?.enabled ?? true,
-    playSound: settings.sound?.enabled ?? false,
-    isCustomSound: !!settings.sound?.customSoundFile,
-  })
+  const recipientUserId = options?.recipientUserId
+  const settings = recipientUserId
+    ? mergeForRecipient(tenantSettings, recipientUserId)
+    : tenantSettings
+
+  // Broadcast to UI. With a recipient, scope to that user's WS connections
+  // via `broadcastToTopic('me', …, { toUserIds })` so other tenants in the
+  // same instance don't see toasts/desktop pings meant for someone else.
+  // Without a recipient, behave as before (broadcast to all clients).
+  const notificationType: 'success' | 'info' | 'warning' | 'error' =
+    payload.type === 'pr_merged' || payload.type === 'plan_complete' || payload.type === 'deployment_success'
+      ? 'success'
+      : payload.type === 'deployment_failed'
+      ? 'error'
+      : 'info'
+
+  const uiPayload = {
+    type: 'notification' as const,
+    payload: {
+      id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+      title: payload.title,
+      message: payload.message,
+      notificationType,
+      taskId: payload.taskId,
+      showToast: settings.toast?.enabled ?? true,
+      showDesktop: settings.desktop?.enabled ?? true,
+      playSound: settings.sound?.enabled ?? false,
+      isCustomSound: !!settings.sound?.customSoundFile,
+    },
+  }
+  if (recipientUserId) {
+    broadcastToTopic('me', uiPayload, { toUserIds: new Set([recipientUserId]) })
+  } else {
+    broadcast(uiPayload)
+  }
 
   const results: NotificationResult[] = []
   const dispatchers = getChannelDispatchers(settings, payload)

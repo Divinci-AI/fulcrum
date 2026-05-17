@@ -176,14 +176,21 @@ export function notifyMentions(opts: {
   }
 
   for (const u of opts.added) {
-    sendNotification({
-      title: `You were mentioned${by}`,
-      message: `${opts.sourceType === 'task' ? 'Task' : 'Project'}: ${opts.sourceTitle}`,
-      type: 'mention',
-      taskId: opts.sourceType === 'task' ? opts.sourceId : undefined,
-      taskTitle: opts.sourceType === 'task' ? opts.sourceTitle : undefined,
-      url,
-    }).catch((err: unknown) => {
+    // D-7 PR 1: pass the recipient so the dispatcher merges this user's
+    // notification preferences (toast/desktop/sound/pushover toggles +
+    // per-user Pushover key) over the tenant defaults, and limits the UI
+    // broadcast to the recipient's own sockets.
+    sendNotification(
+      {
+        title: `You were mentioned${by}`,
+        message: `${opts.sourceType === 'task' ? 'Task' : 'Project'}: ${opts.sourceTitle}`,
+        type: 'mention',
+        taskId: opts.sourceType === 'task' ? opts.sourceId : undefined,
+        taskTitle: opts.sourceType === 'task' ? opts.sourceTitle : undefined,
+        url,
+      },
+      { recipientUserId: u.id }
+    ).catch((err: unknown) => {
       logger.warn('Mention notification dispatch failed', {
         userId: u.id,
         sourceType: opts.sourceType,
