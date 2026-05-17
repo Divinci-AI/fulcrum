@@ -444,6 +444,24 @@ export const googleAccounts = sqliteTable('google_accounts', {
   updatedAt: text('updated_at').notNull(),
 })
 
+// GitHub accounts (D-6 PR 2): one row per (user, GitHub identity) pair so
+// each tenant member's PRs/issues attribute to their own GitHub identity.
+// Migration 0079 bootstraps a single row from the legacy tenant
+// `integrations.githubPat` setting on first boot, labeled "imported" and
+// owned by the tenant's earliest user. The PAT itself lives in fnox under
+// the key recorded in `pat_fnox_key`, not in this table.
+export const githubAccounts = sqliteTable('github_accounts', {
+  id: text('id').primaryKey(),
+  ownerUserId: text('owner_user_id').notNull(),
+  label: text('label').notNull(), // User-visible name; unique per owner
+  patFnoxKey: text('pat_fnox_key').notNull(), // Name of the age-encrypted fnox secret
+  githubLogin: text('github_login'), // From octokit.users.getAuthenticated() at validation
+  githubAvatarUrl: text('github_avatar_url'),
+  lastValidatedAt: text('last_validated_at'),
+  createdAt: text('created_at').notNull(),
+  updatedAt: text('updated_at').notNull(),
+})
+
 // Gmail drafts - cached Gmail draft metadata
 export const gmailDrafts = sqliteTable('gmail_drafts', {
   id: text('id').primaryKey(),
@@ -728,6 +746,8 @@ export type ObserverInvocation = typeof observerInvocations.$inferSelect
 export type NewObserverInvocation = typeof observerInvocations.$inferInsert
 export type GoogleAccount = typeof googleAccounts.$inferSelect
 export type NewGoogleAccount = typeof googleAccounts.$inferInsert
+export type GithubAccount = typeof githubAccounts.$inferSelect
+export type NewGithubAccount = typeof githubAccounts.$inferInsert
 export type GmailDraft = typeof gmailDrafts.$inferSelect
 export type NewGmailDraft = typeof gmailDrafts.$inferInsert
 export type User = typeof users.$inferSelect
