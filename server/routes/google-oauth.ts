@@ -6,8 +6,8 @@
  */
 
 import { Hono } from 'hono'
-import { eq } from 'drizzle-orm'
-import { db, googleAccounts } from '../db'
+import { asc, eq } from 'drizzle-orm'
+import { db, googleAccounts, users } from '../db'
 import { googleCalendarManager } from '../services/google/google-calendar-manager'
 import { getSettings } from '../lib/settings'
 import {
@@ -17,10 +17,11 @@ import {
   getAccountEmail,
 } from '../services/google-oauth'
 import { createLogger } from '../lib/logger'
+import type { CurrentUserContext } from '../middleware/current-user'
 
 const logger = createLogger('GoogleOAuth:Routes')
 
-const app = new Hono()
+const app = new Hono<CurrentUserContext>()
 
 /**
  * GET /api/google/oauth/authorize
@@ -216,7 +217,19 @@ app.get('/callback', async (c) => {
         })
       }
     } else {
-      // New account
+      // New account. D-6 PR 1: record the owning user so subsequent route
+      // calls can scope visibility. `c.var.user` is set by the global
+      // currentUser middleware from the CF Access header on this callback
+      // (Google's redirect returns to the same hostname, so CF Access
+      // gates it and rewrites the header). If somehow absent — e.g. local
+      // dev without FULCRUM_DEV_USER_EMAIL — fall back to the tenant's
+      // first user so the account isn't created orphaned, matching the
+      // migration backfill behavior.
+      const callerUserId =
+        c.var.user?.id ??
+        db.select({ id: users.id }).from(users).orderBy(asc(users.createdAt)).limit(1).get()?.id ??
+        null
+
       const accountId = crypto.randomUUID()
       db.insert(googleAccounts)
         .values({
@@ -230,6 +243,7 @@ app.get('/callback', async (c) => {
           calendarEnabled: false,
           gmailEnabled: false,
           syncIntervalMinutes: 15,
+          ownerUserId: callerUserId,
           createdAt: now,
           updatedAt: now,
         })
@@ -239,6 +253,7 @@ app.get('/callback', async (c) => {
         accountId,
         name: state.accountName,
         email,
+        ownerUserId: callerUserId,
       })
     }
 

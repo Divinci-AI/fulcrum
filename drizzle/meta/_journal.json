@@ -547,6 +547,13 @@
       "when": 1778530000000,
       "tag": "0077_add_d5_access_control",
       "breakpoints": true
+    },
+    {
+      "idx": 78,
+      "version": "6",
+      "when": 1778994720000,
+      "tag": "0078_add_google_owner_user_id",
+      "breakpoints": true
     }
   ]
 }
