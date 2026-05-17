@@ -8,6 +8,7 @@ import { nanoid } from 'nanoid'
 import { db, channelMessages } from '../../db'
 import type { ChannelMessageMetadata, ChannelMessage } from '../../db/schema'
 import { log } from '../../lib/logger'
+import { resolveInboundUserId } from '../channel-identity-service'
 
 /**
  * Parameters for storing an email.
@@ -142,6 +143,15 @@ export function storeEmail(params: StoreEmailParams): boolean {
   // Get recipient for outgoing emails
   const recipientId = params.toAddresses?.[0] ?? undefined
 
+  // D-7 PR 6: attribute incoming emails to the Fulcrum user whose
+  // users.email matches the sender. Outgoing emails are from "us" so the
+  // attribution there belongs to the dispatcher's recipient-targeting,
+  // not the sender column.
+  const userId =
+    params.direction === 'incoming'
+      ? resolveInboundUserId('email', params.fromAddress)
+      : null
+
   db.insert(channelMessages)
     .values({
       id: nanoid(),
@@ -155,6 +165,7 @@ export function storeEmail(params: StoreEmailParams): boolean {
       metadata,
       messageTimestamp: params.emailDate?.toISOString() ?? now,
       createdAt: now,
+      userId,
     })
     .run()
 

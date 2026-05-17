@@ -402,6 +402,12 @@ export const channelMessages = sqliteTable('channel_messages', {
   metadata: text('metadata', { mode: 'json' }).$type<ChannelMessageMetadata>(),
   messageTimestamp: text('message_timestamp').notNull(), // When the message was sent/received
   createdAt: text('created_at').notNull(), // When we stored this message
+  // D-7 PR 6: resolved Fulcrum user attribution. For incoming messages, set
+  // by looking up the channel-native sender (slack user_id, discord
+  // snowflake, telegram chat_id, whatsapp JID) in channel_identity_mappings,
+  // or for email by matching senderId against users.email. NULL when no
+  // mapping exists — the message is still stored but not attributed.
+  userId: text('user_id'),
 })
 
 // Sweep runs - track when sweeps happened for reliability and context

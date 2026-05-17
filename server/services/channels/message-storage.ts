@@ -9,6 +9,7 @@ import { db, channelMessages } from '../../db'
 import type { ChannelMessageMetadata } from '../../db/schema'
 import type { ChannelType } from './types'
 import { log } from '../../lib/logger'
+import { resolveInboundUserId } from '../channel-identity-service'
 
 /**
  * Parameters for storing a channel message.
@@ -27,6 +28,12 @@ export interface StoreChannelMessageParams {
 
 /**
  * Store a channel message in the local database.
+ *
+ * D-7 PR 6: incoming messages are attributed to a Fulcrum user via
+ * `resolveInboundUserId` (channel_identity_mappings for the four messaging
+ * channels, users.email for email). Outgoing messages aren't attributed
+ * here — the recipient-targeting story lives in the dispatcher path
+ * (sendNotification's recipientUserId).
  */
 export function storeChannelMessage(params: StoreChannelMessageParams): string {
   const now = new Date().toISOString()
@@ -37,6 +44,11 @@ export function storeChannelMessage(params: StoreChannelMessageParams): string {
     params.messageTimestamp instanceof Date
       ? params.messageTimestamp.toISOString()
       : params.messageTimestamp
+
+  const userId =
+    params.direction === 'incoming'
+      ? resolveInboundUserId(params.channelType, params.senderId)
+      : null
 
   db.insert(channelMessages)
     .values({
@@ -51,6 +63,7 @@ export function storeChannelMessage(params: StoreChannelMessageParams): string {
       metadata: params.metadata,
       messageTimestamp,
       createdAt: now,
+      userId,
     })
     .run()
 
@@ -60,6 +73,7 @@ export function storeChannelMessage(params: StoreChannelMessageParams): string {
     connectionId: params.connectionId,
     direction: params.direction,
     senderId: params.senderId,
+    userId,
   })
 
   return id
