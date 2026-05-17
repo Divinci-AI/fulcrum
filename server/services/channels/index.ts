@@ -245,7 +245,15 @@ function buildSlackMetadata(
 /**
  * Send a message to a channel.
  * Unified interface for sending messages across all supported channels.
- * The recipient is always auto-resolved from stored channel state (the user who configured the channel).
+ *
+ * Default recipient resolution (D-7 PR 4 extension): when
+ * `options.to` is provided, that channel-native id is used directly —
+ * Slack `user_id`, Discord snowflake, Telegram chat_id, WhatsApp JID.
+ * This is the seam the notification dispatcher uses to route a
+ * recipient-addressed payload to the recipient's own DM via the
+ * `channel_identity_mappings` table. Without `options.to`, the
+ * legacy behavior stands: recipient is auto-resolved from stored
+ * channel state (the user who configured the channel).
  */
 export async function sendMessageToChannel(
   channel: 'email' | 'whatsapp' | 'discord' | 'telegram' | 'slack',
@@ -255,19 +263,21 @@ export async function sendMessageToChannel(
     replyToMessageId?: string
     slackBlocks?: Array<Record<string, unknown>>
     filePath?: string
+    /** D-7 PR 4: channel-native recipient id to override the auto-resolver. */
+    to?: string
   }
 ): Promise<{ success: boolean; messageId?: string; error?: string }> {
   if (!body) {
     return { success: false, error: 'Message body is required' }
   }
 
-  // Always resolve recipient from stored channel state (user-only messaging)
-  const resolvedTo = resolveRecipient(channel) ?? undefined
+  const explicitTo = options?.to?.trim()
+  const resolvedTo = explicitTo || resolveRecipient(channel) || undefined
   if (!resolvedTo) {
     const channelName = channel.charAt(0).toUpperCase() + channel.slice(1)
     return { success: false, error: `No ${channelName} recipient found — no user has messaged via ${channelName} yet` }
   }
-  log.messaging.debug('Auto-resolved recipient', { channel, to: resolvedTo })
+  log.messaging.debug('Resolved recipient', { channel, to: resolvedTo, explicit: !!explicitTo })
 
   switch (channel) {
     case 'email':
