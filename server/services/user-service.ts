@@ -44,6 +44,9 @@ export function ensureUserByEmail(email: string, opts: { displayName?: string | 
     email: normalized,
     displayName: opts.displayName ?? null,
     avatarUrl: null,
+    isAdmin: false, // D-7 PR 2: never auto-grant on signup. Migration 0082
+    // seeded the earliest user as admin; any subsequent admin needs an
+    // explicit PATCH /api/users/:id/admin from another admin.
     createdAt: now,
     updatedAt: now,
     lastSeenAt: now,
@@ -81,5 +84,15 @@ export function updateUserProfile(
     updates.avatarUrl = typeof v === 'string' && v.trim() !== '' ? v.trim() : null
   }
   db.update(users).set(updates).where(eq(users.id, id)).run()
+  return db.select().from(users).where(eq(users.id, id)).get() ?? null
+}
+
+/**
+ * D-7 PR 2: promote or demote a user's tenant-admin flag. Caller must be a
+ * tenant admin (gated at the route layer). Returns the updated row.
+ */
+export function setUserAdmin(id: string, isAdmin: boolean): User | null {
+  const now = new Date().toISOString()
+  db.update(users).set({ isAdmin, updatedAt: now }).where(eq(users.id, id)).run()
   return db.select().from(users).where(eq(users.id, id)).get() ?? null
 }

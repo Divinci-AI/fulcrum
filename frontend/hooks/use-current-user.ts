@@ -6,6 +6,11 @@ interface User {
   email: string
   displayName: string | null
   avatarUrl: string | null
+  /** D-7 PR 2: tenant-admin flag. Gates write access to tenant-wide config
+   * (Integrations, tenant notification defaults). Migration 0082
+   * promoted the earliest user; subsequent admins are granted via
+   * PATCH /api/users/:id/admin. */
+  isAdmin: boolean
   createdAt: string
   updatedAt: string
   lastSeenAt: string | null

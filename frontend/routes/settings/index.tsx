@@ -85,6 +85,7 @@ import { CaldavAccounts } from '@/components/caldav/caldav-accounts'
 import { GoogleAccountManager } from '@/components/google/google-account-manager'
 import { GitHubAccountManager } from '@/components/github/github-account-manager'
 import { MyNotificationPreferences } from '@/components/notifications/my-notification-preferences'
+import { useCurrentUser } from '@/hooks/use-current-user'
 import { useGoogleAccounts } from '@/hooks/use-google'
 import { GoogleCalendarSettings } from '@/components/google/google-calendar-settings'
 import { CaldavCopyRules } from '@/components/caldav/caldav-copy-rules'
@@ -147,6 +148,11 @@ function SettingsPage() {
   const { data: autoScrollToBottom, isLoading: autoScrollLoading } = useAutoScrollToBottom()
   const { data: claudeCodePath } = useClaudeCodePath()
   const { data: notificationSettings, isLoading: notificationsLoading } = useNotificationSettings()
+  // D-7 PR 2: gate tenant-default sections (Integrations, tenant
+  // Notifications) for non-admins. Per-user prefs and read-only views stay
+  // visible to everyone.
+  const { data: currentUser } = useCurrentUser()
+  const isAdmin = currentUser?.isAdmin ?? false
   const { data: zAiSettings, isLoading: zAiLoading } = useZAiSettings()
   const { data: deploymentSettings, isLoading: deploymentLoading } = useDeploymentSettings()
   const updateDeploymentSettings = useUpdateDeploymentSettings()
@@ -1312,11 +1318,22 @@ function SettingsPage() {
                   </div>
                 </SettingsSection>
 
-                {/* Integrations */}
+                {/* Integrations — D-7 PR 2: GitHubAccountManager is
+                    per-user (visible to everyone). Cloudflare + Google
+                    OAuth client are tenant defaults — admin-only. */}
                 <SettingsSection title={t('sections.integrations')}>
                   <div className="space-y-4">
                     {/* GitHub Accounts (D-6 PR 2 — per-user) */}
                     <GitHubAccountManager />
+
+                    {!isAdmin && (
+                      <p className="text-xs text-muted-foreground border-t pt-3">
+                        Tenant-wide integrations (Cloudflare, Google OAuth
+                        client) are managed by your tenant admin.
+                      </p>
+                    )}
+
+                    {isAdmin && <>
 
                     {/* Cloudflare API Token */}
                     <div className="space-y-1">
@@ -1387,6 +1404,7 @@ function SettingsPage() {
                       isLoading={isLoading}
                       onSaveCredentials={saveGoogleCredentials}
                     />
+                    </>}
                   </div>
                 </SettingsSection>
               </div>
@@ -2207,7 +2225,10 @@ function SettingsPage() {
                 <MyNotificationPreferences />
               </SettingsSection>
 
-              {/* Notifications */}
+              {/* Notifications — tenant defaults, D-7 PR 2 admin-only.
+                  Non-admins see only the "My notification preferences"
+                  section above. */}
+              {isAdmin && (
               <SettingsSection title={t('sections.notifications')}>
                 <div className="space-y-4">
                   {/* Master toggle */}
@@ -2619,6 +2640,7 @@ function SettingsPage() {
                   </div>
                 </div>
               </SettingsSection>
+              )}
 
               {/* Messaging Channels */}
               <SettingsSection title="Channels">

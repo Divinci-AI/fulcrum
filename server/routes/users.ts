@@ -1,5 +1,5 @@
 import { Hono } from 'hono'
-import { getUserById, listUsers, updateUserProfile } from '../services/user-service'
+import { getUserById, listUsers, updateUserProfile, setUserAdmin } from '../services/user-service'
 import { listMentionsForUser } from '../services/mention-service'
 import {
   getPreferencesForUser,
@@ -7,7 +7,7 @@ import {
   toView,
   type PreferencePatch,
 } from '../services/notification-preferences-service'
-import type { CurrentUserContext } from '../middleware/current-user'
+import { requireAdminUser, type CurrentUserContext } from '../middleware/current-user'
 
 const app = new Hono<CurrentUserContext>()
 
@@ -72,6 +72,24 @@ app.get('/:id', (c) => {
     return c.json({ error: 'User not found' }, 404)
   }
   return c.json(user)
+})
+
+// PATCH /api/users/:id/admin — D-7 PR 2. Tenant-admin only. Promote or
+// demote another user. Body: { isAdmin: boolean }. A tenant admin can
+// demote themselves; the migration backfill ensures the earliest user is
+// always seeded as admin, but there is intentionally no "last admin"
+// guardrail (operators who lock themselves out can fix it via SQL).
+app.patch('/:id/admin', async (c) => {
+  const caller = requireAdminUser(c)
+  const targetId = c.req.param('id')
+  const target = getUserById(targetId)
+  if (!target) return c.json({ error: 'User not found' }, 404)
+  const body = await c.req.json<{ isAdmin?: boolean }>()
+  if (typeof body.isAdmin !== 'boolean') {
+    return c.json({ error: 'isAdmin (boolean) is required' }, 400)
+  }
+  const updated = setUserAdmin(targetId, body.isAdmin)
+  return c.json({ user: updated, grantedBy: caller.id })
 })
 
 export default app

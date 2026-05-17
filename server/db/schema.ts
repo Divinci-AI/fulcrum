@@ -618,6 +618,14 @@ export const users = sqliteTable('users', {
   email: text('email').notNull().unique(),
   displayName: text('display_name'), // optional; derive from email when null
   avatarUrl: text('avatar_url'),     // optional; future — CF Access doesn't surface this
+  // D-7 PR 2: tenant-wide admin flag. Distinct from team-level admin (which
+  // governs membership of a specific team) and resource-level admin
+  // (D-5 ACLs, governs a single task/project). A tenant admin can edit
+  // tenant-wide settings — integrations, notification defaults, future
+  // channel routing, and grant/revoke this flag on other users. Migration
+  // 0082 backfills `true` on the earliest user so the first signed-in
+  // identity isn't locked out of their own tenant.
+  isAdmin: integer('is_admin', { mode: 'boolean' }).notNull().default(false),
   createdAt: text('created_at').notNull(),
   updatedAt: text('updated_at').notNull(),
   lastSeenAt: text('last_seen_at'),  // touched by the current-user middleware on each request
