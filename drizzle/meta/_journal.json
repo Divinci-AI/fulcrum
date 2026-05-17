@@ -589,6 +589,13 @@
       "when": 1778995200000,
       "tag": "0083_add_channel_identity_mappings",
       "breakpoints": true
+    },
+    {
+      "idx": 84,
+      "version": "6",
+      "when": 1778995300000,
+      "tag": "0084_add_channel_message_user_id",
+      "breakpoints": true
     }
   ]
 }

@@ -4,6 +4,8 @@ import { db, users } from '../db'
 import {
   listMappingsForUser,
   getChannelIdentityForUser,
+  getUserIdForChannelIdentity,
+  resolveInboundUserId,
   upsertMapping,
   deleteMapping,
   isChannelType,
@@ -105,5 +107,69 @@ describe('channel-identity-service', () => {
     upsertMapping(userId, 'discord', '12345')
     deleteMapping(userId, 'slack')
     expect(getChannelIdentityForUser(userId, 'discord')).toBe('12345')
+  })
+
+  // D-7 PR 6 — inbound attribution reverse lookup.
+  describe('getUserIdForChannelIdentity (reverse lookup)', () => {
+    test('returns the user id for a mapped channel-native id', () => {
+      const alice = insertUser('alice@example.com')
+      upsertMapping(alice, 'slack', 'U01ABC')
+      expect(getUserIdForChannelIdentity('slack', 'U01ABC')).toBe(alice)
+    })
+
+    test('returns null when no mapping exists for the (channelType, channelUserId) pair', () => {
+      expect(getUserIdForChannelIdentity('slack', 'U_UNKNOWN')).toBeNull()
+    })
+
+    test('scoped per channel — the same channelUserId on a different channel does not match', () => {
+      const alice = insertUser('alice@example.com')
+      upsertMapping(alice, 'slack', '12345')
+      // discord uses snowflakes that look like numeric strings too;
+      // ensure the channel discriminator is actually checked.
+      expect(getUserIdForChannelIdentity('slack', '12345')).toBe(alice)
+      expect(getUserIdForChannelIdentity('discord', '12345')).toBeNull()
+    })
+
+    test('trims whitespace before matching (mirrors upsert normalisation)', () => {
+      const alice = insertUser('alice@example.com')
+      upsertMapping(alice, 'slack', 'U01')
+      expect(getUserIdForChannelIdentity('slack', '  U01  ')).toBe(alice)
+    })
+
+    test('rejects empty/whitespace-only channelUserId', () => {
+      expect(getUserIdForChannelIdentity('slack', '')).toBeNull()
+      expect(getUserIdForChannelIdentity('slack', '   ')).toBeNull()
+    })
+  })
+
+  describe('resolveInboundUserId (unified resolver)', () => {
+    test('messaging channels delegate to channel_identity_mappings', () => {
+      const alice = insertUser('alice@example.com')
+      upsertMapping(alice, 'telegram', '9876543')
+      expect(resolveInboundUserId('telegram', '9876543')).toBe(alice)
+      expect(resolveInboundUserId('telegram', 'unknown')).toBeNull()
+    })
+
+    test('email resolves via users.email (case-insensitive)', () => {
+      const alice = insertUser('alice@example.com')
+      expect(resolveInboundUserId('email', 'alice@example.com')).toBe(alice)
+      expect(resolveInboundUserId('email', 'Alice@Example.com')).toBe(alice)
+      expect(resolveInboundUserId('email', 'ALICE@EXAMPLE.COM')).toBe(alice)
+    })
+
+    test('email returns null when no matching user exists', () => {
+      insertUser('alice@example.com')
+      expect(resolveInboundUserId('email', 'stranger@example.com')).toBeNull()
+    })
+
+    test('email is independent from channel_identity_mappings rows', () => {
+      // Even if a user has a slack mapping with an email-like string,
+      // we never bridge across types — email goes to users.email only.
+      const alice = insertUser('alice@example.com')
+      upsertMapping(alice, 'slack', 'alice@example.com')
+      // The slack row exists but we're asking via 'email' — must resolve
+      // through users.email, not channel_identity_mappings.
+      expect(resolveInboundUserId('email', 'alice@example.com')).toBe(alice)
+    })
   })
 })
