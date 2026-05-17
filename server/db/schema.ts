@@ -782,6 +782,30 @@ export const notificationPreferences = sqliteTable('notification_preferences', {
 export type NotificationPreference = typeof notificationPreferences.$inferSelect
 export type NewNotificationPreference = typeof notificationPreferences.$inferInsert
 
+// Channel identity mappings (D-7 PR 3): per-user IDs in external messaging
+// platforms so the notification dispatcher can route a recipient-addressed
+// payload to that user's own DM rather than the tenant-wide channel.
+// Each row is a (user, channel) pair holding the channel-native identity
+// (Slack user_id, Discord snowflake, Telegram chat_id, WhatsApp phone JID).
+//
+// UNIQUE(user_id, channel_type) is enforced by the migration; users can
+// only map one identity per channel — if they switch Slack workspaces
+// they overwrite the row rather than holding multiple.
+//
+// This PR lands the storage + self-service surface. Per-channel dispatcher
+// integration is per-channel follow-up work (each platform has its own
+// outbound API and auth requirements).
+export const channelIdentityMappings = sqliteTable('channel_identity_mappings', {
+  id: text('id').primaryKey(),
+  userId: text('user_id').notNull(),
+  channelType: text('channel_type').notNull(), // 'slack' | 'discord' | 'telegram' | 'whatsapp'
+  channelUserId: text('channel_user_id').notNull(),
+  createdAt: text('created_at').notNull(),
+  updatedAt: text('updated_at').notNull(),
+})
+export type ChannelIdentityMapping = typeof channelIdentityMappings.$inferSelect
+export type NewChannelIdentityMapping = typeof channelIdentityMappings.$inferInsert
+
 export type GmailDraft = typeof gmailDrafts.$inferSelect
 export type NewGmailDraft = typeof gmailDrafts.$inferInsert
 export type User = typeof users.$inferSelect

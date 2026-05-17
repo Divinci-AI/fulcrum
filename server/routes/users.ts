@@ -7,7 +7,13 @@ import {
   toView,
   type PreferencePatch,
 } from '../services/notification-preferences-service'
-import { requireAdminUser, type CurrentUserContext } from '../middleware/current-user'
+import {
+  listMappingsForUser,
+  upsertMapping,
+  deleteMapping,
+  isChannelType,
+} from '../services/channel-identity-service'
+import { requireAdminUser, requireUser, type CurrentUserContext } from '../middleware/current-user'
 
 const app = new Hono<CurrentUserContext>()
 
@@ -56,6 +62,58 @@ app.patch('/me/notifications', async (c) => {
   const body = await c.req.json<PreferencePatch>()
   const row = upsertPreferencesForUser(user.id, body)
   return c.json({ preferences: toView(row) })
+})
+
+// GET /api/users/me/channel-identities — D-7 PR 3. Per-user channel
+// native identities (Slack user_id, Discord snowflake, Telegram chat_id,
+// WhatsApp phone JID). Storage + self-service surface; per-channel
+// dispatcher routing is wired in follow-up PRs.
+app.get('/me/channel-identities', (c) => {
+  const user = requireUser(c)
+  const mappings = listMappingsForUser(user.id).map((m) => ({
+    channelType: m.channelType,
+    channelUserId: m.channelUserId,
+    updatedAt: m.updatedAt,
+  }))
+  return c.json({ mappings })
+})
+
+// PATCH /api/users/me/channel-identities/:channelType — upsert one
+// mapping. Body: { channelUserId: string }.
+app.patch('/me/channel-identities/:channelType', async (c) => {
+  const user = requireUser(c)
+  const channelType = c.req.param('channelType')
+  if (!isChannelType(channelType)) {
+    return c.json({ error: `Unknown channel type: ${channelType}` }, 400)
+  }
+  const body = await c.req.json<{ channelUserId?: string }>()
+  if (typeof body.channelUserId !== 'string' || body.channelUserId.trim() === '') {
+    return c.json({ error: 'channelUserId (non-empty string) is required' }, 400)
+  }
+  try {
+    const row = upsertMapping(user.id, channelType, body.channelUserId)
+    return c.json({
+      mapping: {
+        channelType: row.channelType,
+        channelUserId: row.channelUserId,
+        updatedAt: row.updatedAt,
+      },
+    })
+  } catch (err) {
+    return c.json({ error: err instanceof Error ? err.message : 'Upsert failed' }, 400)
+  }
+})
+
+// DELETE /api/users/me/channel-identities/:channelType — clear a mapping.
+app.delete('/me/channel-identities/:channelType', (c) => {
+  const user = requireUser(c)
+  const channelType = c.req.param('channelType')
+  if (!isChannelType(channelType)) {
+    return c.json({ error: `Unknown channel type: ${channelType}` }, 400)
+  }
+  const removed = deleteMapping(user.id, channelType)
+  if (!removed) return c.json({ error: 'Mapping not found' }, 404)
+  return c.json({ success: true })
 })
 
 // GET /api/users — list every user who has ever signed into this Fulcrum
