@@ -85,6 +85,7 @@ import { CaldavAccounts } from '@/components/caldav/caldav-accounts'
 import { GoogleAccountManager } from '@/components/google/google-account-manager'
 import { GitHubAccountManager } from '@/components/github/github-account-manager'
 import { MyNotificationPreferences } from '@/components/notifications/my-notification-preferences'
+import { MyChannelIdentities } from '@/components/notifications/my-channel-identities'
 import { useCurrentUser } from '@/hooks/use-current-user'
 import { useGoogleAccounts } from '@/hooks/use-google'
 import { GoogleCalendarSettings } from '@/components/google/google-calendar-settings'
@@ -2223,6 +2224,13 @@ function SettingsPage() {
                   is a follow-up (D-7); storage + self-service ship now. */}
               <SettingsSection title={t('sections.myNotifs', 'My notification preferences')}>
                 <MyNotificationPreferences />
+              </SettingsSection>
+
+              {/* D-7 PR 3: per-user channel identity mappings. Storage
+                  surface; dispatcher routing into each channel is wired
+                  in follow-ups. */}
+              <SettingsSection title={t('sections.myChannelIdentities', 'My channel identities')}>
+                <MyChannelIdentities />
               </SettingsSection>
 
               {/* Notifications — tenant defaults, D-7 PR 2 admin-only.
