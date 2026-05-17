@@ -12,7 +12,7 @@
  * regression, a container env var that disables /ws/* registration).
  */
 import { expect, test } from '@playwright/test'
-import { WsClient } from '../_lib/ws'
+import { WsClient, wsUrl } from '../_lib/ws'
 
 // CF Access service-token headers are required for the WS upgrade to
 // authenticate through the gateway. Read them from the same env vars
@@ -25,14 +25,17 @@ const cfHeaders =
       }
     : undefined
 
-// Build the WS URL from the prod base directly. The shared wsUrl() helper
-// reads PLAYWRIGHT_TEST_BASE_URL, which Playwright does NOT auto-export from
-// `use.baseURL` — so it would silently fall back to localhost here.
+// D-7 PR 5: pass the prod base URL explicitly to `wsUrl`. The shared
+// helper now supports an explicit `baseUrl` option for exactly this
+// reason — any prod ws spec should opt in instead of relying on env-var
+// magic (Playwright doesn't auto-export `use.baseURL` to env).
 const PROD_BASE = process.env.FULCRUM_E2E_PROD_URL ?? 'https://fulcrum-acme.divinci.ai'
-const prodWsUrl = (path: string) => PROD_BASE.replace(/^http/, 'ws') + path
 
 test('WS upgrade succeeds and subscribe → ack round-trips', async () => {
-  const ws = new WsClient(prodWsUrl('/ws/terminal'), cfHeaders ? { headers: cfHeaders } : {})
+  const ws = new WsClient(
+    wsUrl('/ws/terminal', { baseUrl: PROD_BASE }),
+    cfHeaders ? { headers: cfHeaders } : {}
+  )
   await ws.opened
 
   ws.send({ type: 'subscribe', payload: { topics: ['me'] } })

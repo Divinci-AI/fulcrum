@@ -10,9 +10,35 @@ export interface WsMessage {
   payload: Record<string, unknown>
 }
 
-export function wsUrl(path = '/ws/terminal'): string {
+/**
+ * Build a `ws://` (or `wss://`) URL for the given path.
+ *
+ * `opts.baseUrl` is the explicit, unambiguous path — pass it from prod
+ * specs so they target the live deployment rather than localhost.
+ * Example:
+ *   const PROD_BASE = process.env.FULCRUM_E2E_PROD_URL ?? 'https://fulcrum-acme.divinci.ai'
+ *   wsUrl('/ws/terminal', { baseUrl: PROD_BASE })
+ *
+ * Without `baseUrl`, the fallback chain is:
+ *   1. `PLAYWRIGHT_TEST_BASE_URL` — Playwright does NOT auto-export this
+ *      from `use.baseURL`, but a `globalSetup` could populate it. Kept
+ *      as the first env-var fallback because that's the spec-recommended
+ *      shape if you ever want a single env to control everything.
+ *   2. `FULCRUM_E2E_PROD_URL` — set on the prod CI / shell path. New in
+ *      this fix; previously falling straight to the local URL meant any
+ *      prod spec that called `wsUrl()` without an explicit baseUrl
+ *      silently hit `localhost:17777` and failed with ECONNREFUSED.
+ *   3. `FULCRUM_E2E_LOCAL_URL` — local docker-compose target.
+ *   4. `http://localhost:17777` — last-resort default.
+ *
+ * The explicit `baseUrl` parameter is the only path that's bulletproof
+ * across project configs. Prefer it in any new prod-ws spec.
+ */
+export function wsUrl(path = '/ws/terminal', opts: { baseUrl?: string } = {}): string {
   const base =
+    opts.baseUrl ??
     process.env.PLAYWRIGHT_TEST_BASE_URL ??
+    process.env.FULCRUM_E2E_PROD_URL ??
     process.env.FULCRUM_E2E_LOCAL_URL ??
     'http://localhost:17777'
   return base.replace(/^http/, 'ws') + path
