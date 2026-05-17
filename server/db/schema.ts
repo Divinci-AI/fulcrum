@@ -750,6 +750,30 @@ export type GoogleAccount = typeof googleAccounts.$inferSelect
 export type NewGoogleAccount = typeof googleAccounts.$inferInsert
 export type GithubAccount = typeof githubAccounts.$inferSelect
 export type NewGithubAccount = typeof githubAccounts.$inferInsert
+
+// Notification preferences (D-6 PR 4): per-user override layer on top of
+// the tenant-wide notification settings. Every column except the FK is
+// nullable — NULL means "inherit the tenant default". One row per user
+// keyed on user_id; rows lazily created on first PATCH.
+//
+// The pushover user key is stored as an age-encrypted fnox key reference;
+// the actual secret lives in fnox.toml under a per-user key name. Toggles
+// store boolean (or NULL) directly. Integration into sendNotification is
+// deferred to a follow-up; this slice lands the storage + self-service
+// route + UI so the foundation is in place.
+export const notificationPreferences = sqliteTable('notification_preferences', {
+  userId: text('user_id').primaryKey(),
+  toastEnabled: integer('toast_enabled', { mode: 'boolean' }),
+  desktopEnabled: integer('desktop_enabled', { mode: 'boolean' }),
+  soundEnabled: integer('sound_enabled', { mode: 'boolean' }),
+  pushoverEnabled: integer('pushover_enabled', { mode: 'boolean' }),
+  pushoverUserKeyFnox: text('pushover_user_key_fnox'),
+  createdAt: text('created_at').notNull(),
+  updatedAt: text('updated_at').notNull(),
+})
+export type NotificationPreference = typeof notificationPreferences.$inferSelect
+export type NewNotificationPreference = typeof notificationPreferences.$inferInsert
+
 export type GmailDraft = typeof gmailDrafts.$inferSelect
 export type NewGmailDraft = typeof gmailDrafts.$inferInsert
 export type User = typeof users.$inferSelect
