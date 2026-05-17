@@ -25,6 +25,7 @@ import { detectTailscaleIp } from './server-expose'
 
 export { CONFIG_KEYS } from '../../shared/config-keys'
 import { CONFIG_KEYS } from '../../shared/config-keys'
+import { requireAdminUser, type CurrentUserContext } from '../middleware/current-user'
 
 // Legacy key mapping to new nested paths (for backward compatibility)
 const LEGACY_KEY_MAP: Record<string, string> = {
@@ -76,7 +77,7 @@ function getSettingValue(path: string): unknown {
   return current
 }
 
-const app = new Hono()
+const app = new Hono<CurrentUserContext>()
 
 // Settings paths whose values are stored via fnox `age` provider — i.e. they
 // are secrets. The /api/config GET listing must not return raw values for
@@ -114,7 +115,12 @@ app.get('/notifications', (c) => {
 
 // PUT /api/config/notifications - Update notification settings
 // Supports optimistic locking via _updatedAt field to prevent stale tabs from overwriting
+//
+// D-7 PR 2: tenant defaults are admin-only. Per-user notification
+// overrides live at PATCH /api/users/me/notifications and stay open to
+// every user.
 app.put('/notifications', async (c) => {
+  requireAdminUser(c)
   try {
     const body = await c.req.json<Partial<NotificationSettings> & { _updatedAt?: number }>()
     const { _updatedAt, ...updates } = body
@@ -426,7 +432,12 @@ const CONFIG_VALIDATORS: Record<string, (value: unknown) => ValidatorResult> = {
 }
 
 // PUT /api/config/:key - Set config value
+//
+// D-7 PR 2: tenant-wide config is admin-only. Reading these settings
+// stays open to any authenticated user (the GET handler above is
+// unchanged), but mutating them requires `isAdmin`. Non-admins get 403.
 app.put('/:key', async (c) => {
+  requireAdminUser(c)
   const key = c.req.param('key')
 
   // Resolve key to nested path

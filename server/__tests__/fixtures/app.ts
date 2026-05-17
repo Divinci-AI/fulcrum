@@ -1,4 +1,28 @@
 import { createApp } from '../../app'
+import { db, users } from '../../db'
+
+// D-7 PR 2: createTestApp seeds an admin user and sets
+// FULCRUM_DEV_USER_EMAIL to its email so every request the test client
+// makes is authenticated as that admin by default. Existing tests that
+// pre-date the admin gate just keep working. Tests that want to exercise
+// non-admin behavior pass an explicit
+// `Cf-Access-Authenticated-User-Email` header — the CF Access header
+// wins over the env fallback in the currentUser middleware.
+const TEST_ADMIN_EMAIL = 'test-admin@example.com'
+function ensureTestAdmin(): void {
+  if (db.select().from(users).limit(1).get()) return
+  const now = new Date().toISOString()
+  db.insert(users)
+    .values({
+      id: crypto.randomUUID(),
+      email: TEST_ADMIN_EMAIL,
+      isAdmin: true,
+      createdAt: now,
+      updatedAt: now,
+    })
+    .run()
+  process.env.FULCRUM_DEV_USER_EMAIL = TEST_ADMIN_EMAIL
+}
 
 /**
  * Test client for making requests to the Hono app.
@@ -32,6 +56,7 @@ export interface TestAppClient {
  */
 export function createTestApp(): TestAppClient {
   const app = createApp()
+  ensureTestAdmin()
 
   const request = async (path: string, init?: RequestInit): Promise<Response> => {
     const url = `http://localhost${path}`

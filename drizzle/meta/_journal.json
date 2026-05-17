@@ -575,6 +575,13 @@
       "when": 1778995000000,
       "tag": "0081_add_notification_preferences",
       "breakpoints": true
+    },
+    {
+      "idx": 82,
+      "version": "6",
+      "when": 1778995100000,
+      "tag": "0082_add_user_is_admin",
+      "breakpoints": true
     }
   ]
 }

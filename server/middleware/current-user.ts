@@ -71,3 +71,24 @@ export function requireUser(c: Context<CurrentUserContext>): User {
   }
   return user
 }
+
+/**
+ * D-7 PR 2: throw a 403 when the route requires a tenant admin.
+ *
+ * Builds on `requireUser` for the auth half — 401 still wins if there's no
+ * identity at all, then 403 when the identity exists but isn't an admin.
+ * The first user of a tenant is automatically promoted by migration 0082;
+ * subsequent admins are granted via PATCH /api/users/:id/admin.
+ */
+export function requireAdminUser(c: Context<CurrentUserContext>): User {
+  const user = requireUser(c)
+  if (!user.isAdmin) {
+    throw new HTTPException(403, {
+      res: new Response(JSON.stringify({ error: 'Tenant admin required' }), {
+        status: 403,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    })
+  }
+  return user
+}
