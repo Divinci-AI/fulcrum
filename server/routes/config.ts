@@ -34,14 +34,12 @@ const LEGACY_KEY_MAP: Record<string, string> = {
   remote_host: 'remoteFulcrum.host',
   hostname: 'remoteFulcrum.host', // Extra legacy key
   ssh_port: 'editor.sshPort',
-  github_pat: 'integrations.githubPat',
   language: 'appearance.language',
   theme: 'appearance.theme',
   // camelCase legacy keys
   defaultGitReposDir: 'paths.defaultGitReposDir',
   remoteHost: 'remoteFulcrum.host',
   sshPort: 'editor.sshPort',
-  githubPat: 'integrations.githubPat',
 }
 
 // Valid nested paths
@@ -365,7 +363,6 @@ function nonEmptyStringValidator(label: string) {
 
 // Fields where empty string should be coerced to null in the catch-all
 const NULLABLE_ON_EMPTY = new Set([
-  CONFIG_KEYS.GITHUB_PAT,
   CONFIG_KEYS.REMOTE_HOST,
   CONFIG_KEYS.EDITOR_HOST,
 ])

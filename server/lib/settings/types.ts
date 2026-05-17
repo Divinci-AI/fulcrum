@@ -112,14 +112,6 @@ export interface Settings {
     sshPort: number
   }
   integrations: {
-    /**
-     * @deprecated D-6 PR 2 — GitHub PATs are now per-user in the
-     * `github_accounts` table. The legacy tenant-level setting stays
-     * readable for one release so the boot-time bootstrap can move it
-     * into a `github_accounts` row labeled "imported". D-6 PR 3 removes
-     * this field entirely.
-     */
-    githubPat: string | null
     cloudflareApiToken: string | null
     cloudflareAccountId: string | null
     googleClientId: string | null
@@ -178,7 +170,6 @@ export const DEFAULT_SETTINGS: Settings = {
     sshPort: 22,
   },
   integrations: {
-    githubPat: null,
     cloudflareApiToken: null,
     cloudflareAccountId: null,
     googleClientId: null,
@@ -288,7 +279,6 @@ export const VALID_SETTING_PATHS = new Set([
   'editor.app',
   'editor.host',
   'editor.sshPort',
-  'integrations.githubPat',
   'integrations.cloudflareApiToken',
   'integrations.cloudflareAccountId',
   'integrations.googleClientId',
@@ -342,7 +332,6 @@ export interface LegacySettings {
   port: number
   defaultGitReposDir: string
   sshPort: number
-  githubPat: string | null
   language: 'en' | 'zh' | null
   theme: 'system' | 'light' | 'dark' | null
 }
@@ -426,7 +415,6 @@ export const MIGRATION_MAP: Record<string, string> = {
   defaultGitReposDir: 'paths.defaultGitReposDir',
   // remoteHost and hostname are handled specially in migrateSettings (need URL construction)
   sshPort: 'editor.sshPort',
-  githubPat: 'integrations.githubPat',
   language: 'appearance.language',
   theme: 'appearance.theme',
 }

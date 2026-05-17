@@ -141,16 +141,6 @@ export function useEditorSshPort() {
   }
 }
 
-export function useGitHubPat() {
-  const query = useConfig(CONFIG_KEYS.GITHUB_PAT)
-
-  return {
-    ...query,
-    data: (query.data?.value as string) ?? '',
-    isDefault: query.data?.isDefault ?? true,
-  }
-}
-
 export function useGoogleClientId() {
   const query = useConfig(CONFIG_KEYS.GOOGLE_CLIENT_ID)
 
@@ -464,14 +454,6 @@ export function useUpdateConfig() {
       }),
     onSuccess: (_, { key }) => {
       queryClient.invalidateQueries({ queryKey: ['config', key] })
-
-      // When GitHub PAT changes, invalidate all GitHub-related queries
-      if (key === CONFIG_KEYS.GITHUB_PAT) {
-        queryClient.invalidateQueries({ queryKey: ['github-user'] })
-        queryClient.invalidateQueries({ queryKey: ['github-prs'] })
-        queryClient.invalidateQueries({ queryKey: ['github-issues'] })
-        queryClient.invalidateQueries({ queryKey: ['github-orgs'] })
-      }
     },
   })
 }

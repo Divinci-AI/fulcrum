@@ -52,7 +52,6 @@ export function getSettings(): Settings {
       sshPort: (fv('editor.sshPort') as number) ?? DEFAULT_SETTINGS.editor.sshPort,
     },
     integrations: {
-      githubPat: (fv('integrations.githubPat') as string | null) ?? null,
       cloudflareApiToken: (fv('integrations.cloudflareApiToken') as string | null) ?? null,
       cloudflareAccountId: (fv('integrations.cloudflareAccountId') as string | null) ?? null,
       googleClientId: (fv('integrations.googleClientId') as string | null) ?? null,
@@ -160,7 +159,6 @@ export function getSettings(): Settings {
       sshPort: !isNaN(editorSshPortEnv) && editorSshPortEnv > 0 ? editorSshPortEnv : settings.editor.sshPort,
     },
     integrations: {
-      githubPat: process.env.GITHUB_PAT ?? settings.integrations.githubPat,
       cloudflareApiToken: process.env.CLOUDFLARE_API_TOKEN ?? settings.integrations.cloudflareApiToken,
       cloudflareAccountId: process.env.CLOUDFLARE_ACCOUNT_ID ?? settings.integrations.cloudflareAccountId,
       googleClientId: process.env.GOOGLE_CLIENT_ID ?? settings.integrations.googleClientId,
@@ -194,7 +192,6 @@ export function toLegacySettings(settings: Settings): LegacySettings {
     port: settings.server.port,
     defaultGitReposDir: settings.paths.defaultGitReposDir,
     sshPort: settings.editor.sshPort,
-    githubPat: settings.integrations.githubPat,
     language: settings.appearance.language,
     theme: settings.appearance.theme,
   }

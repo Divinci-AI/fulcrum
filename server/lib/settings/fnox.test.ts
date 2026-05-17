@@ -73,9 +73,8 @@ describe('fnox', () => {
     })
 
     test('maps known integration secrets', () => {
-      expect(FNOX_CONFIG_MAP['integrations.githubPat'].fnoxKey).toBe('FULCRUM_GITHUB_PAT')
-      expect(FNOX_CONFIG_MAP['integrations.githubPat'].provider).toBe('age')
       expect(FNOX_CONFIG_MAP['integrations.cloudflareApiToken'].fnoxKey).toBe('FULCRUM_CLOUDFLARE_API_TOKEN')
+      expect(FNOX_CONFIG_MAP['integrations.cloudflareApiToken'].provider).toBe('age')
       expect(FNOX_CONFIG_MAP['integrations.googleClientId'].fnoxKey).toBe('FULCRUM_GOOGLE_CLIENT_ID')
       expect(FNOX_CONFIG_MAP['integrations.googleClientSecret'].fnoxKey).toBe('FULCRUM_GOOGLE_CLIENT_SECRET')
     })
@@ -120,15 +119,17 @@ describe('fnox', () => {
       }
     })
 
-    test('has expected number of secret mappings (15)', () => {
-      expect(Object.keys(FNOX_SECRET_MAP).length).toBe(15)
+    test('has expected number of secret mappings (14)', () => {
+      // D-6 PR 3 dropped `integrations.githubPat` (PATs are now per-user in
+      // `github_accounts`), bringing this from 15 → 14.
+      expect(Object.keys(FNOX_SECRET_MAP).length).toBe(14)
     })
   })
 
   describe('isSecretPath', () => {
     test('returns true for known secret paths', () => {
-      expect(isSecretPath('integrations.githubPat')).toBe(true)
       expect(isSecretPath('integrations.cloudflareApiToken')).toBe(true)
+      expect(isSecretPath('integrations.googleClientSecret')).toBe(true)
       expect(isSecretPath('channels.slack.botToken')).toBe(true)
       expect(isSecretPath('notifications.pushover.appToken')).toBe(true)
       expect(isSecretPath('zai.apiKey')).toBe(true)
@@ -156,7 +157,7 @@ describe('fnox', () => {
 
     test('getFnoxSecret returns null when cache is empty', async () => {
       const { getFnoxSecret } = await import('./fnox')
-      expect(getFnoxSecret('integrations.githubPat')).toBeNull()
+      expect(getFnoxSecret('integrations.cloudflareApiToken')).toBeNull()
     })
 
     test('getFnoxValue returns null when cache is empty', async () => {

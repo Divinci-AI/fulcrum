@@ -14,7 +14,6 @@ export const CONFIG_KEYS = {
   EDITOR_APP: 'editor.app',
   EDITOR_HOST: 'editor.host',
   EDITOR_SSH_PORT: 'editor.sshPort',
-  GITHUB_PAT: 'integrations.githubPat',
   GOOGLE_CLIENT_ID: 'integrations.googleClientId',
   GOOGLE_CLIENT_SECRET: 'integrations.googleClientSecret',
   DEFAULT_AGENT: 'agent.defaultAgent',

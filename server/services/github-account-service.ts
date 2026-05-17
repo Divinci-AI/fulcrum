@@ -9,9 +9,8 @@
  */
 import { and, asc, eq } from 'drizzle-orm'
 import { Octokit } from '@octokit/rest'
-import { db, githubAccounts, users } from '../db'
+import { db, githubAccounts } from '../db'
 import type { GithubAccount } from '../db'
-import { getSetting } from '../lib/settings'
 import {
   fnoxGet as defaultFnoxGet,
   fnoxRemove as defaultFnoxRemove,
@@ -174,51 +173,17 @@ export function deleteGithubAccount(id: string, userId: string): boolean {
   return true
 }
 
-// One-shot bootstrap from the legacy tenant-level `integrations.githubPat`
-// setting. Runs once on startup when `github_accounts` is empty and the
-// legacy setting has a value. The PAT is moved into a fresh fnox key so the
-// new code path is the only reader; the legacy setting stays in place for
-// one release as a read-only deprecated shim. D-6 PR 3 removes the setting.
-export function bootstrapLegacyGithubPat(): GithubAccount | null {
-  const existing = db.select({ id: githubAccounts.id }).from(githubAccounts).limit(1).get()
-  if (existing) return null // Already migrated or fresh tenant; no-op.
-
-  const legacyPat = getSetting('integrations.githubPat')
-  if (!legacyPat || typeof legacyPat !== 'string' || legacyPat.trim() === '') return null
-
-  // Tenant's earliest user owns the imported row. Matches the
-  // google-accounts backfill in D-6 PR 1.
-  const owner = db.select({ id: users.id }).from(users).orderBy(asc(users.createdAt)).limit(1).get()
-  if (!owner) {
-    logger.warn(
-      'Legacy GitHub PAT present but no users exist yet — bootstrap deferred until the first sign-in.'
-    )
-    return null
-  }
-
-  const id = crypto.randomUUID()
-  const key = fnoxKeyForId(id)
-  secretStore.set(key, legacyPat)
-
-  const now = new Date().toISOString()
-  db.insert(githubAccounts)
-    .values({
-      id,
-      ownerUserId: owner.id,
-      label: 'imported',
-      patFnoxKey: key,
-      githubLogin: null, // Validate on first /api/github/user request.
-      githubAvatarUrl: null,
-      lastValidatedAt: null,
-      createdAt: now,
-      updatedAt: now,
-    })
-    .run()
-
-  logger.info('Bootstrapped legacy integrations.githubPat into github_accounts', {
-    accountId: id,
-    ownerUserId: owner.id,
-  })
-
-  return db.select().from(githubAccounts).where(eq(githubAccounts.id, id)).get() ?? null
+// D-6 PR 3: one-shot cleanup of the legacy `FULCRUM_GITHUB_PAT` fnox key.
+// PR 2 moved its value into a `github_accounts` row on first boot;
+// removing the setting from FNOX_CONFIG_MAP in PR 3 means the value is
+// now unreachable through the type system, but the encrypted blob is
+// still sitting in `fnox.toml` until something explicitly removes it.
+// Runs every boot — idempotent (no-op once the key is gone).
+export function pruneLegacyGithubPatFnoxKey(): void {
+  const existing = secretStore.get('FULCRUM_GITHUB_PAT')
+  if (existing === null) return
+  secretStore.remove('FULCRUM_GITHUB_PAT')
+  logger.info(
+    'Removed obsolete FULCRUM_GITHUB_PAT fnox key — PATs are now stored per-row under FULCRUM_GH_ACCOUNT_<uuid>'
+  )
 }
