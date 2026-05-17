@@ -84,6 +84,7 @@ import { EmailSettings } from '@/components/messaging/email-settings'
 import { CaldavAccounts } from '@/components/caldav/caldav-accounts'
 import { GoogleAccountManager } from '@/components/google/google-account-manager'
 import { GitHubAccountManager } from '@/components/github/github-account-manager'
+import { MyNotificationPreferences } from '@/components/notifications/my-notification-preferences'
 import { useGoogleAccounts } from '@/hooks/use-google'
 import { GoogleCalendarSettings } from '@/components/google/google-calendar-settings'
 import { CaldavCopyRules } from '@/components/caldav/caldav-copy-rules'
@@ -2199,6 +2200,13 @@ function SettingsPage() {
 
           <TabsContent value="messaging" className="flex-1 overflow-auto p-6">
             <div className="mx-auto max-w-5xl space-y-4">
+              {/* D-6 PR 4: per-user overrides on top of the tenant-wide
+                  notification defaults below. The dispatcher integration
+                  is a follow-up (D-7); storage + self-service ship now. */}
+              <SettingsSection title={t('sections.myNotifs', 'My notification preferences')}>
+                <MyNotificationPreferences />
+              </SettingsSection>
+
               {/* Notifications */}
               <SettingsSection title={t('sections.notifications')}>
                 <div className="space-y-4">

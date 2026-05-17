@@ -568,6 +568,13 @@
       "when": 1778994900000,
       "tag": "0080_google_owner_user_id_not_null",
       "breakpoints": true
+    },
+    {
+      "idx": 81,
+      "version": "6",
+      "when": 1778995000000,
+      "tag": "0081_add_notification_preferences",
+      "breakpoints": true
     }
   ]
 }

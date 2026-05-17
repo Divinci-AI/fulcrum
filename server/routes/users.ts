@@ -1,6 +1,12 @@
 import { Hono } from 'hono'
 import { getUserById, listUsers, updateUserProfile } from '../services/user-service'
 import { listMentionsForUser } from '../services/mention-service'
+import {
+  getPreferencesForUser,
+  upsertPreferencesForUser,
+  toView,
+  type PreferencePatch,
+} from '../services/notification-preferences-service'
 import type { CurrentUserContext } from '../middleware/current-user'
 
 const app = new Hono<CurrentUserContext>()
@@ -29,6 +35,27 @@ app.patch('/me', async (c) => {
   const body = await c.req.json<{ displayName?: string | null; avatarUrl?: string | null }>()
   const updated = updateUserProfile(user.id, body)
   return c.json({ user: updated })
+})
+
+// GET /api/users/me/notifications — D-6 PR 4. Per-user notification
+// preferences. Every field is nullable; null means "inherit the tenant
+// default". The pushover user key is intentionally never returned — only
+// `pushoverUserKeySet` indicates whether one is configured.
+app.get('/me/notifications', (c) => {
+  const user = c.var.user
+  if (!user) return c.json({ error: 'Authentication required' }, 401)
+  return c.json({ preferences: toView(getPreferencesForUser(user.id)) })
+})
+
+// PATCH /api/users/me/notifications — update one or more fields. Omitted
+// fields are untouched. Pass `pushoverUserKey: ''` (empty string) or
+// `null` to clear the stored pushover key.
+app.patch('/me/notifications', async (c) => {
+  const user = c.var.user
+  if (!user) return c.json({ error: 'Authentication required' }, 401)
+  const body = await c.req.json<PreferencePatch>()
+  const row = upsertPreferencesForUser(user.id, body)
+  return c.json({ preferences: toView(row) })
 })
 
 // GET /api/users — list every user who has ever signed into this Fulcrum
