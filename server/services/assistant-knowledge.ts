@@ -565,7 +565,7 @@ You can read and modify all Fulcrum settings using the settings MCP tools. Setti
 - \`editor.sshPort\` - SSH port for remote editing (default: 22)
 
 **integrations** - Third-party service credentials
-- \`integrations.githubPat\` - GitHub Personal Access Token (for PR status, auto-close) [SENSITIVE]
+- GitHub PATs are now per-user in the \`github_accounts\` table (D-6 PR 2). Each user manages their own at \`/api/github/accounts\` or via Settings → Integrations.
 - \`integrations.cloudflareApiToken\` - Cloudflare API token (for DNS/tunnels) [SENSITIVE]
 - \`integrations.cloudflareAccountId\` - Cloudflare account ID
 
@@ -656,10 +656,8 @@ Notification settings are managed separately via \`get-notification-settings\` a
 update_setting key="appearance.theme" value="dark"
 \`\`\`
 
-**Set up GitHub integration:**
-\`\`\`
-update_setting key="integrations.githubPat" value="ghp_xxxx"
-\`\`\`
+**Set up GitHub integration (per-user, D-6 PR 2):**
+Each user adds their own PAT through Settings → Integrations → GitHub Accounts, or by POST /api/github/accounts with \`{ "label": "personal", "pat": "ghp_xxxx" }\`. There is no tenant-wide setting any more — PRs/issues attribute to the calling user's GitHub identity.
 
 **Enable Slack notifications:**
 \`\`\`

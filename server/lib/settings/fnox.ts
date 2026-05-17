@@ -29,7 +29,6 @@ export const FNOX_CONFIG_MAP: Record<string, ConfigEntry> = {
   'editor.sshPort': { fnoxKey: 'FULCRUM_EDITOR_SSH_PORT', provider: 'plain', type: 'number' },
 
   // Integrations (secrets)
-  'integrations.githubPat': { fnoxKey: 'FULCRUM_GITHUB_PAT', provider: 'age', type: 'string' },
   'integrations.cloudflareApiToken': { fnoxKey: 'FULCRUM_CLOUDFLARE_API_TOKEN', provider: 'age', type: 'string' },
   'integrations.cloudflareAccountId': { fnoxKey: 'FULCRUM_CLOUDFLARE_ACCOUNT_ID', provider: 'age', type: 'string' },
   'integrations.googleClientId': { fnoxKey: 'FULCRUM_GOOGLE_CLIENT_ID', provider: 'age', type: 'string' },

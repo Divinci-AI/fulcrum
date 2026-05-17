@@ -25,14 +25,14 @@ describe('Settings', () => {
       FULCRUM_DIR: process.env.FULCRUM_DIR,
       PORT: process.env.PORT,
       FULCRUM_GIT_REPOS_DIR: process.env.FULCRUM_GIT_REPOS_DIR,
-      GITHUB_PAT: process.env.GITHUB_PAT,
+      CLOUDFLARE_API_TOKEN: process.env.CLOUDFLARE_API_TOKEN,
     }
 
     // Set test environment
     process.env.FULCRUM_DIR = tempDir
     delete process.env.PORT
     delete process.env.FULCRUM_GIT_REPOS_DIR
-    delete process.env.GITHUB_PAT
+    delete process.env.CLOUDFLARE_API_TOKEN
 
     // Clear fnox cache between tests to prevent pollution
     const { clearFnoxCache } = await import('./')
@@ -83,7 +83,7 @@ describe('Settings', () => {
 
       expect(settings.server.port).toBe(7777)
       expect(settings.paths.defaultGitReposDir).toBe(process.env.HOME)
-      expect(settings.integrations.githubPat).toBeNull()
+      expect(settings.integrations.cloudflareApiToken).toBeNull()
     })
 
     test('reads settings from fnox cache', async () => {
@@ -103,14 +103,14 @@ describe('Settings', () => {
       ensureFulcrumDir()
 
       updateSettingByPath('server.port', 8888)
-      updateSettingByPath('integrations.githubPat', 'fnox-key')
+      updateSettingByPath('integrations.cloudflareApiToken', 'fnox-key')
 
       process.env.PORT = '9999'
-      process.env.GITHUB_PAT = 'env-key'
+      process.env.CLOUDFLARE_API_TOKEN = 'env-key'
 
       const settings = getSettings()
       expect(settings.server.port).toBe(9999)
-      expect(settings.integrations.githubPat).toBe('env-key')
+      expect(settings.integrations.cloudflareApiToken).toBe('env-key')
     })
 
     test('ignores invalid PORT env var', async () => {
@@ -137,9 +137,9 @@ describe('Settings', () => {
       const { updateSettingByPath, getSettings, ensureFulcrumDir } = await import('./')
       ensureFulcrumDir()
 
-      updateSettingByPath('integrations.githubPat', 'new-key')
+      updateSettingByPath('integrations.cloudflareApiToken', 'new-key')
       const settings = getSettings()
-      expect(settings.integrations.githubPat).toBe('new-key')
+      expect(settings.integrations.cloudflareApiToken).toBe('new-key')
     })
 
     test('throws error for unknown setting path', async () => {
@@ -152,11 +152,11 @@ describe('Settings', () => {
       const { updateSettingByPath, getSettings, ensureFulcrumDir } = await import('./')
       ensureFulcrumDir()
 
-      updateSettingByPath('integrations.githubPat', 'some-key')
-      expect(getSettings().integrations.githubPat).toBe('some-key')
+      updateSettingByPath('integrations.cloudflareApiToken', 'some-key')
+      expect(getSettings().integrations.cloudflareApiToken).toBe('some-key')
 
-      updateSettingByPath('integrations.githubPat', null)
-      expect(getSettings().integrations.githubPat).toBeNull()
+      updateSettingByPath('integrations.cloudflareApiToken', null)
+      expect(getSettings().integrations.cloudflareApiToken).toBeNull()
     })
   })
 
@@ -166,13 +166,13 @@ describe('Settings', () => {
       ensureFulcrumDir()
 
       updateSettingByPath('server.port', 9999)
-      updateSettingByPath('integrations.githubPat', 'custom-key')
+      updateSettingByPath('integrations.cloudflareApiToken', 'custom-key')
 
       resetSettings()
 
       const settings = getSettings()
       expect(settings.server.port).toBe(7777)
-      expect(settings.integrations.githubPat).toBeNull()
+      expect(settings.integrations.cloudflareApiToken).toBeNull()
     })
   })
 

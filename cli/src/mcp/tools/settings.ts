@@ -7,7 +7,6 @@ import { formatSuccess, handleToolError } from '../utils'
 
 // Sensitive setting paths that should be masked in responses
 const SENSITIVE_SETTINGS = new Set([
-  'integrations.githubPat',
   'integrations.cloudflareApiToken',
   'channels.email.smtp.password',
   'channels.email.imap.password',

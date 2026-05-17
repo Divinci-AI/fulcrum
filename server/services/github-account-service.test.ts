@@ -1,7 +1,6 @@
 import { describe, test, expect, beforeEach, afterEach, mock } from 'bun:test'
 import { setupTestEnv, type TestEnv } from '../__tests__/utils/env'
 import { db, users } from '../db'
-import { updateSettingByPath } from '../lib/settings'
 import {
   createGithubAccount,
   listGithubAccountsForUser,
@@ -9,7 +8,7 @@ import {
   rotateGithubAccountPat,
   updateGithubAccountLabel,
   deleteGithubAccount,
-  bootstrapLegacyGithubPat,
+  pruneLegacyGithubPatFnoxKey,
   readPatForAccount,
   setSecretStore,
   resetSecretStore,
@@ -148,47 +147,29 @@ describe('github-account-service: CRUD', () => {
   })
 })
 
-describe('bootstrapLegacyGithubPat', () => {
+describe('pruneLegacyGithubPatFnoxKey', () => {
   let env: TestEnv
   let secrets: ReturnType<typeof makeInMemorySecretStore>
   beforeEach(() => {
     env = setupTestEnv()
     secrets = makeInMemorySecretStore()
     setSecretStore(secrets)
-    octokitNextResponse = { login: 'mike', avatar_url: 'https://example.com/mike.png' }
   })
   afterEach(() => {
     resetSecretStore()
     env.cleanup()
   })
 
-  test('imports the legacy PAT into a github_accounts row owned by the earliest user', () => {
-    const early = insertUser('early@example.com')
-    insertUser('later@example.com')
-    updateSettingByPath('integrations.githubPat', 'ghp_legacy_tenant_token')
-
-    const created = bootstrapLegacyGithubPat()
-    expect(created).not.toBeNull()
-    expect(created?.label).toBe('imported')
-    expect(created?.ownerUserId).toBe(early)
-    expect(secrets.store.get(created!.patFnoxKey)).toBe('ghp_legacy_tenant_token')
+  test('removes the legacy FULCRUM_GITHUB_PAT secret when present', () => {
+    secrets.store.set('FULCRUM_GITHUB_PAT', 'ghp_leftover_from_pr2_or_earlier')
+    pruneLegacyGithubPatFnoxKey()
+    expect(secrets.store.has('FULCRUM_GITHUB_PAT')).toBe(false)
   })
 
-  test('is a no-op when github_accounts already has at least one row', async () => {
-    const userId = insertUser('mike@divinci.ai')
-    await createGithubAccount(userId, 'personal', 'ghp_existing')
-    updateSettingByPath('integrations.githubPat', 'ghp_should_be_ignored')
-    expect(bootstrapLegacyGithubPat()).toBeNull()
-    expect(listGithubAccountsForUser(userId).length).toBe(1)
-  })
-
-  test('is a no-op when no legacy PAT is set', () => {
-    insertUser('mike@divinci.ai')
-    expect(bootstrapLegacyGithubPat()).toBeNull()
-  })
-
-  test('is a no-op when no users exist yet (deferred until first sign-in)', () => {
-    updateSettingByPath('integrations.githubPat', 'ghp_orphan')
-    expect(bootstrapLegacyGithubPat()).toBeNull()
+  test('is a no-op when the legacy key is already gone (idempotent)', () => {
+    secrets.store.set('FULCRUM_GH_ACCOUNT_KEEP_ME', 'ghp_active_per_user_pat')
+    pruneLegacyGithubPatFnoxKey()
+    // Other secrets in the store stay untouched.
+    expect(secrets.store.get('FULCRUM_GH_ACCOUNT_KEEP_ME')).toBe('ghp_active_per_user_pat')
   })
 })

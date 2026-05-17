@@ -207,16 +207,14 @@ describe('Config Routes', () => {
       expect(body7.error).toContain('Invalid timezone')
     })
 
-    test('converts empty string to null for nullable fields', async () => {
-      const { put, get } = createTestApp()
-      const res = await put('/api/config/integrations.githubPat', { value: '' })
-
-      expect(res.status).toBe(200)
-
-      const checkRes = await get('/api/config/integrations.githubPat')
-      const checkBody = await checkRes.json()
-      expect(checkBody.value).toBe(null)
-    })
+    // The "empty string → null" coercion previously tested via
+    // `integrations.githubPat` (the only nullable-on-empty path that also
+    // had a `null` default). After D-6 PR 3 dropped that setting, every
+    // remaining NULLABLE_ON_EMPTY path defaults to '' or has a typed
+    // default that masks `null` in the GET response (`value ?? default`).
+    // The coercion itself is still exercised in production via
+    // editor.host / remoteFulcrum.host — there's just no isolated test
+    // assertion that survives the default-value layer.
 
     test('returns 400 for unknown key', async () => {
       const { put } = createTestApp()
