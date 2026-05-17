@@ -28,7 +28,6 @@ import {
   useEditorApp,
   useEditorHost,
   useEditorSshPort,
-  useGitHubPat,
   useGoogleClientId,
   useGoogleClientSecret,
   useDefaultAgent,
@@ -84,6 +83,7 @@ import { SlackSetup } from '@/components/messaging/slack-setup'
 import { EmailSettings } from '@/components/messaging/email-settings'
 import { CaldavAccounts } from '@/components/caldav/caldav-accounts'
 import { GoogleAccountManager } from '@/components/google/google-account-manager'
+import { GitHubAccountManager } from '@/components/github/github-account-manager'
 import { useGoogleAccounts } from '@/hooks/use-google'
 import { GoogleCalendarSettings } from '@/components/google/google-calendar-settings'
 import { CaldavCopyRules } from '@/components/caldav/caldav-copy-rules'
@@ -137,7 +137,6 @@ function SettingsPage() {
   const { data: editorApp, isLoading: editorAppLoading } = useEditorApp()
   const { data: editorHost, isLoading: editorHostLoading } = useEditorHost()
   const { data: editorSshPort, isLoading: editorSshPortLoading } = useEditorSshPort()
-  const { data: githubPat, isLoading: githubPatLoading } = useGitHubPat()
   const { data: googleClientId } = useGoogleClientId()
   const { data: googleClientSecret } = useGoogleClientSecret()
   const { data: defaultAgent, isLoading: defaultAgentLoading } = useDefaultAgent()
@@ -188,7 +187,6 @@ function SettingsPage() {
   const [localEditorApp, setLocalEditorApp] = useState<EditorApp>('vscode')
   const [localEditorHost, setLocalEditorHost] = useState('')
   const [localEditorSshPort, setLocalEditorSshPort] = useState('')
-  const [localGitHubPat, setLocalGitHubPat] = useState('')
   const [localGoogleClientId, setLocalGoogleClientId] = useState('')
   const [localGoogleClientSecret, setLocalGoogleClientSecret] = useState('')
   const [localDefaultAgent, setLocalDefaultAgent] = useState<AgentType>('claude')
@@ -268,7 +266,6 @@ function SettingsPage() {
     if (editorApp !== undefined) setLocalEditorApp(editorApp)
     if (editorHost !== undefined) setLocalEditorHost(editorHost)
     if (editorSshPort !== undefined) setLocalEditorSshPort(String(editorSshPort))
-    if (githubPat !== undefined) setLocalGitHubPat(githubPat)
     if (googleClientId !== undefined) setLocalGoogleClientId(googleClientId)
     if (googleClientSecret !== undefined) setLocalGoogleClientSecret(googleClientSecret)
     if (defaultAgent !== undefined) setLocalDefaultAgent(defaultAgent)
@@ -277,7 +274,7 @@ function SettingsPage() {
     if (globalOpencodePlanAgent !== undefined) setLocalOpencodePlanAgent(globalOpencodePlanAgent)
     if (autoScrollToBottom !== undefined) setLocalAutoScrollToBottom(autoScrollToBottom)
     if (claudeCodePath !== undefined) setLocalClaudeCodePath(claudeCodePath ?? '')
-  }, [port, defaultGitReposDir, editorApp, editorHost, editorSshPort, githubPat, googleClientId, googleClientSecret, defaultAgent, globalOpencodeModel, globalOpencodeDefaultAgent, globalOpencodePlanAgent, autoScrollToBottom, claudeCodePath])
+  }, [port, defaultGitReposDir, editorApp, editorHost, editorSshPort, googleClientId, googleClientSecret, defaultAgent, globalOpencodeModel, globalOpencodeDefaultAgent, globalOpencodePlanAgent, autoScrollToBottom, claudeCodePath])
 
   // Sync notification settings
   useEffect(() => {
@@ -364,7 +361,7 @@ function SettingsPage() {
   ])
 
   const isLoading =
-    portLoading || reposDirLoading || editorAppLoading || editorHostLoading || editorSshPortLoading || githubPatLoading || defaultAgentLoading || opcodeModelLoading || opcodeDefaultAgentLoading || opencodePlanAgentLoading || autoScrollLoading || notificationsLoading || zAiLoading || deploymentLoading || taskTypeLoading || startImmediatelyLoading || scratchStartupScriptLoading || timezoneLoading || assistantProviderLoading || assistantModelLoading || assistantObserverModelLoading || assistantDocumentsDirLoading ||
+    portLoading || reposDirLoading || editorAppLoading || editorHostLoading || editorSshPortLoading || defaultAgentLoading || opcodeModelLoading || opcodeDefaultAgentLoading || opencodePlanAgentLoading || autoScrollLoading || notificationsLoading || zAiLoading || deploymentLoading || taskTypeLoading || startImmediatelyLoading || scratchStartupScriptLoading || timezoneLoading || assistantProviderLoading || assistantModelLoading || assistantObserverModelLoading || assistantDocumentsDirLoading ||
     ritualsEnabledLoading || morningTimeLoading || morningPromptLoading || eveningTimeLoading || eveningPromptLoading
 
   const hasZAiChanges = zAiSettings && (
@@ -445,7 +442,6 @@ function SettingsPage() {
   const hasChanges =
     localPort !== String(port) ||
     localReposDir !== defaultGitReposDir ||
-    localGitHubPat !== githubPat ||
     localGoogleClientId !== googleClientId ||
     localGoogleClientSecret !== googleClientSecret ||
     hasAgentChanges ||
@@ -533,17 +529,6 @@ function SettingsPage() {
           })
         )
       }
-    }
-
-    if (localGitHubPat !== githubPat) {
-      promises.push(
-        new Promise((resolve) => {
-          updateConfig.mutate(
-            { key: CONFIG_KEYS.GITHUB_PAT, value: localGitHubPat },
-            { onSettled: resolve }
-          )
-        })
-      )
     }
 
     if (localGoogleClientId !== googleClientId) {
@@ -919,14 +904,6 @@ function SettingsPage() {
       onSuccess: (data) => {
         if (data.value !== null && data.value !== undefined)
           setLocalEditorSshPort(String(data.value))
-      },
-    })
-  }
-
-  const handleResetGitHubPat = () => {
-    resetConfig.mutate(CONFIG_KEYS.GITHUB_PAT, {
-      onSuccess: (data) => {
-        setLocalGitHubPat(data.value !== null && data.value !== undefined ? String(data.value) : '')
       },
     })
   }
@@ -1337,44 +1314,8 @@ function SettingsPage() {
                 {/* Integrations */}
                 <SettingsSection title={t('sections.integrations')}>
                   <div className="space-y-4">
-                    {/* GitHub PAT */}
-                    <div className="space-y-1">
-                      <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-                        <label className="text-sm text-muted-foreground sm:w-20 sm:shrink-0">
-                          {t('fields.github.label')}
-                        </label>
-                        <div className="flex flex-1 items-center gap-2">
-                          <div className="relative flex-1">
-                            <Input
-                              type="password"
-                              value={localGitHubPat}
-                              onChange={(e) => setLocalGitHubPat(e.target.value)}
-                              placeholder="ghp_..."
-                              disabled={isLoading}
-                              className="flex-1 pr-8 font-mono text-sm"
-                            />
-                            {!!githubPat && (
-                              <div className="absolute right-2 top-1/2 -translate-y-1/2 text-green-500">
-                                <HugeiconsIcon icon={Tick02Icon} size={14} strokeWidth={2} />
-                              </div>
-                            )}
-                          </div>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="h-8 w-8 text-muted-foreground hover:text-foreground"
-                            onClick={handleResetGitHubPat}
-                            disabled={isLoading || resetConfig.isPending}
-                            title={tc('buttons.reset')}
-                          >
-                            <HugeiconsIcon icon={RotateLeft01Icon} size={14} strokeWidth={2} />
-                          </Button>
-                        </div>
-                      </div>
-                      <p className="text-xs text-muted-foreground sm:ml-20 sm:pl-2">
-                        {t('fields.github.description')}
-                      </p>
-                    </div>
+                    {/* GitHub Accounts (D-6 PR 2 — per-user) */}
+                    <GitHubAccountManager />
 
                     {/* Cloudflare API Token */}
                     <div className="space-y-1">
