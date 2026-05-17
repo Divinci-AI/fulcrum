@@ -46,13 +46,15 @@ mock.module('../websocket/terminal-ws', () => ({
   },
 }))
 
-// Track calls to sendNotificationViaMessaging for messaging-based notification tests
-let messagingSendCalls: Array<{ channel: string; body: string }> = []
+// Track calls to sendNotificationViaMessaging for messaging-based notification tests.
+// D-7 PR 4: the call shape gained `recipientChannelId?`. The capture records
+// whatever the dispatcher passed so tests can assert routing decisions.
+let messagingSendCalls: Array<{ channel: string; body: string; recipientChannelId?: string }> = []
 let messagingSendResult: { success: boolean; error?: string } = { success: true }
 
 mock.module('./notification-messaging', () => ({
-  sendNotificationViaMessaging: async (channel: string, body: string) => {
-    messagingSendCalls.push({ channel, body })
+  sendNotificationViaMessaging: async (channel: string, body: string, recipientChannelId?: string) => {
+    messagingSendCalls.push({ channel, body, recipientChannelId })
     return messagingSendResult
   },
 }))
@@ -621,5 +623,56 @@ describe('Notification Service', () => {
     // transitive import boundary inside one test file, so an isolated
     // dispatcher-side assertion here would be flaky. The combined unit
     // coverage above is equivalent. Documented gap; not a behavior gap.
+
+    // D-7 PR 4: per-channel dispatcher routing reads the recipient's
+    // channel-native id from `channel_identity_mappings` and threads it
+    // through `sendNotificationViaMessaging` as the third argument.
+    test('recipient with a Slack mapping → dispatcher passes their Slack user_id to the messaging adapter', async () => {
+      const { upsertMapping } = await import('./channel-identity-service')
+      const settingsModule = await import('../lib/settings')
+      const userId = await makeUser('slack-routed@example.com')
+      upsertMapping(userId, 'slack', 'U01ABCDEF')
+      // Tenant Slack enabled via the messaging channel path (not webhook).
+      await settingsModule.updateNotificationSettings({
+        slack: { enabled: true, botToken: '', appToken: '', useMessagingChannel: true },
+      })
+      messagingSendCalls = []
+      await sendNotification(
+        { title: 't', message: 'm', type: 'mention' },
+        { recipientUserId: userId }
+      )
+      const slackCall = messagingSendCalls.find((c) => c.channel === 'slack')
+      expect(slackCall).toBeDefined()
+      expect(slackCall!.recipientChannelId).toBe('U01ABCDEF')
+    })
+
+    test('recipient with no mapping for the channel → recipientChannelId is undefined, adapter falls back to tenant default', async () => {
+      const settingsModule = await import('../lib/settings')
+      const userId = await makeUser('no-slack@example.com')
+      // No upsertMapping call — user has no Slack identity registered.
+      await settingsModule.updateNotificationSettings({
+        slack: { enabled: true, botToken: '', appToken: '', useMessagingChannel: true },
+      })
+      messagingSendCalls = []
+      await sendNotification(
+        { title: 't', message: 'm', type: 'mention' },
+        { recipientUserId: userId }
+      )
+      const slackCall = messagingSendCalls.find((c) => c.channel === 'slack')
+      expect(slackCall).toBeDefined()
+      expect(slackCall!.recipientChannelId).toBeUndefined()
+    })
+
+    test('no recipientUserId at all → recipientChannelId is undefined (tenant-wide notifications unchanged)', async () => {
+      const settingsModule = await import('../lib/settings')
+      await settingsModule.updateNotificationSettings({
+        slack: { enabled: true, botToken: '', appToken: '', useMessagingChannel: true },
+      })
+      messagingSendCalls = []
+      await sendNotification({ title: 't', message: 'm', type: 'task_status_change' })
+      const slackCall = messagingSendCalls.find((c) => c.channel === 'slack')
+      expect(slackCall).toBeDefined()
+      expect(slackCall!.recipientChannelId).toBeUndefined()
+    })
   })
 })

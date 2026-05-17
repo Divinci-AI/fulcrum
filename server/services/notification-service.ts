@@ -15,6 +15,10 @@ import {
   getPreferencesForUser,
   getPushoverUserKeyForUser,
 } from './notification-preferences-service'
+import {
+  getChannelIdentityForUser,
+  type ChannelType,
+} from './channel-identity-service'
 
 export interface NotificationPayload {
   title: string
@@ -156,14 +160,24 @@ async function sendPushoverNotification(
   }
 }
 
-// Send notification via a messaging channel (WhatsApp, Telegram, Slack, Discord)
+// Send notification via a messaging channel (WhatsApp, Telegram, Slack, Discord).
+//
+// D-7 PR 4: when `recipientUserId` is provided, look up the recipient's
+// channel-native id from `channel_identity_mappings` and thread it through
+// to the unified `sendMessageToChannel`. When the user has no mapping for
+// this channel, the channel adapter falls back to its tenant-default
+// auto-resolved recipient — same behavior as before per-user routing.
 async function sendViaMessagingChannel(
   channel: 'whatsapp' | 'discord' | 'telegram' | 'slack',
-  payload: NotificationPayload
+  payload: NotificationPayload,
+  recipientUserId?: string
 ): Promise<NotificationResult> {
   const text = `*${payload.title}*\n${payload.message}${payload.url ? `\n${payload.url}` : ''}`
+  const recipientChannelId = recipientUserId
+    ? getChannelIdentityForUser(recipientUserId, channel as ChannelType) ?? undefined
+    : undefined
   try {
-    const result = await sendNotificationViaMessaging(channel, text)
+    const result = await sendNotificationViaMessaging(channel, text, recipientChannelId)
     if (result.success) {
       return { channel, success: true }
     }
@@ -240,10 +254,17 @@ function broadcastUINotification(
   })
 }
 
-// Build list of enabled channel dispatchers from current settings
+// Build list of enabled channel dispatchers from current settings.
+//
+// D-7 PR 4: when `recipientUserId` is provided, the messaging-channel
+// path threads it down to `sendViaMessagingChannel` so per-channel routing
+// can look up the user's channel-native id and DM them directly. Channels
+// that go via webhook (sendSlackNotification/sendDiscordNotification when
+// useMessagingChannel is false) are tenant-wide by nature and untouched.
 function getChannelDispatchers(
   settings: NotificationSettings,
-  payload: NotificationPayload
+  payload: NotificationPayload,
+  recipientUserId?: string
 ): Array<{ channel: string; send: () => Promise<NotificationResult> }> {
   const dispatchers: Array<{ channel: string; send: () => Promise<NotificationResult> }> = []
 
@@ -255,7 +276,7 @@ function getChannelDispatchers(
     dispatchers.push({
       channel: 'slack',
       send: () => settings.slack!.useMessagingChannel
-        ? sendViaMessagingChannel('slack', payload)
+        ? sendViaMessagingChannel('slack', payload, recipientUserId)
         : sendSlackNotification(settings.slack!, payload),
     })
   }
@@ -264,7 +285,7 @@ function getChannelDispatchers(
     dispatchers.push({
       channel: 'discord',
       send: () => settings.discord!.useMessagingChannel
-        ? sendViaMessagingChannel('discord', payload)
+        ? sendViaMessagingChannel('discord', payload, recipientUserId)
         : sendDiscordNotification(settings.discord!, payload),
     })
   }
@@ -274,11 +295,11 @@ function getChannelDispatchers(
   }
 
   if (settings.whatsapp?.enabled) {
-    dispatchers.push({ channel: 'whatsapp', send: () => sendViaMessagingChannel('whatsapp', payload) })
+    dispatchers.push({ channel: 'whatsapp', send: () => sendViaMessagingChannel('whatsapp', payload, recipientUserId) })
   }
 
   if (settings.telegram?.enabled) {
-    dispatchers.push({ channel: 'telegram', send: () => sendViaMessagingChannel('telegram', payload) })
+    dispatchers.push({ channel: 'telegram', send: () => sendViaMessagingChannel('telegram', payload, recipientUserId) })
   }
 
   if (settings.gmail?.enabled) {
@@ -385,7 +406,7 @@ export async function sendNotification(
   }
 
   const results: NotificationResult[] = []
-  const dispatchers = getChannelDispatchers(settings, payload)
+  const dispatchers = getChannelDispatchers(settings, payload, recipientUserId)
 
   await Promise.allSettled(
     dispatchers.map((d) =>
