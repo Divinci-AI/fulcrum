@@ -292,6 +292,31 @@ tenant's container against it. The data bind-mount is preserved across
 recreate (the bind source is on the host filesystem, outside the
 container layer), so SQLite + fnox config survive.
 
+### The fast path: `scripts/build-deploy.sh`
+
+```sh
+# Full deploy of acme — build, stream, recreate, e2e
+./deploy/saas/scripts/build-deploy.sh
+
+# Just recreate the container against an already-loaded image
+./deploy/saas/scripts/build-deploy.sh --skip-build --skip-stream
+
+# Different tenant slug
+./deploy/saas/scripts/build-deploy.sh --tenant=foo
+
+# Skip prod e2e (e.g. for off-hours deploys)
+./deploy/saas/scripts/build-deploy.sh --skip-e2e
+```
+
+The script wraps the manual Steps 1-2 below into one invocation +
+also does the recreate + healthcheck + Playwright run that Steps 2-3
+otherwise require you to type by hand. See `--help` for the full
+flag list.
+
+The manual steps remain documented below for the cases where the
+script isn't enough — e.g. building from a non-default working tree,
+debugging a specific stage, or initial host bring-up.
+
 ### Step 1: get the image onto the host
 
 **Preferred — registry pull:**
