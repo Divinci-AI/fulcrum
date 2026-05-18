@@ -22,6 +22,7 @@ import execRoutes from './routes/exec'
 import appsRoutes from './routes/apps'
 import composeRoutes from './routes/compose'
 import deploymentRoutes from './routes/deployment'
+import emailEventsRoutes from './routes/email-events'
 import jobsRoutes from './routes/jobs'
 import opencodeRoutes from './routes/opencode'
 import projectsRoutes from './routes/projects'
@@ -125,6 +126,10 @@ export function createApp() {
   app.route('/api/apps', appsRoutes)
   app.route('/api/compose', composeRoutes)
   app.route('/api/deployment', deploymentRoutes)
+  // D-11 PR 2: webhook ingest. Auth via X-Webhook-Secret header
+  // checked inside the route — distinct from user-Bearer auth so it
+  // doesn't collide with the currentUser middleware's token check.
+  app.route('/api/email-events', emailEventsRoutes)
   app.route('/api/jobs', jobsRoutes)
   app.route('/api/opencode', opencodeRoutes)
   app.route('/api/projects', projectsRoutes)
