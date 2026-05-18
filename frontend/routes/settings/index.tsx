@@ -86,6 +86,7 @@ import { GoogleAccountManager } from '@/components/google/google-account-manager
 import { GitHubAccountManager } from '@/components/github/github-account-manager'
 import { MyNotificationPreferences } from '@/components/notifications/my-notification-preferences'
 import { MyChannelIdentities } from '@/components/notifications/my-channel-identities'
+import { MyUsersAdmin } from '@/components/users/my-users-admin'
 import { useCurrentUser } from '@/hooks/use-current-user'
 import { useGoogleAccounts } from '@/hooks/use-google'
 import { GoogleCalendarSettings } from '@/components/google/google-calendar-settings'
@@ -1318,6 +1319,16 @@ function SettingsPage() {
                     </div>
                   </div>
                 </SettingsSection>
+
+                {/* Members — D-8 PR 2. Admin-only. Lists every user in
+                    this tenant and lets an admin invite / promote /
+                    demote. Pre-provisioned rows still need CF Access edge
+                    admission until D-8 PR 5 closes that gap. */}
+                {isAdmin && (
+                  <SettingsSection title="Members">
+                    <MyUsersAdmin />
+                  </SettingsSection>
+                )}
 
                 {/* Integrations — D-7 PR 2: GitHubAccountManager is
                     per-user (visible to everyone). Cloudflare + Google
