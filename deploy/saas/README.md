@@ -1,5 +1,8 @@
 # Fulcrum-as-SaaS — Deployment Harness
 
+> **Operator? Start at [QUICKSTART.md](./QUICKSTART.md)** — one-screen task
+> index. RUNBOOK.md has the full procedures + recovery paths.
+
 > Status: **design, decisions locked**. Implementation not yet started, but the
 > open questions from the first draft have been answered. This doc reflects the
 > architecture Divinci-AI is committing to.
