@@ -54,6 +54,8 @@ export function getSettings(): Settings {
     integrations: {
       cloudflareApiToken: (fv('integrations.cloudflareApiToken') as string | null) ?? null,
       cloudflareAccountId: (fv('integrations.cloudflareAccountId') as string | null) ?? null,
+      cloudflareAccessAppId: (fv('integrations.cloudflareAccessAppId') as string | null) ?? null,
+      cloudflareAccessPolicyId: (fv('integrations.cloudflareAccessPolicyId') as string | null) ?? null,
       googleClientId: (fv('integrations.googleClientId') as string | null) ?? null,
       googleClientSecret: (fv('integrations.googleClientSecret') as string | null) ?? null,
     },
@@ -161,6 +163,8 @@ export function getSettings(): Settings {
     integrations: {
       cloudflareApiToken: process.env.CLOUDFLARE_API_TOKEN ?? settings.integrations.cloudflareApiToken,
       cloudflareAccountId: process.env.CLOUDFLARE_ACCOUNT_ID ?? settings.integrations.cloudflareAccountId,
+      cloudflareAccessAppId: process.env.CLOUDFLARE_ACCESS_APP_ID ?? settings.integrations.cloudflareAccessAppId,
+      cloudflareAccessPolicyId: process.env.CLOUDFLARE_ACCESS_POLICY_ID ?? settings.integrations.cloudflareAccessPolicyId,
       googleClientId: process.env.GOOGLE_CLIENT_ID ?? settings.integrations.googleClientId,
       googleClientSecret: process.env.GOOGLE_CLIENT_SECRET ?? settings.integrations.googleClientSecret,
     },

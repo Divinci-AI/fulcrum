@@ -123,6 +123,30 @@ describe('POST /api/users', () => {
     const body = (await res.json()) as { users: Array<{ email: string }> }
     expect(body.users.some((u) => u.email === 'visible@example.com')).toBe(true)
   })
+
+  // D-8 PR 5: response carries a cfAccess result. When CF Access isn't
+  // configured (the default test state), `configured: false` and the
+  // overall result is treated as ok so the happy path UI doesn't warn.
+  test('response includes cfAccess shape; configured:false when CF Access is unset', async () => {
+    const savedKeys = ['CLOUDFLARE_API_TOKEN', 'CLOUDFLARE_ACCOUNT_ID', 'CLOUDFLARE_ACCESS_APP_ID', 'CLOUDFLARE_ACCESS_POLICY_ID'] as const
+    const saved: Record<string, string | undefined> = {}
+    for (const k of savedKeys) {
+      saved[k] = process.env[k]
+      delete process.env[k]
+    }
+    try {
+      const { post } = createTestApp()
+      const res = await post('/api/users', { email: 'cf-check@example.com' })
+      expect(res.status).toBe(201)
+      const body = (await res.json()) as { cfAccess: { ok: boolean; configured: boolean } }
+      expect(body.cfAccess.configured).toBe(false)
+      expect(body.cfAccess.ok).toBe(true)
+    } finally {
+      for (const k of savedKeys) {
+        if (saved[k] !== undefined) process.env[k] = saved[k]
+      }
+    }
+  })
 })
 
 // D-8 PR 3a — /api/users/me/tokens (self-managed API tokens).
