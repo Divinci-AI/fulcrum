@@ -16,11 +16,13 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Switch } from '@/components/ui/switch'
 import { HugeiconsIcon } from '@hugeicons/react'
-import { Loading03Icon, UserAdd01Icon } from '@hugeicons/core-free-icons'
+import { Delete02Icon, Loading03Icon, Mail01Icon, UserAdd01Icon } from '@hugeicons/core-free-icons'
 import { useCurrentUser } from '@/hooks/use-current-user'
 import {
+  useDeleteUser,
   useInviteUser,
   useListUsers,
+  useResendInvite,
   useSetUserAdmin,
   type TenantUser,
 } from '@/hooks/use-users-admin'
@@ -36,10 +38,14 @@ export function MyUsersAdmin() {
   const { data: users, isLoading } = useListUsers()
   const inviteUser = useInviteUser()
   const setUserAdmin = useSetUserAdmin()
+  const resendInvite = useResendInvite()
+  const deleteUser = useDeleteUser()
 
   const [inviteEmail, setInviteEmail] = useState('')
   const [inviteAsAdmin, setInviteAsAdmin] = useState(false)
   const [togglingId, setTogglingId] = useState<string | null>(null)
+  const [resendingId, setResendingId] = useState<string | null>(null)
+  const [deletingId, setDeletingId] = useState<string | null>(null)
 
   const handleInvite = async () => {
     const email = inviteEmail.trim()
@@ -82,6 +88,44 @@ export function MyUsersAdmin() {
       toast.error(err instanceof Error ? err.message : String(err))
     } finally {
       setTogglingId(null)
+    }
+  }
+
+  const handleResend = async (target: TenantUser) => {
+    setResendingId(target.id)
+    try {
+      const { inviteEmail: result } = await resendInvite.mutateAsync(target.id)
+      if (result.drafted) {
+        toast.success(`Invite email re-drafted for ${target.email} — review in Gmail`)
+      } else {
+        toast.warning(`Could not re-draft invite for ${target.email}: ${result.reason ?? 'unknown'}`)
+      }
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : String(err))
+    } finally {
+      setResendingId(null)
+    }
+  }
+
+  const handleDelete = async (target: TenantUser) => {
+    // Confirm — delete is destructive (tokens revoked, mentions removed,
+    // channel-message attribution cleared). Native confirm is fine here;
+    // sortable shadcn dialog would be polish.
+    if (!window.confirm(`Remove ${target.email}? This revokes their API tokens, channel routes, mentions, and notification prefs. Channel-message history is preserved but un-attributed.`)) {
+      return
+    }
+    setDeletingId(target.id)
+    try {
+      const { cleanup } = await deleteUser.mutateAsync(target.id)
+      const counts = Object.entries(cleanup)
+        .filter(([, v]) => typeof v === 'number' && v > 0)
+        .map(([k, v]) => `${k}: ${v}`)
+        .join(', ')
+      toast.success(`Removed ${target.email}${counts ? ` (${counts})` : ''}`)
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : String(err))
+    } finally {
+      setDeletingId(null)
     }
   }
 
@@ -180,6 +224,42 @@ export function MyUsersAdmin() {
                 </p>
               </div>
               <div className="flex items-center gap-2 shrink-0">
+                {/* Resend only makes sense for invited rows (never seen);
+                    once they've logged in they don't need a re-invite. */}
+                {invited && (
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-8 w-8"
+                    onClick={() => handleResend(u)}
+                    disabled={resendingId === u.id}
+                    title="Resend invite email"
+                  >
+                    {resendingId === u.id ? (
+                      <HugeiconsIcon icon={Loading03Icon} className="h-3.5 w-3.5 animate-spin" />
+                    ) : (
+                      <HugeiconsIcon icon={Mail01Icon} className="h-3.5 w-3.5" />
+                    )}
+                  </Button>
+                )}
+                {/* Self-row hides the destructive button entirely; the
+                    server's last-admin guard catches the policy edge. */}
+                {!isSelf && (
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-8 w-8"
+                    onClick={() => handleDelete(u)}
+                    disabled={deletingId === u.id}
+                    title="Remove member"
+                  >
+                    {deletingId === u.id ? (
+                      <HugeiconsIcon icon={Loading03Icon} className="h-3.5 w-3.5 animate-spin" />
+                    ) : (
+                      <HugeiconsIcon icon={Delete02Icon} className="h-3.5 w-3.5 text-destructive" />
+                    )}
+                  </Button>
+                )}
                 <label className="text-xs text-muted-foreground select-none">
                   Admin
                 </label>

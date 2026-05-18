@@ -5,7 +5,10 @@ import {
   updateUserProfile,
   setUserAdmin,
   createUserByAdmin,
+  deleteUserByAdmin,
   DuplicateUserError,
+  CannotDeleteSelfError,
+  CannotDeleteLastAdminError,
 } from '../services/user-service'
 import { listMentionsForUser } from '../services/mention-service'
 import {
@@ -25,7 +28,7 @@ import {
   mintToken,
   revokeToken,
 } from '../services/api-token-service'
-import { addEmailToPolicy } from '../services/cloudflare-access'
+import { addEmailToPolicy, removeEmailFromPolicy } from '../services/cloudflare-access'
 import { draftInviteEmail } from '../services/invite-email-service'
 import { getPageContext } from '../services/page-context-service'
 import { requireAdminUser, requireUser, type CurrentUserContext } from '../middleware/current-user'
@@ -285,6 +288,72 @@ app.patch('/:id/admin', async (c) => {
   }
   const updated = setUserAdmin(targetId, body.isAdmin)
   return c.json({ user: updated, grantedBy: caller.id })
+})
+
+// POST /api/users/:id/resend-invite — D-10 PR 6. Admin-only.
+// Re-runs the Gmail invite draft for an existing user row (useful when
+// the initial POST /api/users hit a soft-fail like "Google account
+// needs re-authorization", or when an admin wants to remind an invitee
+// who hasn't shown up yet). Creates a brand-new draft each call —
+// Gmail's Drafts API doesn't deduplicate; the admin reviews + sends
+// the most recent one.
+//
+// Returns: { user, inviteEmail: { drafted, draftId?, reason? } }
+app.post('/:id/resend-invite', async (c) => {
+  const caller = requireAdminUser(c)
+  const target = getUserById(c.req.param('id'))
+  if (!target) return c.json({ error: 'User not found' }, 404)
+
+  const requestUrl = new URL(c.req.url)
+  const tenantUrl = `${requestUrl.protocol}//${requestUrl.host}`
+  const inviteEmail = await draftInviteEmail({
+    inviterUserId: caller.id,
+    inviteeEmail: target.email,
+    tenantUrl,
+    inviteeDisplayName: target.displayName,
+  })
+  return c.json({ user: target, inviteEmail })
+})
+
+// DELETE /api/users/:id — D-10 PR 6. Admin-only.
+// Hard-deletes the user + their owned rows (tokens, channel
+// identities, notification prefs, mentions). Channel_messages.user_id
+// is null'd in place to preserve the audit trail without dangling
+// references. Refuses to delete the caller themselves (409) or the
+// last admin (409) — protections against locking the tenant out.
+//
+// CF Access cleanup: if the per-user policy is configured, removes
+// the email from the policy's include list. Soft-failed: a CF error
+// doesn't block the local delete.
+//
+// Returns: { success, cfAccess: { ok, configured, reason? }, cleanup }
+app.delete('/:id', async (c) => {
+  const caller = requireAdminUser(c)
+  const target = getUserById(c.req.param('id'))
+  if (!target) return c.json({ error: 'User not found' }, 404)
+
+  // Try the CF Access cleanup first (best-effort). We do it before the
+  // local delete so the email is still in our records if CF is slow.
+  const cf = await removeEmailFromPolicy(target.email)
+  const cfAccess = cf.skipped
+    ? { ok: true, configured: false }
+    : { ok: cf.ok, configured: true, reason: cf.reason }
+
+  try {
+    const cleanup = deleteUserByAdmin(caller.id, target.id)
+    return c.json({ success: true, cfAccess, cleanup })
+  } catch (err) {
+    if (err instanceof CannotDeleteSelfError) {
+      return c.json({ error: err.message }, 409)
+    }
+    if (err instanceof CannotDeleteLastAdminError) {
+      return c.json({ error: err.message }, 409)
+    }
+    return c.json(
+      { error: err instanceof Error ? err.message : 'Delete failed' },
+      400
+    )
+  }
 })
 
 export default app
