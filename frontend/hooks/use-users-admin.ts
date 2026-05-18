@@ -47,17 +47,18 @@ export interface CfAccessResult {
 
 export interface InviteEmailResult {
   /** True iff an invite email was delivered or drafted. False = the
-   * tenant has neither CF Email nor a Gmail-enabled inviter account. */
+   * tenant has neither CF Email nor a Gmail-enabled inviter account,
+   * OR (D-10 PR 9) CF reported a permanent bounce. */
   drafted: boolean
-  /** D-10 PR 8: which path actually fired.
-   *   - `cloudflare`: auto-sent via CF Email API (drafted=true means
-   *     sent and accepted; draftId = CF message id)
-   *   - `gmail-draft`: created a draft in the inviter's Gmail Drafts
-   *     folder for them to review and send
-   *   - `none`: neither path available */
+  /** D-10 PR 8: which path actually fired. */
   mode?: 'cloudflare' | 'gmail-draft' | 'none'
-  /** Message id (cloudflare) or draft id (gmail-draft). */
+  /** Gmail draft id (only when mode='gmail-draft'). */
   draftId?: string
+  /** D-10 PR 9: CF outcome bucket when mode='cloudflare'.
+   *   - 'delivered': handed off to destination MX (best case)
+   *   - 'queued': CF will retry (transient issue)
+   *   - 'bounced': permanent failure; drafted will be false */
+  delivery?: 'delivered' | 'queued' | 'bounced'
   reason?: string
 }
 

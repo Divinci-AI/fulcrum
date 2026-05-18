@@ -100,10 +100,10 @@ describe('cloudflare-email-service', () => {
       expect(result.skipped).toBe(true)
     })
 
-    test('POSTs to /accounts/<id>/email/sending/send with expected body shape', async () => {
+    test('POSTs the expected body shape; recipient in delivered → sent:true delivery:delivered', async () => {
       setupConfig()
       const { fetch: mock, calls } = makeMockFetch([
-        { body: { success: true, result: { id: 'cf-msg-abc' } } },
+        { body: { success: true, errors: [], result: { delivered: ['newbie@example.com'], permanent_bounces: [], queued: [] } } },
       ])
       setCloudflareEmailFetchImpl(mock)
 
@@ -115,7 +115,7 @@ describe('cloudflare-email-service', () => {
       })
 
       expect(result.sent).toBe(true)
-      expect(result.messageId).toBe('cf-msg-abc')
+      expect(result.delivery).toBe('delivered')
       expect(calls.length).toBe(1)
       expect(calls[0].url).toContain('/accounts/acct_test/email/sending/send')
       expect(calls[0].method).toBe('POST')
@@ -125,6 +125,68 @@ describe('cloudflare-email-service', () => {
       expect(String(calls[0].body.text)).toContain('Newbie')
       expect(String(calls[0].body.text)).toContain('https://fulcrum-acme.divinci.ai')
       expect(String(calls[0].body.html)).toContain('mike@divinci.ai')
+    })
+
+    test('recipient in queued → sent:true delivery:queued', async () => {
+      setupConfig()
+      const { fetch: mock } = makeMockFetch([
+        { body: { success: true, result: { delivered: [], permanent_bounces: [], queued: ['slow@example.com'] } } },
+      ])
+      setCloudflareEmailFetchImpl(mock)
+      const result = await sendInviteEmail({
+        to: 'slow@example.com',
+        tenantUrl: 'https://x.example.com',
+        inviterEmail: 'a@example.com',
+      })
+      expect(result.sent).toBe(true)
+      expect(result.delivery).toBe('queued')
+    })
+
+    test('recipient in permanent_bounces → sent:false delivery:bounced with reason', async () => {
+      setupConfig()
+      const { fetch: mock } = makeMockFetch([
+        { body: { success: true, result: { delivered: [], permanent_bounces: ['nope@example.com'], queued: [] } } },
+      ])
+      setCloudflareEmailFetchImpl(mock)
+      const result = await sendInviteEmail({
+        to: 'nope@example.com',
+        tenantUrl: 'https://x.example.com',
+        inviterEmail: 'a@example.com',
+      })
+      expect(result.sent).toBe(false)
+      expect(result.skipped).toBe(false)
+      expect(result.delivery).toBe('bounced')
+      expect(result.reason).toContain('bounce')
+    })
+
+    test('success:true but recipient not in any bucket → sent:true delivery:queued (optimistic)', async () => {
+      setupConfig()
+      const { fetch: mock } = makeMockFetch([
+        { body: { success: true, result: { delivered: [], permanent_bounces: [], queued: [] } } },
+      ])
+      setCloudflareEmailFetchImpl(mock)
+      const result = await sendInviteEmail({
+        to: 'orphan@example.com',
+        tenantUrl: 'https://x.example.com',
+        inviterEmail: 'a@example.com',
+      })
+      expect(result.sent).toBe(true)
+      expect(result.delivery).toBe('queued')
+    })
+
+    test('outcome matching is case-insensitive on the recipient address', async () => {
+      setupConfig()
+      const { fetch: mock } = makeMockFetch([
+        { body: { success: true, result: { delivered: ['Mike@DIVINCI.AI'], permanent_bounces: [], queued: [] } } },
+      ])
+      setCloudflareEmailFetchImpl(mock)
+      const result = await sendInviteEmail({
+        to: 'mike@divinci.ai',
+        tenantUrl: 'https://x.example.com',
+        inviterEmail: 'a@example.com',
+      })
+      expect(result.sent).toBe(true)
+      expect(result.delivery).toBe('delivered')
     })
 
     test('returns sent:false reason on CF API error (success:false)', async () => {
