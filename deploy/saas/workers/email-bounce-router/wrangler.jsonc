@@ -1,0 +1,31 @@
+{
+  // Cloudflare Email Worker that catches inbound bounce/complaint
+  // emails on the Routing-configured domain, parses the RFC 3464
+  // DSN, and POSTs structured events to Fulcrum's
+  // /api/email-events endpoint.
+  //
+  // Operator setup steps (one-time per tenant):
+  //   1. Enable Email Routing on the same zone the sending domain
+  //      lives in (typically `invites.divinci.ai` or a sibling
+  //      like `bounces.invites.divinci.ai`). CF dashboard →
+  //      Email Routing → Get Started → publish DNS records.
+  //   2. Set up secrets:
+  //        wrangler secret put FULCRUM_INGEST_URL
+  //          → e.g. https://fulcrum-acme.divinci.ai/api/email-events
+  //        wrangler secret put FULCRUM_INGEST_SECRET
+  //          → the same value stored in fnox
+  //            integrations.cloudflareEmailIngestSecret
+  //   3. Deploy:  wrangler deploy
+  //   4. CF dashboard → Email Routing → Email Workers → bind this
+  //      Worker as the destination for the catch-all route on the
+  //      bounce-handling domain.
+  "$schema": "https://json.schemastore.org/wrangler.json",
+  "name": "fulcrum-email-bounce-router",
+  "main": "src/worker.ts",
+  "compatibility_date": "2025-11-01",
+  "send_email": [],
+  "observability": {
+    "enabled": true,
+    "head_sampling_rate": 1
+  }
+}
