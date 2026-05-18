@@ -26,6 +26,7 @@ import {
   revokeToken,
 } from '../services/api-token-service'
 import { addEmailToPolicy } from '../services/cloudflare-access'
+import { draftInviteEmail } from '../services/invite-email-service'
 import { requireAdminUser, requireUser, type CurrentUserContext } from '../middleware/current-user'
 
 const app = new Hono<CurrentUserContext>()
@@ -225,7 +226,27 @@ app.post('/', async (c) => {
     ? { ok: true, configured: false }
     : { ok: cf.ok, configured: true, reason: cf.reason }
 
-  return c.json({ user, invitedBy: caller.id, cfAccess }, 201)
+  // D-9 PR 2: optionally draft an invite email in the admin's Gmail.
+  // Stays inside the "user-only outbound" policy — we never send to
+  // a third party, just create a draft for the admin to review +
+  // send manually. No-op when the admin has no Gmail-enabled Google
+  // account; soft-fail (logged) on any draft API error.
+  //
+  // The tenant URL is derived from the request origin so the link in
+  // the draft points at this exact tenant.
+  const requestUrl = new URL(c.req.url)
+  const tenantUrl = `${requestUrl.protocol}//${requestUrl.host}`
+  const draft = await draftInviteEmail({
+    inviterUserId: caller.id,
+    inviteeEmail: user.email,
+    tenantUrl,
+    inviteeDisplayName: user.displayName,
+  })
+
+  return c.json(
+    { user, invitedBy: caller.id, cfAccess, inviteEmail: draft },
+    201
+  )
 })
 
 // GET /api/users/:id — single user lookup. 404 if unknown.

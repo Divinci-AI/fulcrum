@@ -127,6 +127,16 @@ describe('POST /api/users', () => {
   // D-8 PR 5: response carries a cfAccess result. When CF Access isn't
   // configured (the default test state), `configured: false` and the
   // overall result is treated as ok so the happy path UI doesn't warn.
+  // D-9 PR 2: invite-email shape on the response.
+  test('response includes inviteEmail:drafted:false when admin has no Gmail-enabled account', async () => {
+    const { post } = createTestApp()
+    const res = await post('/api/users', { email: 'gmail-check@example.com' })
+    expect(res.status).toBe(201)
+    const body = (await res.json()) as { inviteEmail: { drafted: boolean; reason?: string } }
+    expect(body.inviteEmail.drafted).toBe(false)
+    expect(body.inviteEmail.reason).toContain('no Gmail-enabled')
+  })
+
   test('response includes cfAccess shape; configured:false when CF Access is unset', async () => {
     const savedKeys = ['CLOUDFLARE_API_TOKEN', 'CLOUDFLARE_ACCOUNT_ID', 'CLOUDFLARE_ACCESS_APP_ID', 'CLOUDFLARE_ACCESS_POLICY_ID'] as const
     const saved: Record<string, string | undefined> = {}
