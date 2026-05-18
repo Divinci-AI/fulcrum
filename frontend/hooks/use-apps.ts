@@ -522,8 +522,14 @@ export function useDetectPublicIp() {
 export interface DeploymentSettings {
   cloudflareApiToken: string | null
   cloudflareAccountId: string | null
+  /** D-9 PR 1: non-secret CF Access resource IDs. Returned plaintext
+   * because they aren't credentials — just pointers into the CF Access
+   * App/Policy hierarchy that the invite flow updates. */
+  cloudflareAccessAppId: string | null
+  cloudflareAccessPolicyId: string | null
   cloudflareConfigured: boolean
   tunnelsAvailable: boolean
+  cfAccessInviteConfigured: boolean
 }
 
 export function useDeploymentSettings() {
@@ -541,6 +547,8 @@ export function useUpdateDeploymentSettings() {
     mutationFn: (data: {
       cloudflareApiToken?: string | null
       cloudflareAccountId?: string | null
+      cloudflareAccessAppId?: string | null
+      cloudflareAccessPolicyId?: string | null
     }) =>
       fetchJSON<{ success: boolean }>(`${API_BASE}/api/deployment/settings`, {
         method: 'POST',
