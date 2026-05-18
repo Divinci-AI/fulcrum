@@ -142,6 +142,15 @@ export interface Settings {
      */
     cloudflareEmailEnabled: boolean | null
     cloudflareEmailFromAddress: string | null
+    /**
+     * D-11 PR 2: shared secret the CF Email Worker uses to authenticate
+     * inbound bounce/complaint POSTs to `/api/email-events`. Stored
+     * age-encrypted because it's a credential — leak = arbitrary event
+     * injection into the audit log. Operator generates a random string
+     * once (e.g. `openssl rand -hex 32`), pastes it into both Fulcrum
+     * (here) and the Worker's wrangler secret.
+     */
+    cloudflareEmailIngestSecret: string | null
     googleClientId: string | null
     googleClientSecret: string | null
   }
@@ -204,6 +213,7 @@ export const DEFAULT_SETTINGS: Settings = {
     cloudflareAccessPolicyId: null,
     cloudflareEmailEnabled: null,
     cloudflareEmailFromAddress: null,
+    cloudflareEmailIngestSecret: null,
     googleClientId: null,
     googleClientSecret: null,
   },
@@ -317,6 +327,7 @@ export const VALID_SETTING_PATHS = new Set([
   'integrations.cloudflareAccessPolicyId',
   'integrations.cloudflareEmailEnabled',
   'integrations.cloudflareEmailFromAddress',
+  'integrations.cloudflareEmailIngestSecret',
   'integrations.googleClientId',
   'integrations.googleClientSecret',
   'agent.defaultAgent',

@@ -582,6 +582,9 @@ describe('Config Routes', () => {
       // Same shape — server-only, settable via UI/CLI.
       'integrations.cloudflareEmailEnabled',
       'integrations.cloudflareEmailFromAddress',
+      // D-11 PR 2: shared secret between CF Email Worker and our
+      // /api/email-events ingest endpoint. Server-only secret.
+      'integrations.cloudflareEmailIngestSecret',
       // Channel settings (managed via messaging/channel routes)
       ...Array.from(VALID_SETTING_PATHS).filter(
         (p) => p.startsWith('channels.')

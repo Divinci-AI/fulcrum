@@ -120,10 +120,12 @@ describe('fnox', () => {
       }
     })
 
-    test('has expected number of secret mappings (14)', () => {
+    test('has expected number of secret mappings (15)', () => {
       // D-6 PR 3 dropped `integrations.githubPat` (PATs are now per-user in
       // `github_accounts`), bringing this from 15 → 14.
-      expect(Object.keys(FNOX_SECRET_MAP).length).toBe(14)
+      // D-11 PR 2 added `integrations.cloudflareEmailIngestSecret`,
+      // bringing it back to 15.
+      expect(Object.keys(FNOX_SECRET_MAP).length).toBe(15)
     })
   })
 
