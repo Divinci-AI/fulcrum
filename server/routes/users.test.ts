@@ -124,3 +124,117 @@ describe('POST /api/users', () => {
     expect(body.users.some((u) => u.email === 'visible@example.com')).toBe(true)
   })
 })
+
+// D-8 PR 3a — /api/users/me/tokens (self-managed API tokens).
+describe('/api/users/me/tokens', () => {
+  let env: TestEnv
+  beforeEach(() => {
+    env = setupTestEnv()
+  })
+  afterEach(() => env.cleanup())
+
+  test('POST mints a token and returns plaintext exactly once', async () => {
+    const { post } = createTestApp()
+    const res = await post('/api/users/me/tokens', { name: 'laptop-cli' })
+    expect(res.status).toBe(201)
+    const body = (await res.json()) as {
+      token: { plaintext: string; prefix: string; name: string; lastUsedAt: string | null }
+    }
+    expect(body.token.plaintext.startsWith('fulc_')).toBe(true)
+    expect(body.token.name).toBe('laptop-cli')
+    expect(body.token.lastUsedAt).toBeNull()
+  })
+
+  test('POST 400 when name is missing/empty', async () => {
+    const { post } = createTestApp()
+    const a = await post('/api/users/me/tokens', {})
+    expect(a.status).toBe(400)
+    const b = await post('/api/users/me/tokens', { name: '   ' })
+    expect(b.status).toBe(400)
+  })
+
+  test('POST 400 when expiresAt is malformed/past', async () => {
+    const { post } = createTestApp()
+    const past = new Date(Date.now() - 60_000).toISOString()
+    const res = await post('/api/users/me/tokens', { name: 'expired', expiresAt: past })
+    expect(res.status).toBe(400)
+  })
+
+  test('GET lists only the caller\'s tokens with no plaintext leakage', async () => {
+    const { get, post } = createTestApp()
+    await post('/api/users/me/tokens', { name: 'a' })
+    await post('/api/users/me/tokens', { name: 'b' })
+    const res = await get('/api/users/me/tokens')
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as {
+      tokens: Array<{ id: string; name: string; prefix: string; plaintext?: string }>
+    }
+    expect(body.tokens.length).toBe(2)
+    for (const t of body.tokens) {
+      expect(t.plaintext).toBeUndefined()
+      expect(t.prefix.startsWith('fulc_')).toBe(true)
+    }
+  })
+
+  test('DELETE 204-shape revokes the caller\'s own token', async () => {
+    const { get, post, delete: del } = createTestApp()
+    const mint = await post('/api/users/me/tokens', { name: 'rev' })
+    const { token } = (await mint.json()) as { token: { id: string } }
+    const res = await del(`/api/users/me/tokens/${token.id}`)
+    expect(res.status).toBe(200)
+    const list = await get('/api/users/me/tokens')
+    const listBody = (await list.json()) as { tokens: unknown[] }
+    expect(listBody.tokens.length).toBe(0)
+  })
+
+  test("DELETE 404 when trying to revoke another user's token", async () => {
+    const { post, delete: del } = createTestApp()
+    // Mint as the default test admin first.
+    const mintAsAdmin = await post('/api/users/me/tokens', { name: 'admins' })
+    const { token } = (await mintAsAdmin.json()) as { token: { id: string } }
+
+    // Now try to revoke it acting as a different user.
+    insertUser('peer@example.com', { isAdmin: false })
+    const res = await del(`/api/users/me/tokens/${token.id}`, {
+      'Cf-Access-Authenticated-User-Email': 'peer@example.com',
+    })
+    expect(res.status).toBe(404)
+  })
+
+  test('401 when unauthenticated', async () => {
+    const { get } = createTestApp()
+    const saved = process.env.FULCRUM_DEV_USER_EMAIL
+    delete process.env.FULCRUM_DEV_USER_EMAIL
+    try {
+      const res = await get('/api/users/me/tokens')
+      expect(res.status).toBe(401)
+    } finally {
+      if (saved !== undefined) process.env.FULCRUM_DEV_USER_EMAIL = saved
+    }
+  })
+
+  test('using the minted token as Bearer reaches /me as that user', async () => {
+    const { get, post } = createTestApp()
+    const mint = await post('/api/users/me/tokens', { name: 'cli' })
+    const { token } = (await mint.json()) as { token: { plaintext: string } }
+    const me = await get('/api/users/me', {
+      Authorization: `Bearer ${token.plaintext}`,
+      // Send a conflicting CF Access header to prove Bearer wins.
+      'Cf-Access-Authenticated-User-Email': 'someone-else@example.com',
+    })
+    expect(me.status).toBe(200)
+    const body = (await me.json()) as { user: { email: string } }
+    expect(body.user.email).toBe('test-admin@example.com')
+  })
+
+  test('an invalid Bearer 401s (does not silently fall through to CF Access)', async () => {
+    const { get } = createTestApp()
+    const res = await get('/api/users/me', {
+      Authorization: 'Bearer fulc_doesnotexist12345678901234567890123456',
+      'Cf-Access-Authenticated-User-Email': 'test-admin@example.com',
+    })
+    expect(res.status).toBe(401)
+    const body = (await res.json()) as { error: string }
+    expect(body.error).toBe('Invalid API token')
+  })
+})
