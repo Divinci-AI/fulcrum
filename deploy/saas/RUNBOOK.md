@@ -333,6 +333,97 @@ rollback cheap.
 
 ---
 
+## §8 — Rotate `CLOUDFLARE_API_TOKEN`
+
+The token in operator's `~/.zshrc` needs rotation periodically (the
+current one is **expired**, returning 401 on `/user/tokens/verify` —
+this blocks future programmatic CF management, including D-8 PR 5 which
+adds per-user invites to a CF Access policy).
+
+### Step 1 — create the replacement
+
+1. Open https://dash.cloudflare.com/profile/api-tokens.
+2. Click **"Create Token"** → **"Custom token"** at the bottom.
+3. Name: `fulcrum-saas-<YYYY-MM>` (date the month you created it).
+4. Permissions (exact three, per §3):
+   - **Zone** › **DNS** › **Edit** — *Specific Zone → divinci.ai*
+   - **Account** › **Access: Apps and Policies** › **Edit** — *Specific account → Divinci-AI*
+   - **Account** › **Cloudflare Tunnel** › **Edit** — *Specific account → Divinci-AI*
+5. **TTL**: leave blank for non-expiring (preferred — rotation is manual
+   and we'd rather rotate on incident-response than discover the token
+   has silently died). If your org policy forbids non-expiring, choose
+   12+ months.
+6. **Client IP filtering**: skip — the GCE host's egress IP can change
+   on instance recreate, and locking it down adds an outage mode for
+   no real security gain (the token is already a bearer secret).
+7. Confirm and **copy the token value once**. Cloudflare never shows it again.
+
+### Step 2 — verify before swapping
+
+Before touching production env, sanity-check the new token from the
+operator's machine:
+
+```sh
+NEW_TOKEN="<paste fresh token>"
+curl -fsS -H "Authorization: Bearer $NEW_TOKEN" \
+    https://api.cloudflare.com/client/v4/user/tokens/verify \
+    | jq .result.status
+# expect: "active"
+```
+
+If that returns `"active"`, the permissions are correct. If it returns
+4xx, re-check the three permission scopes in step 1.4.
+
+### Step 3 — swap on the operator's shell
+
+```sh
+# Edit ~/.zshrc — replace the existing CLOUDFLARE_API_TOKEN export
+$EDITOR ~/.zshrc
+
+# Reload
+source ~/.zshrc
+
+# Re-verify post-swap
+curl -fsS -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+    https://api.cloudflare.com/client/v4/user/tokens/verify \
+    | jq .result.status
+```
+
+### Step 4 — swap on the GCE host
+
+Same procedure on the GCE host's `~/.zshrc` if any scripts there read
+the token directly. The Fulcrum container reads it from fnox-managed
+config, not the host env, so only the host-side ops scripts need it.
+
+### Step 5 — revoke the old token
+
+Back in the CF dashboard → API Tokens → find the expired/superseded
+row → **Roll**. Don't delete blindly without verifying §4 first: if the
+new token is broken, you want the option to revert.
+
+### When to rotate
+
+- **Reactive**: any time `/user/tokens/verify` returns non-`"active"`.
+- **Proactive**: every 12 months on a calendar reminder, or whenever
+  an operator with token access leaves the project.
+
+---
+
+## §9 — Cloudflare Access policy invites (D-8 PR 5, planned)
+
+D-8 PR 5 will wire `POST /api/users` to also add the invited email to
+a CF Access policy's `include` list, so admins don't have to round-trip
+to the Cloudflare dashboard for each non-Divincian invite. Requires §8
+completed first because the call needs an active `CLOUDFLARE_API_TOKEN`.
+
+Until PR 5 lands, the workflow is:
+1. Admin invites teammate via `fulcrum users invite teammate@…` (D-8 PR 3b)
+2. Operator manually adds teammate's email to the CF Access App's
+   policy include list at
+   https://one.dash.cloudflare.com/{account}/access/apps
+
+---
+
 ## What's still missing (post-§6)
 
 - **Litestream sidecar** for continuous SQLite replication to R2. Design is
@@ -351,8 +442,7 @@ rollback cheap.
 
 **"cloudflare API error: 9109 Invalid or missing API token"**
 The token in `CLOUDFLARE_API_TOKEN` either lacks one of the three required
-permissions or has expired. Re-create at
-https://dash.cloudflare.com/profile/api-tokens.
+permissions or has expired. See §8 for the full rotation procedure.
 
 **"`<slug>` never became healthy"**
 `docker logs fulcrum-<slug>` shows what crashed. Most common: missing
