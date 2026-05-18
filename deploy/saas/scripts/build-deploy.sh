@@ -66,7 +66,7 @@ log() {
 
 # --- Step 1: build (amd64 explicitly so we don't ship arm64 to the GCE host) ---
 if [ "$SKIP_BUILD" -eq 0 ]; then
-  log "Building $IMAGE_TAG for linux/amd64 from $REPO_ROOT…"
+  log "Building ${IMAGE_TAG} for linux/amd64 from ${REPO_ROOT}…"
   docker build --platform linux/amd64 -t "$IMAGE_TAG" "$REPO_ROOT"
   log "Build done."
 else
