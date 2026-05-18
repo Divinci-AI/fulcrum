@@ -96,3 +96,70 @@ export function setUserAdmin(id: string, isAdmin: boolean): User | null {
   db.update(users).set({ isAdmin, updatedAt: now }).where(eq(users.id, id)).run()
   return db.select().from(users).where(eq(users.id, id)).get() ?? null
 }
+
+// D-8 PR 1: explicit admin-driven user provisioning. Raised when an admin
+// invites an email that already corresponds to a row — the route layer maps
+// this to HTTP 409 so the client can distinguish "already a member" from a
+// generic 400. Other validation failures bubble as plain Errors → 400.
+export class DuplicateUserError extends Error {
+  constructor(email: string) {
+    super(`User with email ${email} already exists`)
+    this.name = 'DuplicateUserError'
+  }
+}
+
+/**
+ * D-8 PR 1: admin-invoked pre-provisioning of a user row.
+ *
+ * Differs from `ensureUserByEmail` (the lazy auto-provision the
+ * currentUser middleware uses) in three ways:
+ *   1. Throws `DuplicateUserError` if the email already exists — no upsert.
+ *   2. Honours an explicit `isAdmin` opt at creation time.
+ *   3. Leaves `lastSeenAt` null. The middleware will set it on the user's
+ *      first authenticated request, which is also our "have they actually
+ *      shown up yet?" signal for the invited-but-never-logged-in UI state.
+ *
+ * Email validation is intentionally lightweight — just trim/lowercase and
+ * require an `@`. Real validation is done by CF Access at the edge before
+ * the request reaches this server.
+ */
+export function createUserByAdmin(
+  email: string,
+  opts: { isAdmin?: boolean; displayName?: string | null } = {}
+): User {
+  const normalized = (email ?? '').trim().toLowerCase()
+  if (!normalized || !normalized.includes('@')) {
+    throw new Error('Invalid email')
+  }
+  const existing = db
+    .select()
+    .from(users)
+    .where(eq(users.email, normalized))
+    .get()
+  if (existing) {
+    throw new DuplicateUserError(normalized)
+  }
+  const now = new Date().toISOString()
+  const id = crypto.randomUUID()
+  const displayName =
+    typeof opts.displayName === 'string' && opts.displayName.trim() !== ''
+      ? opts.displayName.trim()
+      : null
+  const row: User = {
+    id,
+    email: normalized,
+    displayName,
+    avatarUrl: null,
+    isAdmin: opts.isAdmin === true,
+    createdAt: now,
+    updatedAt: now,
+    lastSeenAt: null,
+  }
+  db.insert(users).values(row).run()
+  logger.info('Admin pre-provisioned user', {
+    id,
+    email: normalized,
+    isAdmin: row.isAdmin,
+  })
+  return row
+}
