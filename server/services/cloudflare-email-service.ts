@@ -39,8 +39,12 @@ export interface SendInviteEmailResult {
    * configured (or explicitly disabled). Distinct from `sent:false`
    * which means CF API was called and failed. */
   skipped: boolean
-  /** CF-returned message id on success. */
-  messageId?: string
+  /** D-10 PR 9: bucket CF's response landed the recipient in.
+   *   - `delivered`: handed off to the destination mail server
+   *   - `queued`: CF will retry (transient failure)
+   *   - `bounced`: permanent failure (bad address, rejected, etc.)
+   * Undefined on transport/HTTP errors that never produced a body. */
+  delivery?: 'delivered' | 'queued' | 'bounced'
   reason?: string
 }
 
@@ -54,10 +58,34 @@ interface SendInviteEmailOptions {
   inviteeDisplayName?: string | null
 }
 
+// Actual CF beta response shape (verified 2026-05-18 against
+// https://developers.cloudflare.com/email-service/api/send-emails/rest-api/):
+//   { success, errors[], messages[], result: { delivered, permanent_bounces, queued } }
+// `result.delivered/queued/permanent_bounces` are arrays of recipient
+// addresses (RCPT-level outcome). No per-message id is exposed.
 interface CfEmailSendResponse {
   success: boolean
   errors?: Array<{ code: number; message: string }>
-  result?: { id?: string; message_id?: string }
+  result?: {
+    delivered?: string[]
+    permanent_bounces?: string[]
+    queued?: string[]
+  }
+}
+
+function classifyOutcome(
+  recipient: string,
+  result: CfEmailSendResponse['result']
+): 'delivered' | 'queued' | 'bounced' | 'unknown' {
+  const lc = recipient.toLowerCase()
+  const has = (arr?: string[]) => !!arr?.some((a) => a.toLowerCase() === lc)
+  if (has(result?.permanent_bounces)) return 'bounced'
+  if (has(result?.delivered)) return 'delivered'
+  if (has(result?.queued)) return 'queued'
+  // CF returned success:true but the recipient isn't in any bucket.
+  // Treat as queued (optimistic) — they reported success and will
+  // surface a webhook event if it ultimately fails.
+  return 'unknown'
 }
 
 // Exposed so tests can inject a mock fetch without `mock.module`
@@ -174,12 +202,22 @@ export async function sendInviteEmail(
         reason: `Cloudflare Email API error: ${summary || 'unknown'}`,
       }
     }
-    const messageId = parsed.result?.id ?? parsed.result?.message_id
+    const outcome = classifyOutcome(trimmedTo, parsed.result)
+    if (outcome === 'bounced') {
+      logger.warn('CF Email permanent bounce', { to: trimmedTo })
+      return {
+        sent: false,
+        skipped: false,
+        delivery: 'bounced',
+        reason: 'Cloudflare reported a permanent bounce — recipient address is invalid or refusing mail',
+      }
+    }
+    const delivery = outcome === 'unknown' ? 'queued' : outcome
     logger.info('Sent invite email via Cloudflare', {
       to: trimmedTo,
-      messageId,
+      delivery,
     })
-    return { sent: true, skipped: false, messageId }
+    return { sent: true, skipped: false, delivery }
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
     logger.warn('CF Email send failed', { to: trimmedTo, error: message })

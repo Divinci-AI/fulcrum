@@ -18,14 +18,20 @@ import { createLogger } from '../lib/logger'
 const logger = createLogger('InviteEmail')
 
 export interface DraftInviteEmailResult {
-  /** True iff a Gmail draft was created OR a CF Email send succeeded. */
+  /** True iff a Gmail draft was created OR a CF Email send succeeded.
+   * "Succeeded" for CF = recipient is in delivered/queued (NOT
+   * permanent_bounces — those flip drafted:false with reason). */
   drafted: boolean
   /** D-10 PR 8: which path actually delivered. `cloudflare` is a true
    * send; `gmail-draft` is a "review and click send" draft; `none` is
    * the no-Gmail-account, no-CF-Email fallback. */
   mode: 'cloudflare' | 'gmail-draft' | 'none'
-  /** Draft id (Gmail) OR message id (CF Email), depending on mode. */
+  /** Gmail draft id, when mode='gmail-draft'. */
   draftId?: string
+  /** D-10 PR 9: CF outcome bucket when mode='cloudflare'.
+   * 'delivered' = handed off to destination MX. 'queued' = CF will
+   * retry. 'bounced' is impossible here (drafted would be false). */
+  delivery?: 'delivered' | 'queued' | 'bounced'
   reason?: string
 }
 
@@ -96,12 +102,22 @@ export async function draftInviteEmail(
   })
   if (!cf.skipped) {
     if (cf.sent) {
-      return { drafted: true, mode: 'cloudflare', draftId: cf.messageId }
+      return {
+        drafted: true,
+        mode: 'cloudflare',
+        delivery: cf.delivery,
+      }
     }
-    // CF Email is configured but the call failed — surface that.
-    // Don't silently fall back to Gmail draft; the operator chose CF
-    // explicitly and needs to know it didn't work.
-    return { drafted: false, mode: 'cloudflare', reason: cf.reason }
+    // CF Email is configured but the call failed (HTTP error OR
+    // permanent bounce). Surface the reason; don't silently fall
+    // back to Gmail draft — the operator chose CF explicitly and
+    // needs to know it didn't work.
+    return {
+      drafted: false,
+      mode: 'cloudflare',
+      delivery: cf.delivery,
+      reason: cf.reason,
+    }
   }
 
   // --- Pre-existing path: Gmail draft in the inviter's account ---

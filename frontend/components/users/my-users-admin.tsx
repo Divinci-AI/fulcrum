@@ -65,17 +65,20 @@ export function MyUsersAdmin() {
         else fragments.push(`CF Access update failed: ${cfAccess.reason ?? 'unknown'}`)
       }
       if (inviteEmailResult.drafted) {
-        // D-10 PR 8: distinguish the two delivery paths so the admin
-        // knows whether they need to open Gmail vs. trust it shipped.
         if (inviteEmailResult.mode === 'cloudflare') {
-          fragments.push('invite email sent via Cloudflare')
+          // D-10 PR 9: surface delivered vs queued so the admin knows
+          // whether the recipient's mail server already accepted it.
+          const verb = inviteEmailResult.delivery === 'queued'
+            ? 'queued for delivery via Cloudflare'
+            : 'sent via Cloudflare'
+          fragments.push(`invite email ${verb}`)
         } else {
           fragments.push('invite email drafted — review in Gmail')
         }
       } else if (inviteEmailResult.mode === 'cloudflare') {
-        // CF was configured but the send failed — surface that as a
-        // warning fragment so the admin notices the email didn't go.
-        fragments.push(`Cloudflare Email send failed: ${inviteEmailResult.reason ?? 'unknown'}`)
+        // CF configured but the send failed — bounce or transport error.
+        const tag = inviteEmailResult.delivery === 'bounced' ? 'bounced' : 'failed'
+        fragments.push(`Cloudflare Email ${tag}: ${inviteEmailResult.reason ?? 'unknown'}`)
       }
       const detail = fragments.length > 0 ? ` (${fragments.join('; ')})` : ''
       const cfFailed = cfAccess.configured && !cfAccess.ok
@@ -107,12 +110,14 @@ export function MyUsersAdmin() {
       const { inviteEmail: result } = await resendInvite.mutateAsync(target.id)
       if (result.drafted) {
         if (result.mode === 'cloudflare') {
-          toast.success(`Invite email re-sent to ${target.email} via Cloudflare`)
+          const verb = result.delivery === 'queued' ? 're-queued via Cloudflare' : 're-sent via Cloudflare'
+          toast.success(`Invite email ${verb} to ${target.email}`)
         } else {
           toast.success(`Invite email re-drafted for ${target.email} — review in Gmail`)
         }
       } else {
-        toast.warning(`Could not deliver invite for ${target.email}: ${result.reason ?? 'unknown'}`)
+        const tag = result.delivery === 'bounced' ? 'bounced' : 'failed'
+        toast.warning(`Invite ${tag} for ${target.email}: ${result.reason ?? 'unknown'}`)
       }
     } catch (err) {
       toast.error(err instanceof Error ? err.message : String(err))
