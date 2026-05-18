@@ -88,3 +88,33 @@ export function useSetUserAdmin() {
     },
   })
 }
+
+// D-10 PR 6 — resend the Gmail invite draft for an existing user row.
+// Useful when the initial draft failed (e.g. Google account needed
+// re-auth) or when the admin wants to remind an invitee.
+export function useResendInvite() {
+  return useMutation({
+    mutationFn: (id: string) =>
+      fetchJSON<{ user: TenantUser; inviteEmail: InviteEmailResult }>(
+        `/api/users/${id}/resend-invite`,
+        { method: 'POST' }
+      ),
+  })
+}
+
+// D-10 PR 6 — hard-delete a user. The server refuses self-delete and
+// last-admin-delete with 409.
+export function useDeleteUser() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (id: string) =>
+      fetchJSON<{
+        success: boolean
+        cfAccess: CfAccessResult
+        cleanup: Record<string, number>
+      }>(`/api/users/${id}`, { method: 'DELETE' }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: LIST_KEY })
+    },
+  })
+}
