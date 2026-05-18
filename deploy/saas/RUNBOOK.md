@@ -478,7 +478,8 @@ Until PR 5 lands, the workflow is:
   swap to GKE; the compose template is container-native so the lift is
   k8s manifests.
 - **CASA submission** — required before we cross 100 total Google-OAuth
-  users. Plan 2–6 months of lead time + $500–$4,500/yr.
+  users. Plan 2–6 months of lead time + $500–$4,500/yr. **Prep checklist
+  at `deploy/saas/CASA-PREP.md`** — work it before engaging an assessor.
 
 ---
 
