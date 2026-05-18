@@ -1672,4 +1672,19 @@ export class FulcrumClient {
   }> {
     return this.fetch('/api/users/me')
   }
+
+  // D-9 Phase C — return the most recent page-context snapshot the
+  // user's browser has published. Used by MCP tools so an agent can
+  // answer "what is the user looking at?" without polling the page.
+  async getPageContext(): Promise<{
+    context: {
+      route: string
+      selection?: { kind: string; id: string } | null
+      visibleEntities?: Record<string, string[] | undefined>
+      metadata?: Record<string, unknown>
+      updatedAt: string
+    } | null
+  }> {
+    return this.fetch('/api/users/me/page-context')
+  }
 }

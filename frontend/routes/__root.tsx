@@ -2,6 +2,7 @@ import { useState, useCallback, useEffect } from 'react'
 import { Outlet, createRootRoute, useRouterState } from '@tanstack/react-router'
 import { Header } from '@/components/layout/header'
 import { useTaskSync } from '@/hooks/use-task-sync'
+import { usePageContextPublisher } from '@/hooks/use-page-context-publisher'
 import { useLanguageSync } from '@/hooks/use-language-sync'
 import { useThemeSync } from '@/hooks/use-theme-sync'
 import { useAutoScrollSync } from '@/hooks/use-auto-scroll-sync'
@@ -22,6 +23,15 @@ export const Route = createRootRoute({
 
 function TaskSync() {
   useTaskSync()
+  return null
+}
+
+// D-9 Phase C — publish the current page context over WS so MCP tools
+// can answer "what is the user looking at?" without polling the
+// browser. Mounted once at the root so navigation between routes
+// fires updates without re-establishing the socket.
+function PageContextPublisher() {
+  usePageContextPublisher()
   return null
 }
 
@@ -115,6 +125,7 @@ function RootLayout() {
     <KeyboardProvider>
       <div className="flex h-screen flex-col overflow-x-hidden bg-background text-foreground">
         <TaskSync />
+        <PageContextPublisher />
         <LanguageSync />
         <ThemeSync />
         <AutoScrollSync />

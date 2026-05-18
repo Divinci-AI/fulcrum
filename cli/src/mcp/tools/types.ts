@@ -27,5 +27,7 @@ export const ToolCategorySchema = z.enum([
   'assistant',
   'caldav',
   'memory',
+  // D-9 Phase C — browser/page state surface for agents.
+  'ui',
 ])
 export const AgentTypeSchema = z.enum(['claude', 'opencode'])
