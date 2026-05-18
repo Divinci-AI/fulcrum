@@ -573,6 +573,11 @@ describe('Config Routes', () => {
       // Cloudflare integration keys (managed via integrations routes)
       'integrations.cloudflareApiToken',
       'integrations.cloudflareAccountId',
+      // D-8 PR 5: per-tenant CF Access app+policy IDs. Server-only
+      // knobs settable via `fulcrum config set`; not exposed in
+      // shared/config-keys.ts because no client code reads them.
+      'integrations.cloudflareAccessAppId',
+      'integrations.cloudflareAccessPolicyId',
       // Channel settings (managed via messaging/channel routes)
       ...Array.from(VALID_SETTING_PATHS).filter(
         (p) => p.startsWith('channels.')

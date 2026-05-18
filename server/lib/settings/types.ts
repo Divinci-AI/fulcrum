@@ -114,6 +114,19 @@ export interface Settings {
   integrations: {
     cloudflareApiToken: string | null
     cloudflareAccountId: string | null
+    /**
+     * Cloudflare Access App ID — the app fronting this Fulcrum tenant.
+     * D-8 PR 5 reads this to PUT into `/apps/{id}/policies/{id}`.
+     * Optional: when null, the invite flow skips the CF call and a
+     * Fulcrum invite only stamps the local user row.
+     */
+    cloudflareAccessAppId: string | null
+    /**
+     * Cloudflare Access **Policy** ID inside the App above. The "Per-user
+     * invites" companion policy created per RUNBOOK §9. The invite flow
+     * appends `{ email: { email: ... } }` to that policy's include[].
+     */
+    cloudflareAccessPolicyId: string | null
     googleClientId: string | null
     googleClientSecret: string | null
   }
@@ -172,6 +185,8 @@ export const DEFAULT_SETTINGS: Settings = {
   integrations: {
     cloudflareApiToken: null,
     cloudflareAccountId: null,
+    cloudflareAccessAppId: null,
+    cloudflareAccessPolicyId: null,
     googleClientId: null,
     googleClientSecret: null,
   },
@@ -281,6 +296,8 @@ export const VALID_SETTING_PATHS = new Set([
   'editor.sshPort',
   'integrations.cloudflareApiToken',
   'integrations.cloudflareAccountId',
+  'integrations.cloudflareAccessAppId',
+  'integrations.cloudflareAccessPolicyId',
   'integrations.googleClientId',
   'integrations.googleClientSecret',
   'agent.defaultAgent',

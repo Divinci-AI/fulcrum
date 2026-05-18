@@ -31,6 +31,8 @@ export const FNOX_CONFIG_MAP: Record<string, ConfigEntry> = {
   // Integrations (secrets)
   'integrations.cloudflareApiToken': { fnoxKey: 'FULCRUM_CLOUDFLARE_API_TOKEN', provider: 'age', type: 'string' },
   'integrations.cloudflareAccountId': { fnoxKey: 'FULCRUM_CLOUDFLARE_ACCOUNT_ID', provider: 'age', type: 'string' },
+  'integrations.cloudflareAccessAppId': { fnoxKey: 'FULCRUM_CLOUDFLARE_ACCESS_APP_ID', provider: 'plain', type: 'string' },
+  'integrations.cloudflareAccessPolicyId': { fnoxKey: 'FULCRUM_CLOUDFLARE_ACCESS_POLICY_ID', provider: 'plain', type: 'string' },
   'integrations.googleClientId': { fnoxKey: 'FULCRUM_GOOGLE_CLIENT_ID', provider: 'age', type: 'string' },
   'integrations.googleClientSecret': { fnoxKey: 'FULCRUM_GOOGLE_CLIENT_SECRET', provider: 'age', type: 'string' },
 

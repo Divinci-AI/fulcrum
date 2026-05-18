@@ -25,6 +25,7 @@ import {
   mintToken,
   revokeToken,
 } from '../services/api-token-service'
+import { addEmailToPolicy } from '../services/cloudflare-access'
 import { requireAdminUser, requireUser, type CurrentUserContext } from '../middleware/current-user'
 
 const app = new Hono<CurrentUserContext>()
@@ -198,12 +199,12 @@ app.post('/', async (c) => {
   if (typeof body.email !== 'string') {
     return c.json({ error: 'email (string) is required' }, 400)
   }
+  let user
   try {
-    const user = createUserByAdmin(body.email, {
+    user = createUserByAdmin(body.email, {
       isAdmin: body.isAdmin,
       displayName: body.displayName,
     })
-    return c.json({ user, invitedBy: caller.id }, 201)
   } catch (err) {
     if (err instanceof DuplicateUserError) {
       return c.json({ error: err.message }, 409)
@@ -213,6 +214,18 @@ app.post('/', async (c) => {
       400
     )
   }
+
+  // D-8 PR 5: chain CF Access policy update. Soft-fails — the local row
+  // exists regardless; the result is surfaced so the admin UI can flag
+  // "manual CF step required" if the API call didn't land. When CF
+  // Access isn't configured (skipped), we return ok: true to keep the
+  // happy-path UX simple — the operator hasn't asked for CF chaining.
+  const cf = await addEmailToPolicy(user.email)
+  const cfAccess = cf.skipped
+    ? { ok: true, configured: false }
+    : { ok: cf.ok, configured: true, reason: cf.reason }
+
+  return c.json({ user, invitedBy: caller.id, cfAccess }, 201)
 })
 
 // GET /api/users/:id — single user lookup. 404 if unknown.
