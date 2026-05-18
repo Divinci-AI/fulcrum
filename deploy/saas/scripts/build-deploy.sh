@@ -13,6 +13,7 @@
 #   ./scripts/build-deploy.sh --skip-build       # reuse existing local image
 #   ./scripts/build-deploy.sh --skip-e2e         # skip prod Playwright run
 #   ./scripts/build-deploy.sh --skip-stream      # local image already on host
+#   ./scripts/build-deploy.sh --prune            # also `docker image prune -f` on host after recreate
 #   ./scripts/build-deploy.sh --help
 #
 # Requires the operator's `~/.zshrc` to export:
@@ -29,6 +30,11 @@ TENANT="acme"
 SKIP_BUILD=0
 SKIP_STREAM=0
 SKIP_E2E=0
+# Default off so the operator keeps the previous image as a rollback
+# candidate. Opt in with --prune once you're confident the new image
+# is good (or just to free disk — every deploy adds ~3GB of layers
+# and the 96GB GCE root fills in ~30 deploys without cleanup).
+PRUNE=0
 IMAGE_TAG="divinci-ai/fulcrum:dev"
 
 GCP_PROJECT="${GCP_PROJECT:-fulcrum-mike-2026}"
@@ -46,6 +52,7 @@ for arg in "$@"; do
     --skip-build)  SKIP_BUILD=1 ;;
     --skip-stream) SKIP_STREAM=1 ;;
     --skip-e2e)    SKIP_E2E=1 ;;
+    --prune)       PRUNE=1 ;;
     --image=*)     IMAGE_TAG="${arg#*=}" ;;
     --help|-h)     usage 0 ;;
     *)
@@ -124,6 +131,17 @@ if [ "$SKIP_E2E" -eq 0 ]; then
   fi
 else
   log "Skipping prod e2e (--skip-e2e)"
+fi
+
+# --- Step 5: optional image prune on host ---
+# Discovered the hard way deploying D-10 PR 8: 21 dangling images
+# from this session's deploy cadence filled the 96GB root and the
+# next docker load failed with "no space left on device". Defaults
+# off so an operator keeps a rollback image; flip --prune on once
+# confident or to recover from a near-full host.
+if [ "$PRUNE" -eq 1 ]; then
+  log "Pruning dangling images on host…"
+  "${SSH_BASE[@]}" --command='docker image prune -f | tail -2'
 fi
 
 log "✓ Deploy complete: tenant=$TENANT image=$IMAGE_TAG"
