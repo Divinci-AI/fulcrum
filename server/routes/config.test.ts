@@ -583,7 +583,10 @@ describe('Config Routes', () => {
       'integrations.cloudflareEmailEnabled',
       'integrations.cloudflareEmailFromAddress',
       // D-11 PR 2: shared secret between CF Email Worker and our
-      // /api/email-events ingest endpoint. Server-only secret.
+      // /api/email-events ingest endpoint. D-11 PR 4 added a
+      // Settings UI input for it but it's not in shared/config-keys.ts
+      // because no client code reads the raw value (UI only sees the
+      // masked echo).
       'integrations.cloudflareEmailIngestSecret',
       // Channel settings (managed via messaging/channel routes)
       ...Array.from(VALID_SETTING_PATHS).filter(

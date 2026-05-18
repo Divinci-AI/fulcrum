@@ -211,6 +211,10 @@ app.post('/settings', async (c) => {
       // D-10 PR 8: Cloudflare Email Sending toggle + from address.
       cloudflareEmailEnabled?: boolean | null
       cloudflareEmailFromAddress?: string | null
+      // D-11 PR 4: shared secret between this server and the CF Email
+      // Worker that POSTs bounces back. Treated like a secret — mask
+      // round-trip, only update when client sends a real value.
+      cloudflareEmailIngestSecret?: string | null
     }>()
 
     // Helper to check if a value is a masked placeholder (all dots)
@@ -239,6 +243,9 @@ app.post('/settings', async (c) => {
     }
     if (body.cloudflareEmailFromAddress !== undefined) {
       updateSettingByPath('integrations.cloudflareEmailFromAddress', body.cloudflareEmailFromAddress)
+    }
+    if (body.cloudflareEmailIngestSecret !== undefined && !isMaskedValue(body.cloudflareEmailIngestSecret)) {
+      updateSettingByPath('integrations.cloudflareEmailIngestSecret', body.cloudflareEmailIngestSecret)
     }
 
     const settings = getSettings()
@@ -283,6 +290,11 @@ app.get('/settings', async (c) => {
     // D-10 PR 8: CF Email Sending state (non-secret).
     cloudflareEmailEnabled: settings.integrations.cloudflareEmailEnabled ?? false,
     cloudflareEmailFromAddress: settings.integrations.cloudflareEmailFromAddress ?? null,
+    // D-11 PR 4: masked ingest secret for the bounce-receiver wire.
+    // Mask + length so the UI can show "configured" without leaking.
+    cloudflareEmailIngestSecret: settings.integrations.cloudflareEmailIngestSecret
+      ? '•'.repeat(settings.integrations.cloudflareEmailIngestSecret.length)
+      : null,
     cloudflareConfigured: !!token,
     tunnelsAvailable: !!(token && accountId),
     cfAccessInviteConfigured: !!(token && accountId && accessAppId && accessPolicyId),
@@ -291,6 +303,16 @@ app.get('/settings', async (c) => {
       accountId &&
       settings.integrations.cloudflareEmailEnabled &&
       settings.integrations.cloudflareEmailFromAddress
+    ),
+    // D-11 PR 4: true when the bounce-handling wire is fully wired
+    // (CF Email send + ingest secret + the Worker bound on the CF side
+    // are all in place). Worker binding can't be detected from here,
+    // so this is the server-side necessary-but-not-sufficient flag.
+    cfBounceIngestConfigured: !!(
+      token &&
+      accountId &&
+      settings.integrations.cloudflareEmailEnabled &&
+      settings.integrations.cloudflareEmailIngestSecret
     ),
   })
 })

@@ -530,10 +530,18 @@ export interface DeploymentSettings {
   /** D-10 PR 8: CF Email Sending toggle + verified sender address. */
   cloudflareEmailEnabled: boolean
   cloudflareEmailFromAddress: string | null
+  /** D-11 PR 4: masked echo of the bounce-receiver shared secret.
+   * Server returns dots-of-length when set, null when unset. UI
+   * uses presence/absence as the "configured" indicator. */
+  cloudflareEmailIngestSecret: string | null
   cloudflareConfigured: boolean
   tunnelsAvailable: boolean
   cfAccessInviteConfigured: boolean
   cfEmailInviteConfigured: boolean
+  /** Server-side prerequisites for bounce ingest. The Worker
+   * binding lives in CF dashboard and can't be detected from here,
+   * so this is "Fulcrum's half is wired". */
+  cfBounceIngestConfigured: boolean
 }
 
 export function useDeploymentSettings() {
@@ -555,6 +563,7 @@ export function useUpdateDeploymentSettings() {
       cloudflareAccessPolicyId?: string | null
       cloudflareEmailEnabled?: boolean | null
       cloudflareEmailFromAddress?: string | null
+      cloudflareEmailIngestSecret?: string | null
     }) =>
       fetchJSON<{ success: boolean }>(`${API_BASE}/api/deployment/settings`, {
         method: 'POST',
