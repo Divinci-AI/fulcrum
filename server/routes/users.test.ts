@@ -269,6 +269,41 @@ describe('POST /api/users', () => {
     expect(res.status).toBe(403)
   })
 
+  // D-11 PR 5 — GET /api/users/email-delivery-status.
+  test('GET email-delivery-status returns {statuses:[]} when no events exist', async () => {
+    const { get } = createTestApp()
+    const res = await get('/api/users/email-delivery-status')
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as { statuses: unknown[] }
+    expect(body.statuses).toEqual([])
+  })
+
+  test('GET email-delivery-status returns most-recent per user after recordEvent', async () => {
+    const { get } = createTestApp()
+    insertUser('target@example.com', { isAdmin: false })
+
+    const { recordEvent } = await import('../services/email-event-service')
+    recordEvent({ recipientEmail: 'target@example.com', eventType: 'delivered', occurredAt: '2026-05-18T01:00:00Z' })
+    recordEvent({ recipientEmail: 'target@example.com', eventType: 'bounced',   occurredAt: '2026-05-18T05:00:00Z' })
+
+    const res = await get('/api/users/email-delivery-status')
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as { statuses: Array<{ recipientEmail: string; eventType: string }> }
+    expect(body.statuses.length).toBe(1)
+    expect(body.statuses[0].recipientEmail).toBe('target@example.com')
+    expect(body.statuses[0].eventType).toBe('bounced')
+  })
+
+  test('GET email-delivery-status 403 for non-admin', async () => {
+    const { get } = createTestApp()
+    insertUser('peer@example.com', { isAdmin: false })
+    const res = await get(
+      '/api/users/email-delivery-status',
+      { 'Cf-Access-Authenticated-User-Email': 'peer@example.com' }
+    )
+    expect(res.status).toBe(403)
+  })
+
   // D-9 PR 2: invite-email shape on the response.
   test('response includes inviteEmail:drafted:false when admin has no Gmail-enabled account', async () => {
     const { post } = createTestApp()

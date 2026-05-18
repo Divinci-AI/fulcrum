@@ -33,6 +33,37 @@ export function useListUsers() {
   })
 }
 
+// D-11 PR 5: latest email delivery event per user. Admin-only.
+// Members UI uses this to show bounce/complaint badges on rows
+// whose last invite attempt failed.
+export interface UserDeliveryStatus {
+  userId: string
+  recipientEmail: string
+  eventType: 'delivered' | 'bounced' | 'complained' | 'queued' | 'deferred' | 'dropped'
+  occurredAt: string
+  reason?: string
+}
+
+const DELIVERY_STATUS_KEY = ['users', 'email-delivery-status'] as const
+
+export function useEmailDeliveryStatus() {
+  return useQuery({
+    queryKey: DELIVERY_STATUS_KEY,
+    queryFn: async () => {
+      const { statuses } = await fetchJSON<{ statuses: UserDeliveryStatus[] }>(
+        `/api/users/email-delivery-status`
+      )
+      // Index by userId for O(1) lookup in the Members render loop.
+      const map = new Map<string, UserDeliveryStatus>()
+      for (const s of statuses) map.set(s.userId, s)
+      return map
+    },
+    // Delivery events update on a webhook cadence (minutes-to-hours),
+    // not on user interaction. 60s staleTime is plenty.
+    staleTime: 60_000,
+  })
+}
+
 export interface InviteUserVars {
   email: string
   isAdmin?: boolean

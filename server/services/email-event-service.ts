@@ -121,6 +121,79 @@ export function mostRecentEventFor(email: string): EmailSendEvent | null {
 }
 
 /**
+ * D-11 PR 5: latest event per known recipient, scoped to users
+ * that exist in the tenant. Used by the Members UI to show a
+ * bounce badge on rows whose last delivery attempt failed.
+ *
+ * Single SQL pass — for each (recipient_email, max(occurred_at))
+ * pair, returns the row. Joined to `users` so we get the row's
+ * userId for direct map lookup in the frontend.
+ */
+export interface UserDeliveryStatus {
+  userId: string
+  recipientEmail: string
+  eventType: string
+  occurredAt: string
+  reason?: string
+}
+
+export function latestEventPerUser(): UserDeliveryStatus[] {
+  // For each (recipient_email, max(occurred_at)) pair, fetch the
+  // row + the matching user row. Join to users on lowered email
+  // so a status only surfaces when the recipient is a known tenant
+  // member (we don't expose delivery status for test sends).
+  const rows = db.all(sql`
+    SELECT u.id AS userId,
+           e.recipient_email AS recipientEmail,
+           e.event_type AS eventType,
+           e.occurred_at AS occurredAt,
+           e.raw_payload AS rawPayload
+    FROM email_send_events e
+    JOIN (
+      SELECT recipient_email, MAX(occurred_at) AS max_at
+      FROM email_send_events
+      GROUP BY recipient_email
+    ) latest
+      ON latest.recipient_email = e.recipient_email
+      AND latest.max_at = e.occurred_at
+    JOIN users u
+      ON LOWER(u.email) = e.recipient_email
+  `) as Array<{
+    userId: string
+    recipientEmail: string
+    eventType: string
+    occurredAt: string
+    rawPayload: string | Record<string, unknown> | null
+  }>
+
+  return rows.map((r) => {
+    let reason: string | undefined
+    if (r.rawPayload) {
+      // raw_payload is JSON in the schema — drizzle returns string
+      // here because raw SQL doesn't auto-parse $type JSON columns.
+      const parsed =
+        typeof r.rawPayload === 'string'
+          ? (() => {
+              try {
+                return JSON.parse(r.rawPayload as string) as { reason?: string }
+              } catch {
+                return null
+              }
+            })()
+          : (r.rawPayload as { reason?: string })
+      reason = parsed?.reason
+    }
+    return {
+      userId: r.userId,
+      recipientEmail: r.recipientEmail,
+      eventType: r.eventType,
+      occurredAt: r.occurredAt,
+      reason,
+    }
+  })
+}
+
+/**
  * Aggregate count of bounce/complaint events since `since`. Used by
  * a future monitoring dashboard / alerting cron.
  */
