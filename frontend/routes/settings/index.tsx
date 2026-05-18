@@ -213,6 +213,10 @@ function SettingsPage() {
   const [toastEnabled, setToastEnabled] = useState(true)
   const [desktopEnabled, setDesktopEnabled] = useState(true)
   const [soundEnabled, setSoundEnabled] = useState(false)
+  // D-10 PR 7: per-event control for the kanban-drag-between-columns
+  // noise. Default true (silent) — the user explicitly asked for the
+  // noises gone. Toggle off to bring the goat bleat back on every move.
+  const [silenceTaskMoves, setSilenceTaskMoves] = useState(true)
   const [slackEnabled, setSlackEnabled] = useState(false)
   const [slackWebhook, setSlackWebhook] = useState('')
   const [discordEnabled, setDiscordEnabled] = useState(false)
@@ -297,6 +301,7 @@ function SettingsPage() {
       setDesktopEnabled(notificationSettings.desktop?.enabled ?? true)
       setSoundEnabled(notificationSettings.sound?.enabled ?? false)
       setHasCustomSound(!!notificationSettings.sound?.customSoundFile)
+      setSilenceTaskMoves(notificationSettings.sound?.silenceTaskMoves ?? true)
       setSlackEnabled(notificationSettings.slack?.enabled ?? false)
       setSlackWebhook(notificationSettings.slack?.webhookUrl ?? '')
       setDiscordEnabled(notificationSettings.discord?.enabled ?? false)
@@ -436,6 +441,7 @@ function SettingsPage() {
     toastEnabled !== (notificationSettings.toast?.enabled ?? true) ||
     desktopEnabled !== (notificationSettings.desktop?.enabled ?? true) ||
     soundEnabled !== (notificationSettings.sound?.enabled ?? false) ||
+    silenceTaskMoves !== (notificationSettings.sound?.silenceTaskMoves ?? true) ||
     slackEnabled !== (notificationSettings.slack?.enabled ?? false) ||
     slackWebhook !== (notificationSettings.slack?.webhookUrl ?? '') ||
     slackUseMessaging !== (notificationSettings.slack?.useMessagingChannel ?? false) ||
@@ -653,7 +659,7 @@ function SettingsPage() {
               enabled: notificationsEnabled,
               toast: { enabled: toastEnabled },
               desktop: { enabled: desktopEnabled },
-              sound: { enabled: soundEnabled },
+              sound: { enabled: soundEnabled, silenceTaskMoves },
               slack: { enabled: slackEnabled, webhookUrl: slackWebhook, useMessagingChannel: slackUseMessaging },
               discord: { enabled: discordEnabled, webhookUrl: discordWebhook, useMessagingChannel: discordUseMessaging },
               pushover: { enabled: pushoverEnabled, appToken: pushoverAppToken, userKey: pushoverUserKey },
@@ -2454,6 +2460,21 @@ function SettingsPage() {
                         {t('notifications.customSoundActive')}
                       </p>
                     )}
+                    {/* D-10 PR 7 — per-event sound suppression for the
+                        kanban-drag-between-columns case. Default true
+                        (silent). Toggle off if you want the chimes back
+                        on every column move. Indented + label-only
+                        because it's a sub-control of "Sound". */}
+                    <div className="flex items-center gap-2 ml-10">
+                      <Switch
+                        checked={silenceTaskMoves}
+                        onCheckedChange={setSilenceTaskMoves}
+                        disabled={isLoading || !notificationsEnabled || !soundEnabled}
+                      />
+                      <label className="text-xs text-muted-foreground select-none">
+                        Silence sound for task column moves
+                      </label>
+                    </div>
                   </div>
 
                   {/* Slack */}

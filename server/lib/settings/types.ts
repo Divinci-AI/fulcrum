@@ -357,6 +357,14 @@ export interface LegacySettings {
 export interface SoundNotificationConfig {
   enabled: boolean
   customSoundFile?: string // Path to user-uploaded sound file
+  /**
+   * D-10 PR 7: when true, the sound is suppressed specifically for
+   * `task_status_change` events (i.e. drag-between-kanban-columns and
+   * other status flips). Default true because the goat-bleat-on-every-
+   * column-move was noisy enough to draw a "remove the noises" request
+   * from the operator. Set false to bring the chimes back.
+   */
+  silenceTaskMoves?: boolean
 }
 
 export interface ToastNotificationConfig {

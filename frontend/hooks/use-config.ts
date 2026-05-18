@@ -477,7 +477,7 @@ export interface NotificationSettings {
   enabled: boolean
   toast: { enabled: boolean }
   desktop: { enabled: boolean }
-  sound: { enabled: boolean; customSoundFile?: string }
+  sound: { enabled: boolean; customSoundFile?: string; silenceTaskMoves?: boolean }
   slack: { enabled: boolean; webhookUrl: string; useMessagingChannel?: boolean }
   discord: { enabled: boolean; webhookUrl: string; useMessagingChannel?: boolean }
   pushover: { enabled: boolean; appToken: string; userKey: string }

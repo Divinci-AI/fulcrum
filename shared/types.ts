@@ -422,6 +422,10 @@ export interface ConfigResponse {
 export interface SoundNotificationConfig {
   enabled: boolean
   customSoundFile?: string // Path to user-uploaded sound file
+  /** D-10 PR 7: when true, sound is suppressed for
+   * `task_status_change` events (kanban column moves). Default true
+   * so the goat bleat doesn't fire on every drag. */
+  silenceTaskMoves?: boolean
 }
 
 export interface SlackNotificationConfig {

@@ -48,6 +48,7 @@ export function getNotificationSettings(): NotificationSettings {
     sound: {
       enabled: (fv('notifications.sound.enabled') as boolean | null) ?? true,
       customSoundFile: (fv('notifications.sound.customSoundFile') as string | undefined) ?? undefined,
+      silenceTaskMoves: (fv('notifications.sound.silenceTaskMoves') as boolean | null) ?? true,
     },
     slack: {
       enabled: (fv('notifications.slack.enabled') as boolean | null) ?? false,
@@ -152,6 +153,9 @@ export function updateNotificationSettingsSync(
   setFnoxValue('notifications.sound.enabled', updated.sound.enabled)
   if (updated.sound.customSoundFile !== undefined) {
     setFnoxValue('notifications.sound.customSoundFile', updated.sound.customSoundFile || null)
+  }
+  if (updated.sound.silenceTaskMoves !== undefined) {
+    setFnoxValue('notifications.sound.silenceTaskMoves', updated.sound.silenceTaskMoves)
   }
   setFnoxValue('notifications.slack.enabled', updated.slack.enabled)
   if (updated.slack.webhookUrl !== undefined) {
