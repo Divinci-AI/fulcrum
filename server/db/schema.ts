@@ -812,6 +812,32 @@ export const channelIdentityMappings = sqliteTable('channel_identity_mappings', 
 export type ChannelIdentityMapping = typeof channelIdentityMappings.$inferSelect
 export type NewChannelIdentityMapping = typeof channelIdentityMappings.$inferInsert
 
+// User API tokens (D-8 PR 3a): operator-minted bearer tokens for the
+// `fulcrum` CLI (and any future API integration) to act as a specific
+// Fulcrum user. The plaintext token is `fulc_<40 base64url chars>` =
+// ~240 bits of entropy and is shown to the user ONCE on mint; we store
+// only the SHA-256 hex digest. Lookup is single-row by the unique
+// index on token_hash.
+//
+// The Bearer middleware (extended `currentUser`) checks Authorization
+// first and overrides any CF Access header — that's intentional so an
+// operator running the CLI from their laptop sees their own Fulcrum
+// identity instead of whatever email the CF Access service token
+// resolves to. Invalid/expired tokens 401 immediately (strict mode),
+// rather than silently degrading to anonymous.
+export const userApiTokens = sqliteTable('user_api_tokens', {
+  id: text('id').primaryKey(),
+  userId: text('user_id').notNull(),
+  name: text('name').notNull(), // operator-supplied label e.g. "laptop-cli"
+  tokenHash: text('token_hash').notNull().unique(), // sha256 hex, never the plaintext
+  prefix: text('prefix').notNull(), // first 12 chars of plaintext for UI display ("fulc_AbCdEfGh")
+  createdAt: text('created_at').notNull(),
+  lastUsedAt: text('last_used_at'), // null until first auth that uses this token
+  expiresAt: text('expires_at'), // optional ISO timestamp
+})
+export type UserApiToken = typeof userApiTokens.$inferSelect
+export type NewUserApiToken = typeof userApiTokens.$inferInsert
+
 export type GmailDraft = typeof gmailDrafts.$inferSelect
 export type NewGmailDraft = typeof gmailDrafts.$inferInsert
 export type User = typeof users.$inferSelect

@@ -20,6 +20,11 @@ import {
   deleteMapping,
   isChannelType,
 } from '../services/channel-identity-service'
+import {
+  listTokensForUser,
+  mintToken,
+  revokeToken,
+} from '../services/api-token-service'
 import { requireAdminUser, requireUser, type CurrentUserContext } from '../middleware/current-user'
 
 const app = new Hono<CurrentUserContext>()
@@ -109,6 +114,47 @@ app.patch('/me/channel-identities/:channelType', async (c) => {
   } catch (err) {
     return c.json({ error: err instanceof Error ? err.message : 'Upsert failed' }, 400)
   }
+})
+
+// GET /api/users/me/tokens — D-8 PR 3a. List the calling user's API
+// tokens. Returns view rows only — the plaintext is never persisted, so
+// even the server can't return it.
+app.get('/me/tokens', (c) => {
+  const user = requireUser(c)
+  return c.json({ tokens: listTokensForUser(user.id) })
+})
+
+// POST /api/users/me/tokens — mint a new token. The response includes a
+// one-time `plaintext` field; the caller MUST store it immediately,
+// because it cannot be recovered later. Body: { name, expiresAt? }.
+app.post('/me/tokens', async (c) => {
+  const user = requireUser(c)
+  const body = await c.req.json<{ name?: string; expiresAt?: string | null }>()
+  if (typeof body.name !== 'string' || body.name.trim() === '') {
+    return c.json({ error: 'name (non-empty string) is required' }, 400)
+  }
+  try {
+    const minted = mintToken(user.id, {
+      name: body.name,
+      expiresAt: body.expiresAt ?? null,
+    })
+    return c.json({ token: minted }, 201)
+  } catch (err) {
+    return c.json(
+      { error: err instanceof Error ? err.message : 'Mint failed' },
+      400
+    )
+  }
+})
+
+// DELETE /api/users/me/tokens/:id — revoke a token. Only the owner can
+// revoke; trying to revoke someone else's token 404s rather than 403
+// to avoid leaking token-id existence.
+app.delete('/me/tokens/:id', (c) => {
+  const user = requireUser(c)
+  const removed = revokeToken(user.id, c.req.param('id'))
+  if (!removed) return c.json({ error: 'Token not found' }, 404)
+  return c.json({ success: true })
 })
 
 // DELETE /api/users/me/channel-identities/:channelType — clear a mapping.

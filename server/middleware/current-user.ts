@@ -20,6 +20,7 @@ import { createMiddleware } from 'hono/factory'
 import type { Context } from 'hono'
 import { HTTPException } from 'hono/http-exception'
 import { ensureUserByEmail } from '../services/user-service'
+import { resolveBearerUser } from '../services/api-token-service'
 import type { User } from '../db'
 
 const CF_ACCESS_EMAIL_HEADER = 'cf-access-authenticated-user-email'
@@ -30,7 +31,42 @@ export interface CurrentUserContext {
   }
 }
 
+/**
+ * Resolve the request's user identity. Precedence is intentional:
+ *
+ *   1. `Authorization: Bearer fulc_…` — D-8 PR 3a API tokens. Strict
+ *      mode: a malformed/expired/unknown bearer 401s immediately rather
+ *      than silently degrading to anonymous, so CLI auth bugs surface
+ *      as auth errors instead of permission errors at the route layer.
+ *      Bearer wins over CF Access so an operator running the CLI from
+ *      their laptop sees their own Fulcrum identity rather than the CF
+ *      Access service-token identity.
+ *   2. `Cf-Access-Authenticated-User-Email` — the existing edge auth.
+ *   3. `FULCRUM_DEV_USER_EMAIL` env fallback for local dev / e2e.
+ *
+ * If none of the three resolves a user, `c.var.user` is `null` and
+ * routes choose whether to enforce via `requireUser`.
+ */
 export const currentUser = createMiddleware<CurrentUserContext>(async (c, next) => {
+  const auth = c.req.header('Authorization')
+  if (auth?.startsWith('Bearer ')) {
+    // fetch/Hono trim trailing whitespace from header values, so getting
+    // here means at least one non-whitespace char follows "Bearer ".
+    const token = auth.slice(7).trim()
+    const user = resolveBearerUser(token)
+    if (!user) {
+      throw new HTTPException(401, {
+        res: new Response(JSON.stringify({ error: 'Invalid API token' }), {
+          status: 401,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      })
+    }
+    c.set('user', user)
+    await next()
+    return
+  }
+
   const headerEmail = c.req.header(CF_ACCESS_EMAIL_HEADER)
   const fallback = process.env.FULCRUM_DEV_USER_EMAIL
   const email = headerEmail ?? fallback ?? null

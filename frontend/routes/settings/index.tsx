@@ -87,6 +87,7 @@ import { GitHubAccountManager } from '@/components/github/github-account-manager
 import { MyNotificationPreferences } from '@/components/notifications/my-notification-preferences'
 import { MyChannelIdentities } from '@/components/notifications/my-channel-identities'
 import { MyUsersAdmin } from '@/components/users/my-users-admin'
+import { MyApiTokens } from '@/components/users/my-api-tokens'
 import { useCurrentUser } from '@/hooks/use-current-user'
 import { useGoogleAccounts } from '@/hooks/use-google'
 import { GoogleCalendarSettings } from '@/components/google/google-calendar-settings'
@@ -1329,6 +1330,13 @@ function SettingsPage() {
                     <MyUsersAdmin />
                   </SettingsSection>
                 )}
+
+                {/* API tokens — D-8 PR 3a. Self-managed bearer tokens for
+                    the CLI; not admin-gated. Plaintext shown once on
+                    mint. */}
+                <SettingsSection title="API tokens">
+                  <MyApiTokens />
+                </SettingsSection>
 
                 {/* Integrations — D-7 PR 2: GitHubAccountManager is
                     per-user (visible to everyone). Cloudflare + Google
