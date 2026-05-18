@@ -838,6 +838,40 @@ export const userApiTokens = sqliteTable('user_api_tokens', {
 export type UserApiToken = typeof userApiTokens.$inferSelect
 export type NewUserApiToken = typeof userApiTokens.$inferInsert
 
+// Email send events (D-11 PR 1): post-send observability for
+// transactional mail. Stores webhook callbacks from Cloudflare Email
+// (and any future provider) — bounces, deliveries, complaints —
+// keyed on recipient address so a future invite UI can show "this
+// address bounced last time" badges without re-deriving from logs.
+//
+// `userId` is best-effort resolved via users.email at insert time;
+// NULL when no Fulcrum user matches the recipient (e.g. test sends,
+// recently-deleted users). `rawPayload` stores the full webhook body
+// for debug / future-shape adaptation if CF drifts.
+export const emailSendEvents = sqliteTable('email_send_events', {
+  id: text('id').primaryKey(),
+  recipientEmail: text('recipient_email').notNull(),
+  // 'delivered' | 'bounced' | 'complained' | 'queued' | 'deferred' | 'dropped'
+  // (mirrors CF's vocabulary; provider-agnostic enough that other
+  // transactional providers can map into the same set).
+  eventType: text('event_type').notNull(),
+  // When the event happened per the provider's clock. ISO string.
+  occurredAt: text('occurred_at').notNull(),
+  // Provider's full event body for debug + future-proofing if CF
+  // adds fields we don't currently parse.
+  rawPayload: text('raw_payload', { mode: 'json' }).$type<Record<string, unknown>>(),
+  // CF's per-message id when present in the webhook. NULL when the
+  // provider doesn't surface one.
+  providerMessageId: text('provider_message_id'),
+  // FK → users.id when recipient matches a known user, NULL otherwise.
+  userId: text('user_id'),
+  // Server-side insertion time (separate from occurredAt so we can
+  // measure ingest latency).
+  createdAt: text('created_at').notNull(),
+})
+export type EmailSendEvent = typeof emailSendEvents.$inferSelect
+export type NewEmailSendEvent = typeof emailSendEvents.$inferInsert
+
 export type GmailDraft = typeof gmailDrafts.$inferSelect
 export type NewGmailDraft = typeof gmailDrafts.$inferInsert
 export type User = typeof users.$inferSelect
