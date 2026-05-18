@@ -113,6 +113,25 @@ Want to verify a fresh deploy? `--project=prod` after the recreate.
 | `/settings renders` | SPA hydrates without backend boot errors (the symptom we'd have caught on the first Mac-arm64 image had we had this test) |
 | `google-oauth-status shape` | Phase 1 endpoint stays present + shape stable. Skips on builds that predate Phase 1 — flips to PASS when Phase 1 merges into the deployed image |
 
+## Phase B-4 — worktree FS round-trip (gated)
+
+`api/worktree-fs.spec.ts` exercises `/api/fs/write` + `/api/fs/read` +
+`/api/fs/file-stat` end-to-end. It writes to the test container's `/tmp`,
+so it's only safe against the local docker-compose target — never prod.
+
+The spec is **silently skipped** unless `FULCRUM_E2E_LOCAL_FS=1` is set
+in the environment, so the everyday local run stays fast.
+
+```sh
+FULCRUM_E2E_LOCAL_FS=1 \
+  bunx playwright test --config=e2e/playwright.config.ts --project=local
+```
+
+It validates:
+- Write → file-stat round-trip (path correctness, content byte length)
+- Read returns the same content verbatim
+- Path traversal (`../`) rejected with 403, not silently allowed
+
 ## Phase B+C scope (not yet implemented)
 
 - 22 feature specs — one per MCP tool surface (tasks, repos, apps, calendar, gmail, jobs, messaging, memory, search, settings, …)
