@@ -39,11 +39,23 @@ export interface InviteUserVars {
   displayName?: string | null
 }
 
+export interface CfAccessResult {
+  ok: boolean
+  configured: boolean
+  reason?: string
+}
+
+export interface InviteResponse {
+  user: TenantUser
+  invitedBy: string
+  cfAccess: CfAccessResult
+}
+
 export function useInviteUser() {
   const qc = useQueryClient()
   return useMutation({
     mutationFn: (vars: InviteUserVars) =>
-      fetchJSON<{ user: TenantUser; invitedBy: string }>(`/api/users`, {
+      fetchJSON<InviteResponse>(`/api/users`, {
         method: 'POST',
         body: JSON.stringify(vars),
       }),

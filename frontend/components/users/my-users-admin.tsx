@@ -45,13 +45,28 @@ export function MyUsersAdmin() {
     const email = inviteEmail.trim()
     if (!email) return
     try {
-      const { user } = await inviteUser.mutateAsync({
+      const { user, cfAccess } = await inviteUser.mutateAsync({
         email,
         isAdmin: inviteAsAdmin || undefined,
       })
-      toast.success(`Invited ${user.email}`)
       setInviteEmail('')
       setInviteAsAdmin(false)
+      // D-8 PR 6: surface the CF Access chain result. Three cases:
+      //   1. Not configured  → silent success (operator hasn't opted in
+      //      to per-user CF chaining; the Divincians group still covers
+      //      common domains).
+      //   2. Configured + ok → quiet success, mention the edge update.
+      //   3. Configured + failed → loud warning toast so the admin
+      //      knows to manually add the email to CF Access.
+      if (!cfAccess.configured) {
+        toast.success(`Invited ${user.email}`)
+      } else if (cfAccess.ok) {
+        toast.success(`Invited ${user.email} — CF Access policy updated`)
+      } else {
+        toast.warning(
+          `Invited ${user.email}, but CF Access update failed: ${cfAccess.reason ?? 'unknown'}. Add the email manually in the Cloudflare dashboard.`
+        )
+      }
     } catch (err) {
       toast.error(err instanceof Error ? err.message : String(err))
     }
@@ -77,10 +92,13 @@ export function MyUsersAdmin() {
         <h3 className="text-sm font-medium">Members</h3>
         <p className="text-xs text-muted-foreground">
           Invite teammates by email so they appear in mention pickers and
-          assignment dropdowns before their first sign-in. CF Access still
-          gates edge access — invited emails on non-Divincian domains need
-          to be added to a Cloudflare Access policy until D-8 PR 5 wires
-          that step into this flow.
+          assignment dropdowns before their first sign-in. When the
+          per-user CF Access policy is configured (see
+          <code className="mx-1">integrations.cloudflareAccessAppId</code> /
+          <code className="mx-1">.cloudflareAccessPolicyId</code>),
+          invites automatically open the edge for non-Divincian addresses.
+          Otherwise the local row is created and the admin adds the email
+          to Cloudflare Access manually.
         </p>
       </div>
 
