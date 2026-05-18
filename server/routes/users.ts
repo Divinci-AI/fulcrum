@@ -1,5 +1,12 @@
 import { Hono } from 'hono'
-import { getUserById, listUsers, updateUserProfile, setUserAdmin } from '../services/user-service'
+import {
+  getUserById,
+  listUsers,
+  updateUserProfile,
+  setUserAdmin,
+  createUserByAdmin,
+  DuplicateUserError,
+} from '../services/user-service'
 import { listMentionsForUser } from '../services/mention-service'
 import {
   getPreferencesForUser,
@@ -121,6 +128,45 @@ app.delete('/me/channel-identities/:channelType', (c) => {
 // in our SaaS shape because each tenant gets its own container/DB.
 app.get('/', (c) => {
   return c.json({ users: listUsers() })
+})
+
+// POST /api/users — D-8 PR 1. Admin-invoked pre-provisioning. Creates a
+// user row before the invitee's first authenticated request so they show
+// up in mention/assignee pickers immediately.
+//
+// Body: { email: string, isAdmin?: boolean, displayName?: string | null }
+// Returns: 201 { user, invitedBy } | 400 invalid email | 403 non-admin |
+// 409 already exists.
+//
+// CF Access edge admission is still a separate gate — this only stamps
+// the Fulcrum-side identity. A pre-provisioned user can't reach the
+// container until their email also clears CF Access. D-8 PR 5 closes
+// that gap by chaining a Cloudflare Access policy update.
+app.post('/', async (c) => {
+  const caller = requireAdminUser(c)
+  const body = await c.req.json<{
+    email?: string
+    isAdmin?: boolean
+    displayName?: string | null
+  }>()
+  if (typeof body.email !== 'string') {
+    return c.json({ error: 'email (string) is required' }, 400)
+  }
+  try {
+    const user = createUserByAdmin(body.email, {
+      isAdmin: body.isAdmin,
+      displayName: body.displayName,
+    })
+    return c.json({ user, invitedBy: caller.id }, 201)
+  } catch (err) {
+    if (err instanceof DuplicateUserError) {
+      return c.json({ error: err.message }, 409)
+    }
+    return c.json(
+      { error: err instanceof Error ? err.message : 'Invalid request' },
+      400
+    )
+  }
 })
 
 // GET /api/users/:id — single user lookup. 404 if unknown.
