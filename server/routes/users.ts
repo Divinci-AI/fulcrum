@@ -31,6 +31,7 @@ import {
 import { addEmailToPolicy, removeEmailFromPolicy } from '../services/cloudflare-access'
 import { draftInviteEmail } from '../services/invite-email-service'
 import { getPageContext } from '../services/page-context-service'
+import { latestEventPerUser } from '../services/email-event-service'
 import { requireAdminUser, requireUser, type CurrentUserContext } from '../middleware/current-user'
 
 const app = new Hono<CurrentUserContext>()
@@ -190,6 +191,15 @@ app.delete('/me/channel-identities/:channelType', (c) => {
 // in our SaaS shape because each tenant gets its own container/DB.
 app.get('/', (c) => {
   return c.json({ users: listUsers() })
+})
+
+// GET /api/users/email-delivery-status — D-11 PR 5. Returns the most
+// recent email_send_event per user as a batch. Members UI uses this
+// to show bounce/complaint badges. Admin-only because non-admins
+// don't need the delivery audit trail.
+app.get('/email-delivery-status', (c) => {
+  requireAdminUser(c)
+  return c.json({ statuses: latestEventPerUser() })
 })
 
 // POST /api/users — D-8 PR 1. Admin-invoked pre-provisioning. Creates a

@@ -14,6 +14,7 @@ import {
   recentEventsFor,
   mostRecentEventFor,
   bounceCountSince,
+  latestEventPerUser,
 } from './email-event-service'
 
 function insertUser(email: string): string {
@@ -165,6 +166,51 @@ describe('email-event-service', () => {
       recordEvent({ recipientEmail: 'y@example.com', eventType: 'bounced',   occurredAt: '2026-05-18T05:00:00Z' })
       const got = mostRecentEventFor('y@example.com')
       expect(got?.eventType).toBe('bounced')
+    })
+  })
+
+  // D-11 PR 5 — batch latest-event-per-user.
+  describe('latestEventPerUser', () => {
+    test('returns most recent event per user, joined to users table', () => {
+      const alice = insertUser('alice@example.com')
+      const bob = insertUser('bob@example.com')
+      // Stranger NOT in users table; their events shouldn't appear.
+
+      recordEvent({ recipientEmail: 'alice@example.com', eventType: 'delivered', occurredAt: '2026-05-18T01:00:00Z' })
+      recordEvent({ recipientEmail: 'alice@example.com', eventType: 'bounced',   occurredAt: '2026-05-18T05:00:00Z' })
+      recordEvent({ recipientEmail: 'bob@example.com',   eventType: 'delivered', occurredAt: '2026-05-18T04:00:00Z' })
+      recordEvent({ recipientEmail: 'stranger@example.com', eventType: 'bounced', occurredAt: '2026-05-18T06:00:00Z' })
+
+const statuses = latestEventPerUser()
+      const byUser = new Map(statuses.map((s) => [s.userId, s]))
+
+      expect(statuses.length).toBe(2)
+      expect(byUser.get(alice)?.eventType).toBe('bounced')
+      expect(byUser.get(alice)?.occurredAt).toBe('2026-05-18T05:00:00Z')
+      expect(byUser.get(bob)?.eventType).toBe('delivered')
+    })
+
+    test('matches case-insensitively against users.email', () => {
+      const mike = insertUser('mike@divinci.ai')
+      recordEvent({ recipientEmail: 'Mike@DIVINCI.AI', eventType: 'bounced' })
+const statuses = latestEventPerUser()
+      expect(statuses[0]?.userId).toBe(mike)
+    })
+
+    test('extracts reason from raw_payload when present', () => {
+      insertUser('a@example.com')
+      recordEvent({
+        recipientEmail: 'a@example.com',
+        eventType: 'bounced',
+        rawPayload: { reason: 'mailbox unavailable', mta: 'mx1.x.com' },
+      })
+const statuses = latestEventPerUser()
+      expect(statuses[0]?.reason).toBe('mailbox unavailable')
+    })
+
+    test('returns [] when there are no events', () => {
+      insertUser('a@example.com')
+expect(latestEventPerUser()).toEqual([])
     })
   })
 

@@ -20,12 +20,26 @@ import { Delete02Icon, Loading03Icon, Mail01Icon, UserAdd01Icon } from '@hugeico
 import { useCurrentUser } from '@/hooks/use-current-user'
 import {
   useDeleteUser,
+  useEmailDeliveryStatus,
   useInviteUser,
   useListUsers,
   useResendInvite,
   useSetUserAdmin,
   type TenantUser,
+  type UserDeliveryStatus,
 } from '@/hooks/use-users-admin'
+
+/** D-11 PR 5: format the bounce-reason short enough for a tooltip. */
+function deliveryBadgeLabel(s: UserDeliveryStatus): string {
+  if (s.eventType === 'bounced') return 'bounced'
+  if (s.eventType === 'complained') return 'spam complaint'
+  if (s.eventType === 'deferred') return 'deferred'
+  return s.eventType
+}
+function deliveryBadgeTitle(s: UserDeliveryStatus): string {
+  const when = new Date(s.occurredAt).toLocaleString()
+  return `${s.eventType} at ${when}${s.reason ? ` — ${s.reason}` : ''}`
+}
 
 function formatLastSeen(value: string | null): string {
   if (!value) return 'invited'
@@ -36,6 +50,7 @@ function formatLastSeen(value: string | null): string {
 export function MyUsersAdmin() {
   const { data: currentUser } = useCurrentUser()
   const { data: users, isLoading } = useListUsers()
+  const { data: deliveryStatus } = useEmailDeliveryStatus()
   const inviteUser = useInviteUser()
   const setUserAdmin = useSetUserAdmin()
   const resendInvite = useResendInvite()
@@ -227,9 +242,30 @@ export function MyUsersAdmin() {
               className="flex items-center justify-between gap-3 p-3"
             >
               <div className="min-w-0">
-                <p className="text-sm font-medium truncate">
-                  {u.displayName || u.email}
-                </p>
+                <div className="flex items-center gap-2">
+                  <p className="text-sm font-medium truncate">
+                    {u.displayName || u.email}
+                  </p>
+                  {/* D-11 PR 5: bounce/complaint badge if the most
+                      recent delivery event for this user's email was
+                      a permanent failure. Hovered tooltip shows the
+                      provider's reason + timestamp. */}
+                  {(() => {
+                    const status = deliveryStatus?.get(u.id)
+                    if (!status) return null
+                    if (status.eventType !== 'bounced' && status.eventType !== 'complained') {
+                      return null
+                    }
+                    return (
+                      <span
+                        className="text-[10px] uppercase tracking-wide bg-destructive/15 text-destructive px-1.5 py-0.5 rounded-md shrink-0"
+                        title={deliveryBadgeTitle(status)}
+                      >
+                        {deliveryBadgeLabel(status)}
+                      </span>
+                    )
+                  })()}
+                </div>
                 {u.displayName && (
                   <p className="text-xs text-muted-foreground truncate">
                     {u.email}
