@@ -102,6 +102,7 @@ export const FNOX_CONFIG_MAP: Record<string, ConfigEntry> = {
   'notifications.desktop.enabled': { fnoxKey: 'FULCRUM_NOTIF_DESKTOP_ENABLED', provider: 'plain', type: 'boolean' },
   'notifications.sound.enabled': { fnoxKey: 'FULCRUM_NOTIF_SOUND_ENABLED', provider: 'plain', type: 'boolean' },
   'notifications.sound.customSoundFile': { fnoxKey: 'FULCRUM_NOTIF_SOUND_FILE', provider: 'plain', type: 'string' },
+  'notifications.sound.silenceTaskMoves': { fnoxKey: 'FULCRUM_NOTIF_SOUND_SILENCE_TASK_MOVES', provider: 'plain', type: 'boolean' },
   'notifications.slack.enabled': { fnoxKey: 'FULCRUM_NOTIF_SLACK_ENABLED', provider: 'plain', type: 'boolean' },
   'notifications.slack.webhookUrl': { fnoxKey: 'FULCRUM_SLACK_WEBHOOK_URL', provider: 'age', type: 'string' },
   'notifications.slack.useMessagingChannel': { fnoxKey: 'FULCRUM_NOTIF_SLACK_USE_MESSAGING', provider: 'plain', type: 'boolean' },

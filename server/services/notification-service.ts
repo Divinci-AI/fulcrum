@@ -385,6 +385,16 @@ export async function sendNotification(
       ? 'error'
       : 'info'
 
+  // D-10 PR 7: silenceTaskMoves overrides the global sound flag for
+  // task_status_change events (the kanban-drag-between-columns case).
+  // Default true — the goat bleat on every move was noisy enough to
+  // draw a "remove the noises" request. Toggle off in Settings →
+  // Notifications to bring the chimes back.
+  const silenceTaskMoves = settings.sound?.silenceTaskMoves ?? true
+  const playSound =
+    (settings.sound?.enabled ?? false) &&
+    !(silenceTaskMoves && payload.type === 'task_status_change')
+
   const uiPayload = {
     type: 'notification' as const,
     payload: {
@@ -395,7 +405,7 @@ export async function sendNotification(
       taskId: payload.taskId,
       showToast: settings.toast?.enabled ?? true,
       showDesktop: settings.desktop?.enabled ?? true,
-      playSound: settings.sound?.enabled ?? false,
+      playSound,
       isCustomSound: !!settings.sound?.customSoundFile,
     },
   }

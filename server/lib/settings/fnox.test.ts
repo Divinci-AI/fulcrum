@@ -12,6 +12,7 @@ describe('fnox', () => {
         'notifications.desktop.enabled',
         'notifications.sound.enabled',
         'notifications.sound.customSoundFile',
+        'notifications.sound.silenceTaskMoves',
         'notifications.slack.enabled',
         'notifications.slack.webhookUrl',
         'notifications.slack.useMessagingChannel',
