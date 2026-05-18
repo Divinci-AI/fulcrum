@@ -127,6 +127,21 @@ export interface Settings {
      * appends `{ email: { email: ... } }` to that policy's include[].
      */
     cloudflareAccessPolicyId: string | null
+    /**
+     * D-10 PR 8: Cloudflare Email Sending (beta).
+     * When `cloudflareEmailEnabled` is true AND the token + account id +
+     * from address are all set, invite emails auto-send via
+     * `POST /accounts/{id}/email/sending/send` instead of falling
+     * through to the Gmail draft path. Existing draft path remains the
+     * default until an operator opts in.
+     *
+     * `cloudflareEmailFromAddress` is the verified sender address (e.g.
+     * `invites@divinci.ai`). The sending domain must be on Cloudflare
+     * and have SPF/DKIM records configured via the dashboard before
+     * sends will succeed.
+     */
+    cloudflareEmailEnabled: boolean | null
+    cloudflareEmailFromAddress: string | null
     googleClientId: string | null
     googleClientSecret: string | null
   }
@@ -187,6 +202,8 @@ export const DEFAULT_SETTINGS: Settings = {
     cloudflareAccountId: null,
     cloudflareAccessAppId: null,
     cloudflareAccessPolicyId: null,
+    cloudflareEmailEnabled: null,
+    cloudflareEmailFromAddress: null,
     googleClientId: null,
     googleClientSecret: null,
   },
@@ -298,6 +315,8 @@ export const VALID_SETTING_PATHS = new Set([
   'integrations.cloudflareAccountId',
   'integrations.cloudflareAccessAppId',
   'integrations.cloudflareAccessPolicyId',
+  'integrations.cloudflareEmailEnabled',
+  'integrations.cloudflareEmailFromAddress',
   'integrations.googleClientId',
   'integrations.googleClientSecret',
   'agent.defaultAgent',

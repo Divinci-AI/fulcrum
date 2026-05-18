@@ -578,6 +578,10 @@ describe('Config Routes', () => {
       // shared/config-keys.ts because no client code reads them.
       'integrations.cloudflareAccessAppId',
       'integrations.cloudflareAccessPolicyId',
+      // D-10 PR 8: CF Email Sending opt-in toggle + from address.
+      // Same shape — server-only, settable via UI/CLI.
+      'integrations.cloudflareEmailEnabled',
+      'integrations.cloudflareEmailFromAddress',
       // Channel settings (managed via messaging/channel routes)
       ...Array.from(VALID_SETTING_PATHS).filter(
         (p) => p.startsWith('channels.')

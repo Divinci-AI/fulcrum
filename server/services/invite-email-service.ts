@@ -10,14 +10,21 @@
  * Google account: returns `{ drafted: false, reason }`.
  */
 import { and, eq } from 'drizzle-orm'
-import { db, googleAccounts } from '../db'
+import { db, googleAccounts, users } from '../db'
 import { createDraft } from './google/gmail-service'
+import { sendInviteEmail as sendViaCloudflare } from './cloudflare-email-service'
 import { createLogger } from '../lib/logger'
 
 const logger = createLogger('InviteEmail')
 
 export interface DraftInviteEmailResult {
+  /** True iff a Gmail draft was created OR a CF Email send succeeded. */
   drafted: boolean
+  /** D-10 PR 8: which path actually delivered. `cloudflare` is a true
+   * send; `gmail-draft` is a "review and click send" draft; `none` is
+   * the no-Gmail-account, no-CF-Email fallback. */
+  mode: 'cloudflare' | 'gmail-draft' | 'none'
+  /** Draft id (Gmail) OR message id (CF Email), depending on mode. */
   draftId?: string
   reason?: string
 }
@@ -57,13 +64,47 @@ function buildBody(opts: DraftInviteEmailOptions, inviterEmail: string): string 
 }
 
 /**
- * Create an invite email draft in the inviter's Gmail account.
- * Idempotent at the call site (createDraft makes a new draft each
- * time), so the route layer should call this exactly once per invite.
+ * Best-effort delivery of an invite email.
+ *
+ * D-10 PR 8 routing rules, in order:
+ *
+ *   1. Try Cloudflare Email Sending (`cloudflareEmailEnabled` + token +
+ *      account + from address all configured). If it succeeds we
+ *      return `mode: 'cloudflare'` and the message_id; if it returns
+ *      a real error (not "skipped"), surface that and don't fall
+ *      back — the operator opted into CF Email and needs to see the
+ *      failure rather than silently downgrade.
+ *   2. Otherwise (CF skipped), drop to the Gmail draft path. Works
+ *      when the inviter has a Gmail-enabled Google account. Result
+ *      `mode: 'gmail-draft'` with the Gmail draft id.
+ *   3. Neither configured → `mode: 'none'`, with a reason string.
  */
 export async function draftInviteEmail(
   opts: DraftInviteEmailOptions
 ): Promise<DraftInviteEmailResult> {
+  // --- D-10 PR 8 path: Cloudflare Email Sending ---
+  const inviter = db
+    .select({ email: users.email })
+    .from(users)
+    .where(eq(users.id, opts.inviterUserId))
+    .get()
+  const cf = await sendViaCloudflare({
+    to: opts.inviteeEmail,
+    tenantUrl: opts.tenantUrl,
+    inviterEmail: inviter?.email ?? 'admin',
+    inviteeDisplayName: opts.inviteeDisplayName,
+  })
+  if (!cf.skipped) {
+    if (cf.sent) {
+      return { drafted: true, mode: 'cloudflare', draftId: cf.messageId }
+    }
+    // CF Email is configured but the call failed — surface that.
+    // Don't silently fall back to Gmail draft; the operator chose CF
+    // explicitly and needs to know it didn't work.
+    return { drafted: false, mode: 'cloudflare', reason: cf.reason }
+  }
+
+  // --- Pre-existing path: Gmail draft in the inviter's account ---
   const inviterAccount = db
     .select()
     .from(googleAccounts)
@@ -78,13 +119,15 @@ export async function draftInviteEmail(
   if (!inviterAccount) {
     return {
       drafted: false,
-      reason: 'inviter has no Gmail-enabled Google account',
+      mode: 'none',
+      reason: 'inviter has no Gmail-enabled Google account and CF Email is not configured',
     }
   }
 
   if (!inviterAccount.email) {
     return {
       drafted: false,
+      mode: 'none',
       reason: 'inviter Google account is missing an email address',
     }
   }
@@ -100,7 +143,7 @@ export async function draftInviteEmail(
       inviteeEmail: opts.inviteeEmail,
       draftId: draft.draftId,
     })
-    return { drafted: true, draftId: draft.draftId }
+    return { drafted: true, mode: 'gmail-draft', draftId: draft.draftId }
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
     logger.warn('Invite email draft failed', {
@@ -108,7 +151,7 @@ export async function draftInviteEmail(
       inviteeEmail: opts.inviteeEmail,
       error: message,
     })
-    return { drafted: false, reason: message }
+    return { drafted: false, mode: 'gmail-draft', reason: message }
   }
 }
 

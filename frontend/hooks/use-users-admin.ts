@@ -46,7 +46,17 @@ export interface CfAccessResult {
 }
 
 export interface InviteEmailResult {
+  /** True iff an invite email was delivered or drafted. False = the
+   * tenant has neither CF Email nor a Gmail-enabled inviter account. */
   drafted: boolean
+  /** D-10 PR 8: which path actually fired.
+   *   - `cloudflare`: auto-sent via CF Email API (drafted=true means
+   *     sent and accepted; draftId = CF message id)
+   *   - `gmail-draft`: created a draft in the inviter's Gmail Drafts
+   *     folder for them to review and send
+   *   - `none`: neither path available */
+  mode?: 'cloudflare' | 'gmail-draft' | 'none'
+  /** Message id (cloudflare) or draft id (gmail-draft). */
   draftId?: string
   reason?: string
 }
