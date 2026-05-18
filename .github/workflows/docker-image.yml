@@ -1,0 +1,83 @@
+name: Build & push GHCR image
+
+# Triggers on every push to main + manually. Pushes `ghcr.io/<owner>/fulcrum`
+# tagged with both `dev` (the floating SaaS deploy tag — see RUNBOOK §1)
+# and a versioned tag `v<package.json version>` when versions advance.
+#
+# Replaces the laptop-bound `docker save | gzip | ssh | docker load`
+# deploy path described in the saas memory once Actions billing is
+# unblocked. Until then this workflow sits dormant — the operator
+# continues with the laptop build path.
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+# Push permission for GHCR is granted via GITHUB_TOKEN's packages scope.
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  build-and-push:
+    name: Build & push linux/amd64,linux/arm64
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Read version from package.json
+        id: version
+        run: |
+          VERSION=$(jq -r '.version' package.json)
+          # All values written via GITHUB_OUTPUT are validated by the
+          # actions runner — safe to use in subsequent steps.
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Set up QEMU (cross-arch emulation)
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          # github.actor is a GitHub-controlled identity (the user who
+          # triggered the run); not user-provided content, safe as an
+          # action input.
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Compute image tags
+        id: tags
+        # GitHub-controlled values (repository_owner, SHA) consumed via
+        # env: rather than direct shell interpolation, per workflow-
+        # injection hardening guidance.
+        env:
+          REPO_OWNER: ${{ github.repository_owner }}
+          IMAGE_VERSION: ${{ steps.version.outputs.version }}
+          COMMIT_SHA: ${{ github.sha }}
+        run: |
+          OWNER_LC=$(echo "$REPO_OWNER" | tr '[:upper:]' '[:lower:]')
+          BASE="ghcr.io/${OWNER_LC}/fulcrum"
+          TAGS="${BASE}:dev"
+          TAGS="${TAGS},${BASE}:v${IMAGE_VERSION}"
+          TAGS="${TAGS},${BASE}:sha-${COMMIT_SHA:0:7}"
+          echo "tags=${TAGS}" >> "$GITHUB_OUTPUT"
+
+      - name: Build and push (amd64 + arm64)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.tags.outputs.tags }}
+          # GitHub Actions cache buys most of the layer reuse without
+          # needing an external registry cache.
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          provenance: false

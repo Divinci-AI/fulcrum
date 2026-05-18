@@ -21,10 +21,31 @@ pick one.
 
 Free, no GCP setup needed, lives next to your code.
 
+Two ways to push:
+
+#### A.1 — Automated CI (preferred once Actions billing is unblocked)
+
+`.github/workflows/docker-image.yml` builds multi-arch (linux/amd64 +
+linux/arm64) and pushes on every merge to main. Tags emitted:
+- `:dev` (floating, used by `acme.yaml`)
+- `:v<package.json version>` (versioned)
+- `:sha-<7-char>` (immutable, for rollback)
+
+No operator action needed beyond `git merge`. Currently dormant because
+Divinci-AI's Actions billing is blocked — re-enable billing and the
+workflow starts firing.
+
+#### A.2 — Manual push (current path while Actions billing is blocked)
+
 ```sh
 # One-time: create a PAT at https://github.com/settings/tokens with
 # write:packages, then:
 echo "$GHCR_PAT" | docker login ghcr.io -u mikeumus --password-stdin
+
+# Build for the target arch (GCE host is amd64; building from Apple
+# Silicon needs --platform linux/amd64 or the container fails to
+# exec on the host — see Gotcha in saas memory).
+docker build --platform linux/amd64 -t divinci-ai/fulcrum:dev .
 
 # Tag the local image
 docker tag divinci-ai/fulcrum:dev ghcr.io/divinci-ai/fulcrum:dev
@@ -38,6 +59,9 @@ docker push ghcr.io/divinci-ai/fulcrum:latest
 # https://github.com/orgs/Divinci-AI/packages/container/fulcrum/settings
 # → Manage Actions access OR set visibility to Public
 ```
+
+Or, when network egress is the bottleneck, use the
+`docker save | gzip | ssh | docker load` stream from §7.
 
 Set `FULCRUM_SAAS_IMAGE=ghcr.io/divinci-ai/fulcrum:dev` in the GCE host's
 zshrc.
