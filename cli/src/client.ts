@@ -1,4 +1,5 @@
 import { discoverServerUrl } from './utils/server'
+import { loadCliConfig } from './utils/cli-config'
 import { ApiError } from './utils/errors'
 import { readFileSync } from 'node:fs'
 import { basename } from 'node:path'
@@ -374,9 +375,24 @@ export interface BackupRestoreResult {
 
 export class FulcrumClient {
   private baseUrl: string
+  private token: string | null
 
+  /**
+   * URL precedence: explicit override → cli.toml `url` → discoverServerUrl
+   * fallback chain. Token: explicit env var (handled in loadCliConfig) →
+   * cli.toml `token`. Constructor-time resolution so each invocation
+   * picks up `fulcrum login` updates without process restart.
+   */
   constructor(urlOverride?: string, portOverride?: string) {
-    this.baseUrl = discoverServerUrl(urlOverride, portOverride)
+    const cli = loadCliConfig()
+    if (urlOverride) {
+      this.baseUrl = urlOverride
+    } else if (cli.url && !portOverride) {
+      this.baseUrl = cli.url
+    } else {
+      this.baseUrl = discoverServerUrl(urlOverride, portOverride)
+    }
+    this.token = cli.token ?? null
   }
 
   private async fetch<T>(path: string, options?: RequestInit): Promise<T> {
@@ -385,6 +401,9 @@ export class FulcrumClient {
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
       ...(options?.headers as Record<string, string>),
+    }
+    if (this.token && !headers['Authorization']) {
+      headers['Authorization'] = `Bearer ${this.token}`
     }
 
     try {
@@ -1605,4 +1624,52 @@ export class FulcrumClient {
     return this.fetch(`/api/search?${params.toString()}`)
   }
 
+  // D-8 PR 3b — user management.
+  async listUsers(): Promise<{
+    users: Array<{
+      id: string
+      email: string
+      displayName: string | null
+      isAdmin: boolean
+      createdAt: string
+      lastSeenAt: string | null
+    }>
+  }> {
+    return this.fetch('/api/users')
+  }
+
+  async inviteUser(input: {
+    email: string
+    isAdmin?: boolean
+    displayName?: string | null
+  }): Promise<{
+    user: { id: string; email: string; isAdmin: boolean; lastSeenAt: string | null }
+    invitedBy: string
+  }> {
+    return this.fetch('/api/users', {
+      method: 'POST',
+      body: JSON.stringify(input),
+    })
+  }
+
+  async setUserAdmin(
+    userId: string,
+    isAdmin: boolean
+  ): Promise<{ user: { id: string; email: string; isAdmin: boolean }; grantedBy: string }> {
+    return this.fetch(`/api/users/${userId}/admin`, {
+      method: 'PATCH',
+      body: JSON.stringify({ isAdmin }),
+    })
+  }
+
+  // Self / /me — useful for `fulcrum login` verification.
+  async getCurrentUser(): Promise<{
+    user: {
+      id: string
+      email: string
+      isAdmin: boolean
+    } | null
+  }> {
+    return this.fetch('/api/users/me')
+  }
 }

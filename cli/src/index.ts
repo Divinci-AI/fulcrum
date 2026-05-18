@@ -20,6 +20,8 @@ import { mcpCommand } from './commands/mcp'
 
 import { migrateFromViboraCommand } from './commands/migrate-from-vibora'
 import { updateCommand } from './commands/update'
+import { loginCommand } from './commands/login'
+import { usersCommand } from './commands/users'
 
 import pkg from '../../package.json'
 
@@ -67,6 +69,10 @@ const main = defineCommand({
     // Notifications
     notifications: notificationsCommand,
     notify: notifyCommand,
+
+    // D-8: tenant user management (remote-capable via API token)
+    login: loginCommand,
+    users: usersCommand,
 
     // Server management
     up: upCommand,
