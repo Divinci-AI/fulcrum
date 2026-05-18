@@ -202,6 +202,12 @@ app.post('/settings', async (c) => {
     const body = await c.req.json<{
       cloudflareApiToken?: string | null
       cloudflareAccountId?: string | null
+      // D-9 PR 1: per-user CF Access policy identifiers. Plain (not
+      // age-encrypted) — these are non-secret resource IDs. The
+      // settings UI surfaces them with the existing CF inputs so an
+      // admin doesn't have to drop to the CLI.
+      cloudflareAccessAppId?: string | null
+      cloudflareAccessPolicyId?: string | null
     }>()
 
     // Helper to check if a value is a masked placeholder (all dots)
@@ -217,14 +223,23 @@ app.post('/settings', async (c) => {
       updateSettingByPath('integrations.cloudflareAccountId', body.cloudflareAccountId)
     }
 
+    if (body.cloudflareAccessAppId !== undefined) {
+      updateSettingByPath('integrations.cloudflareAccessAppId', body.cloudflareAccessAppId)
+    }
+
+    if (body.cloudflareAccessPolicyId !== undefined) {
+      updateSettingByPath('integrations.cloudflareAccessPolicyId', body.cloudflareAccessPolicyId)
+    }
+
     const settings = getSettings()
-    const { cloudflareApiToken, cloudflareAccountId } = settings.integrations
+    const { cloudflareApiToken, cloudflareAccountId, cloudflareAccessAppId, cloudflareAccessPolicyId } = settings.integrations
 
     return c.json({
       success: true,
       settings: {
         cloudflareConfigured: !!cloudflareApiToken,
         tunnelsAvailable: !!(cloudflareApiToken && cloudflareAccountId),
+        cfAccessInviteConfigured: !!(cloudflareApiToken && cloudflareAccountId && cloudflareAccessAppId && cloudflareAccessPolicyId),
       },
     })
   } catch (err) {
@@ -243,13 +258,21 @@ app.get('/settings', async (c) => {
   const settings = getSettings()
   const token = settings.integrations.cloudflareApiToken
   const accountId = settings.integrations.cloudflareAccountId
+  // D-9 PR 1: the two CF Access IDs are non-secret resource IDs —
+  // returned as-is for the UI. They're only useful with the token, so
+  // missing token = no real exposure here either way.
+  const accessAppId = settings.integrations.cloudflareAccessAppId
+  const accessPolicyId = settings.integrations.cloudflareAccessPolicyId
 
   return c.json({
     // Mask the token but preserve its length for consistent UI display
     cloudflareApiToken: token ? '•'.repeat(token.length) : null,
     cloudflareAccountId: accountId ? '•'.repeat(accountId.length) : null,
+    cloudflareAccessAppId: accessAppId ?? null,
+    cloudflareAccessPolicyId: accessPolicyId ?? null,
     cloudflareConfigured: !!token,
     tunnelsAvailable: !!(token && accountId),
+    cfAccessInviteConfigured: !!(token && accountId && accessAppId && accessPolicyId),
   })
 })
 

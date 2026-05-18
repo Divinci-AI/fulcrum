@@ -237,6 +237,9 @@ function SettingsPage() {
   // Deployment settings local state
   const [localCloudflareToken, setLocalCloudflareToken] = useState('')
   const [localCloudflareAccountId, setLocalCloudflareAccountId] = useState('')
+  // D-9 PR 1: CF Access (per-user invite policy) IDs — non-secret.
+  const [localCloudflareAccessAppId, setLocalCloudflareAccessAppId] = useState('')
+  const [localCloudflareAccessPolicyId, setLocalCloudflareAccessPolicyId] = useState('')
 
   // Task defaults local state
   const [localDefaultTaskType, setLocalDefaultTaskType] = useState<TaskType>('worktree')
@@ -331,6 +334,12 @@ function SettingsPage() {
     if (deploymentSettings?.cloudflareAccountId !== undefined) {
       setLocalCloudflareAccountId(deploymentSettings.cloudflareAccountId ?? '')
     }
+    if (deploymentSettings?.cloudflareAccessAppId !== undefined) {
+      setLocalCloudflareAccessAppId(deploymentSettings.cloudflareAccessAppId ?? '')
+    }
+    if (deploymentSettings?.cloudflareAccessPolicyId !== undefined) {
+      setLocalCloudflareAccessPolicyId(deploymentSettings.cloudflareAccessPolicyId ?? '')
+    }
   }, [deploymentSettings])
 
   // Sync task defaults
@@ -410,11 +419,16 @@ function SettingsPage() {
   const hasDeploymentChanges = (() => {
     const serverToken = deploymentSettings?.cloudflareApiToken ?? ''
     const serverAccountId = deploymentSettings?.cloudflareAccountId ?? ''
+    const serverAccessAppId = deploymentSettings?.cloudflareAccessAppId ?? ''
+    const serverAccessPolicyId = deploymentSettings?.cloudflareAccessPolicyId ?? ''
     // Token: changed if different from server AND not a mask (user entered real value)
     const tokenChanged = localCloudflareToken !== serverToken && !localCloudflareToken.match(/^•+$/)
     // Account ID: changed if different from server AND not a mask
     const accountIdChanged = localCloudflareAccountId !== serverAccountId && !localCloudflareAccountId.match(/^•+$/)
-    return tokenChanged || accountIdChanged
+    // CF Access IDs aren't masked — plain text round-trip
+    const accessAppIdChanged = localCloudflareAccessAppId !== serverAccessAppId
+    const accessPolicyIdChanged = localCloudflareAccessPolicyId !== serverAccessPolicyId
+    return tokenChanged || accountIdChanged || accessAppIdChanged || accessPolicyIdChanged
   })()
 
   const hasNotificationChanges = notificationSettings && (
@@ -845,12 +859,19 @@ function SettingsPage() {
       }
     }
 
-    // Save deployment settings (cloudflare token/account ID)
+    // Save deployment settings (cloudflare token/account ID + CF Access IDs)
     // Only send values that were actually changed by the user (not masked placeholders)
     if (hasDeploymentChanges) {
       const serverToken = deploymentSettings?.cloudflareApiToken ?? ''
       const serverAccountId = deploymentSettings?.cloudflareAccountId ?? ''
-      const updates: { cloudflareApiToken?: string | null; cloudflareAccountId?: string | null } = {}
+      const serverAccessAppId = deploymentSettings?.cloudflareAccessAppId ?? ''
+      const serverAccessPolicyId = deploymentSettings?.cloudflareAccessPolicyId ?? ''
+      const updates: {
+        cloudflareApiToken?: string | null
+        cloudflareAccountId?: string | null
+        cloudflareAccessAppId?: string | null
+        cloudflareAccessPolicyId?: string | null
+      } = {}
 
       // Only send token if it changed and is not a mask (user entered real value)
       if (localCloudflareToken !== serverToken && !localCloudflareToken.match(/^•+$/)) {
@@ -860,6 +881,14 @@ function SettingsPage() {
       // Only send account ID if it changed and is not a mask
       if (localCloudflareAccountId !== serverAccountId && !localCloudflareAccountId.match(/^•+$/)) {
         updates.cloudflareAccountId = localCloudflareAccountId || null
+      }
+
+      // CF Access IDs are plain text — no mask handling.
+      if (localCloudflareAccessAppId !== serverAccessAppId) {
+        updates.cloudflareAccessAppId = localCloudflareAccessAppId || null
+      }
+      if (localCloudflareAccessPolicyId !== serverAccessPolicyId) {
+        updates.cloudflareAccessPolicyId = localCloudflareAccessPolicyId || null
       }
 
       if (Object.keys(updates).length > 0) {
@@ -1410,6 +1439,64 @@ function SettingsPage() {
                       </div>
                       <p className="text-xs text-muted-foreground sm:ml-20 sm:pl-2">
                         Required for Cloudflare Tunnel. Find in your dashboard URL: dash.cloudflare.com/{'<account_id>'}/...
+                      </p>
+                    </div>
+
+                    {/* CF Access App ID — D-9 PR 1 */}
+                    <div className="space-y-1">
+                      <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+                        <label className="text-sm text-muted-foreground sm:w-20 sm:shrink-0">
+                          Access App
+                        </label>
+                        <div className="flex flex-1 items-center gap-2">
+                          <div className="relative flex-1">
+                            <Input
+                              type="text"
+                              value={localCloudflareAccessAppId}
+                              onChange={(e) => setLocalCloudflareAccessAppId(e.target.value)}
+                              placeholder="8c9dfd22-595d-4bd1-869b-7dca77d56cf2"
+                              disabled={isLoading}
+                              className="flex-1 pr-8 font-mono text-sm"
+                            />
+                            {!!deploymentSettings?.cloudflareAccessAppId && (
+                              <div className="absolute right-2 top-1/2 -translate-y-1/2 text-green-500">
+                                <HugeiconsIcon icon={Tick02Icon} size={14} strokeWidth={2} />
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                      <p className="text-xs text-muted-foreground sm:ml-20 sm:pl-2">
+                        Cloudflare Access App ID fronting this tenant. The invite flow updates this app's policy include list.
+                      </p>
+                    </div>
+
+                    {/* CF Access Policy ID — D-9 PR 1 */}
+                    <div className="space-y-1">
+                      <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+                        <label className="text-sm text-muted-foreground sm:w-20 sm:shrink-0">
+                          Access Policy
+                        </label>
+                        <div className="flex flex-1 items-center gap-2">
+                          <div className="relative flex-1">
+                            <Input
+                              type="text"
+                              value={localCloudflareAccessPolicyId}
+                              onChange={(e) => setLocalCloudflareAccessPolicyId(e.target.value)}
+                              placeholder="UUID of the per-user invites policy"
+                              disabled={isLoading}
+                              className="flex-1 pr-8 font-mono text-sm"
+                            />
+                            {!!deploymentSettings?.cloudflareAccessPolicyId && (
+                              <div className="absolute right-2 top-1/2 -translate-y-1/2 text-green-500">
+                                <HugeiconsIcon icon={Tick02Icon} size={14} strokeWidth={2} />
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                      <p className="text-xs text-muted-foreground sm:ml-20 sm:pl-2">
+                        The companion policy created per RUNBOOK §9. When both IDs are set, admin invites also add the email to this policy's include list.
                       </p>
                     </div>
 
