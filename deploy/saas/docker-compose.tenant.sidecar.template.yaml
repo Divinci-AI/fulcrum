@@ -1,0 +1,77 @@
+# Multi-tenant compose template — cloudflared runs as a docker sidecar
+# alongside the Fulcrum container, so no host port is published. This
+# version replaces docker-compose.tenant.template.yaml at N>1 tenants:
+# the host-loopback pattern collides on port 7777 once you have more
+# than one tenant on the same host.
+#
+# Render with envsubst the same way as the legacy template:
+#     TENANT_SLUG=foo \
+#     GOOGLE_CLIENT_ID=... \
+#     GOOGLE_CLIENT_SECRET=... \
+#     CLOUDFLARED_TUNNEL_TOKEN=... \
+#     envsubst < docker-compose.tenant.sidecar.template.yaml > stacks/foo.yaml
+#     docker compose -f stacks/foo.yaml up -d
+#
+# The tunnel token comes from `cloudflared tunnel token <UUID>` on the
+# Cloudflare dashboard. One tunnel per tenant; tunnel's ingress config
+# routes `<slug>.fulcrum.divinci.ai` to `http://fulcrum:7777`
+# (service-name resolution on the per-tenant docker network).
+#
+# The existing acme deployment still uses the host-cloudflared pattern
+# from docker-compose.tenant.template.yaml. Migrate it when you bring
+# the second tenant online — it's a one-time cutover.
+
+services:
+  fulcrum:
+    image: divinci-ai/fulcrum:dev
+    container_name: fulcrum-${TENANT_SLUG}
+    restart: unless-stopped
+
+    environment:
+      FULCRUM_TENANT_SLUG: ${TENANT_SLUG}
+      FULCRUM_DIR: /data/.fulcrum
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET}
+      FULCRUM_SERVER_PORT: "7777"
+      FULCRUM_SERVER_PUBLIC_DOMAIN: ${TENANT_SLUG}.fulcrum.divinci.ai
+
+    volumes:
+      - ${FULCRUM_SAAS_ROOT:-/opt/fulcrum-saas}/data/${TENANT_SLUG}:/data
+
+    # No `ports:` — the only reader of port 7777 is the cloudflared
+    # sidecar below, which reaches `fulcrum:7777` via the per-tenant
+    # docker network. This is the entire point of the sidecar
+    # pattern: no host port collision across tenants.
+
+    networks:
+      - fulcrum-${TENANT_SLUG}
+
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:7777/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    container_name: fulcrum-${TENANT_SLUG}-cloudflared
+    restart: unless-stopped
+    # `tunnel run` with no positional arg uses the credentials embedded
+    # in the token. The token encodes the tunnel UUID and shared
+    # secret — the ingress config lives on the Cloudflare side and
+    # routes to http://fulcrum:7777 (the docker DNS name).
+    command: tunnel --no-autoupdate run
+    environment:
+      TUNNEL_TOKEN: ${CLOUDFLARED_TUNNEL_TOKEN}
+    depends_on:
+      fulcrum:
+        condition: service_healthy
+    networks:
+      - fulcrum-${TENANT_SLUG}
+
+networks:
+  # Per-tenant private network. Each rendered stack creates its own,
+  # so cross-tenant service discovery is impossible by construction.
+  fulcrum-${TENANT_SLUG}:
+    name: fulcrum-${TENANT_SLUG}

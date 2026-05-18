@@ -253,6 +253,26 @@ SSO, you sign in as `$YOUR_EMAIL`, Fulcrum loads. You're in.
 Removal takes effect on Bob's next request (~60s session invalidation).
 Adding a user requires no Fulcrum-side change.
 
+### Which compose template to use
+
+There are two templates in `deploy/saas/`:
+
+| Template | When |
+|---|---|
+| `docker-compose.tenant.template.yaml` | **Single-tenant only.** Publishes the container port to host loopback (`127.0.0.1:7777`); the host's systemd `cloudflared` service routes the public URL there. This is what the current `acme` stack uses. |
+| `docker-compose.tenant.sidecar.template.yaml` | **Multi-tenant.** Runs cloudflared as a per-tenant sidecar container on a per-tenant docker network. No host port is published, so N tenants coexist without port-7777 collisions. Each tenant needs its own Cloudflare Tunnel + token. |
+
+When the second tenant comes online, also migrate `acme` to the
+sidecar template in the same cutover. Steps:
+
+1. Create a fresh Cloudflare Tunnel for acme; copy its token.
+2. Stop the host's systemd `cloudflared` service (or remove the
+   acme ingress from its config).
+3. Re-render `stacks/acme.yaml` from the sidecar template, including
+   `CLOUDFLARED_TUNNEL_TOKEN=<token>`.
+4. `docker compose -f stacks/acme.yaml up -d --force-recreate`.
+5. Confirm `acme.fulcrum.divinci.ai` still resolves end-to-end.
+
 ---
 
 ## §6 — Teardown
