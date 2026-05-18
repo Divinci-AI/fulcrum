@@ -27,6 +27,7 @@ import {
 } from '../services/api-token-service'
 import { addEmailToPolicy } from '../services/cloudflare-access'
 import { draftInviteEmail } from '../services/invite-email-service'
+import { getPageContext } from '../services/page-context-service'
 import { requireAdminUser, requireUser, type CurrentUserContext } from '../middleware/current-user'
 
 const app = new Hono<CurrentUserContext>()
@@ -116,6 +117,16 @@ app.patch('/me/channel-identities/:channelType', async (c) => {
   } catch (err) {
     return c.json({ error: err instanceof Error ? err.message : 'Upsert failed' }, 400)
   }
+})
+
+// GET /api/users/me/page-context — D-9 Phase C. Returns the most
+// recent page-context snapshot the user's browser has published over
+// WebSocket. Null when the user has no active browser session in this
+// process lifetime. Used by MCP tools to answer "what is the user
+// looking at right now?" without round-tripping the browser.
+app.get('/me/page-context', (c) => {
+  const user = requireUser(c)
+  return c.json({ context: getPageContext(user.id) })
 })
 
 // GET /api/users/me/tokens — D-8 PR 3a. List the calling user's API

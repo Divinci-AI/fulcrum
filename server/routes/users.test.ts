@@ -127,6 +127,31 @@ describe('POST /api/users', () => {
   // D-8 PR 5: response carries a cfAccess result. When CF Access isn't
   // configured (the default test state), `configured: false` and the
   // overall result is treated as ok so the happy path UI doesn't warn.
+  // D-9 Phase C — page-context route round-trips with the service.
+  test('GET /api/users/me/page-context returns null when nothing published, then the snapshot after setPageContext', async () => {
+    const { get } = createTestApp()
+    const first = await get('/api/users/me/page-context')
+    expect(first.status).toBe(200)
+    const firstBody = (await first.json()) as { context: unknown }
+    expect(firstBody.context).toBeNull()
+
+    // Look up the test-admin user id to seed a snapshot.
+    const meRes = await get('/api/users/me')
+    const me = (await meRes.json()) as { user: { id: string } }
+    const { setPageContext } = await import('../services/page-context-service')
+    setPageContext(me.user.id, {
+      route: '/tasks/abc',
+      selection: { kind: 'task', id: 'abc' },
+    })
+
+    const second = await get('/api/users/me/page-context')
+    const secondBody = (await second.json()) as {
+      context: { route: string; selection: { kind: string; id: string } | null } | null
+    }
+    expect(secondBody.context?.route).toBe('/tasks/abc')
+    expect(secondBody.context?.selection).toEqual({ kind: 'task', id: 'abc' })
+  })
+
   // D-9 PR 2: invite-email shape on the response.
   test('response includes inviteEmail:drafted:false when admin has no Gmail-enabled account', async () => {
     const { post } = createTestApp()

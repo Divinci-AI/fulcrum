@@ -654,6 +654,17 @@ function buildHandlers(identity: SocketIdentity): WSEvents {
           })
           break
         }
+
+        // D-9 Phase C — frontend publishes its page context. Server
+        // caches per userId so MCP tools can read it via HTTP. Drop
+        // silently for anonymous sockets — no userId to key on.
+        case 'page-context:update': {
+          if (clientData.userId) {
+            const { setPageContext } = await import('../services/page-context-service')
+            setPageContext(clientData.userId, message.payload)
+          }
+          break
+        }
       }
     } catch (error) {
       log.ws.error('Failed to handle message', { error: String(error) })

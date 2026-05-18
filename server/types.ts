@@ -187,6 +187,20 @@ export interface UnsubscribeMessage {
   payload: { topics: string[] }
 }
 
+// D-9 Phase C — frontend publishes its page context so MCP tools can
+// answer "what is the user looking at right now?" without polling the
+// browser. Server caches per userId; payload shape mirrors
+// `PageContext` in services/page-context-service.ts.
+export interface PageContextUpdateMessage {
+  type: 'page-context:update'
+  payload: {
+    route: string
+    selection?: { kind: string; id: string } | null
+    visibleEntities?: Record<string, string[] | undefined>
+    metadata?: Record<string, unknown>
+  }
+}
+
 export type ClientMessage =
   | TerminalCreateMessage
   | TerminalDestroyMessage
@@ -205,6 +219,7 @@ export type ClientMessage =
   | ThemeSyncMessage
   | SubscribeMessage
   | UnsubscribeMessage
+  | PageContextUpdateMessage
 
 // Server -> Client messages
 

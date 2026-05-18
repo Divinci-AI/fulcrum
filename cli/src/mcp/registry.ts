@@ -5,7 +5,7 @@
  * Core tools are always loaded; deferred tools are loaded on-demand after search.
  */
 
-export type ToolCategory = 'core' | 'tasks' | 'projects' | 'repositories' | 'apps' | 'filesystem' | 'git' | 'notifications' | 'exec' | 'settings' | 'backup' | 'email' | 'messaging' | 'assistant' | 'caldav' | 'memory' | 'jobs'
+export type ToolCategory = 'core' | 'tasks' | 'projects' | 'repositories' | 'apps' | 'filesystem' | 'git' | 'notifications' | 'exec' | 'settings' | 'backup' | 'email' | 'messaging' | 'assistant' | 'caldav' | 'memory' | 'jobs' | 'ui'
 
 export interface ToolMetadata {
   name: string
@@ -933,6 +933,15 @@ export const toolRegistry: ToolMetadata[] = [
     description: 'Trigger immediate execution of a scheduled job',
     category: 'jobs',
     keywords: ['job', 'timer', 'run', 'trigger', 'execute', 'now'],
+    defer_loading: true,
+  },
+  // D-9 Phase C — browser page-context bridge.
+  {
+    name: 'get_page_context',
+    description:
+      "Get the current page context of the user's Fulcrum browser session: route, selected entity, visible entities, and any page-specific metadata.",
+    category: 'ui',
+    keywords: ['page', 'context', 'browser', 'route', 'selection', 'ui', 'where'],
     defer_loading: true,
   },
 ]
