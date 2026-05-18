@@ -45,27 +45,28 @@ export function MyUsersAdmin() {
     const email = inviteEmail.trim()
     if (!email) return
     try {
-      const { user, cfAccess } = await inviteUser.mutateAsync({
+      const { user, cfAccess, inviteEmail: inviteEmailResult } = await inviteUser.mutateAsync({
         email,
         isAdmin: inviteAsAdmin || undefined,
       })
       setInviteEmail('')
       setInviteAsAdmin(false)
-      // D-8 PR 6: surface the CF Access chain result. Three cases:
-      //   1. Not configured  → silent success (operator hasn't opted in
-      //      to per-user CF chaining; the Divincians group still covers
-      //      common domains).
-      //   2. Configured + ok → quiet success, mention the edge update.
-      //   3. Configured + failed → loud warning toast so the admin
-      //      knows to manually add the email to CF Access.
-      if (!cfAccess.configured) {
-        toast.success(`Invited ${user.email}`)
-      } else if (cfAccess.ok) {
-        toast.success(`Invited ${user.email} — CF Access policy updated`)
+      // D-8 PR 6 + D-9 PR 2: combine CF Access + invite email results
+      // in a single toast so the admin sees both outcomes at a glance.
+      const fragments: string[] = []
+      if (cfAccess.configured) {
+        if (cfAccess.ok) fragments.push('CF Access policy updated')
+        else fragments.push(`CF Access update failed: ${cfAccess.reason ?? 'unknown'}`)
+      }
+      if (inviteEmailResult.drafted) {
+        fragments.push('invite email drafted — review in Gmail')
+      }
+      const detail = fragments.length > 0 ? ` (${fragments.join('; ')})` : ''
+      const cfFailed = cfAccess.configured && !cfAccess.ok
+      if (cfFailed) {
+        toast.warning(`Invited ${user.email}${detail}. Add the email manually in the Cloudflare dashboard.`)
       } else {
-        toast.warning(
-          `Invited ${user.email}, but CF Access update failed: ${cfAccess.reason ?? 'unknown'}. Add the email manually in the Cloudflare dashboard.`
-        )
+        toast.success(`Invited ${user.email}${detail}`)
       }
     } catch (err) {
       toast.error(err instanceof Error ? err.message : String(err))

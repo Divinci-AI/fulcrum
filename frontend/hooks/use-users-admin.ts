@@ -45,10 +45,17 @@ export interface CfAccessResult {
   reason?: string
 }
 
+export interface InviteEmailResult {
+  drafted: boolean
+  draftId?: string
+  reason?: string
+}
+
 export interface InviteResponse {
   user: TenantUser
   invitedBy: string
   cfAccess: CfAccessResult
+  inviteEmail: InviteEmailResult
 }
 
 export function useInviteUser() {
