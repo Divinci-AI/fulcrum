@@ -497,6 +497,41 @@ Until PR 5 lands, the workflow is:
 
 ---
 
+## §10 — Bounce / complaint ingest (D-11)
+
+CF Email Sending (beta) doesn't push delivery events as webhooks.
+The bounce-handling wire is: outbound DSN bounces → CF Email
+Routing on the sending domain → an Email Worker that parses the
+DSN/ARF → POST to `/api/email-events` → `email_send_events` table
+→ Members UI red badge.
+
+End-to-end requires three pieces wired:
+
+1. **Server side** (Settings → Integrations):
+   - Enable "Auto-send invite emails via Cloudflare"
+   - Set the "Bounce secret" — paste output of `openssl rand -hex 32`
+   - Save. Settings → "cfBounceIngestConfigured" flag flips true.
+2. **Worker side** (`deploy/saas/workers/email-bounce-router/`):
+   - `wrangler secret put FULCRUM_INGEST_URL` ←
+     `https://<tenant>.fulcrum.divinci.ai/api/email-events`
+   - `wrangler secret put FULCRUM_INGEST_SECRET` ← same value as
+     the "Bounce secret" from step 1
+   - `wrangler deploy`
+3. **Routing side** (Cloudflare dashboard):
+   - Email Routing → enable on the sending domain (publishes MX records)
+   - Email Routing → Email Workers tab → bind
+     `fulcrum-email-bounce-router` as the catch-all destination
+
+Once all three are in place, a bounce on a typo'd invite address
+arrives as a `bounced` event within seconds; the Members row
+sprouts a red `bounced` badge with the SMTP reason in its
+tooltip.
+
+Full per-step walkthrough:
+`deploy/saas/workers/email-bounce-router/README.md`
+
+---
+
 ## What's still missing (post-§6)
 
 - **Litestream sidecar** for continuous SQLite replication to R2. Design is

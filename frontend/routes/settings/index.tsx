@@ -247,6 +247,9 @@ function SettingsPage() {
   // D-10 PR 8: Cloudflare Email Sending opt-in + from address.
   const [localCloudflareEmailEnabled, setLocalCloudflareEmailEnabled] = useState(false)
   const [localCloudflareEmailFromAddress, setLocalCloudflareEmailFromAddress] = useState('')
+  // D-11 PR 4: shared secret between the CF Email Worker (parses
+  // bounces) and our /api/email-events ingest endpoint.
+  const [localCloudflareEmailIngestSecret, setLocalCloudflareEmailIngestSecret] = useState('')
 
   // Task defaults local state
   const [localDefaultTaskType, setLocalDefaultTaskType] = useState<TaskType>('worktree')
@@ -354,6 +357,9 @@ function SettingsPage() {
     if (deploymentSettings?.cloudflareEmailFromAddress !== undefined) {
       setLocalCloudflareEmailFromAddress(deploymentSettings.cloudflareEmailFromAddress ?? '')
     }
+    if (deploymentSettings?.cloudflareEmailIngestSecret !== undefined) {
+      setLocalCloudflareEmailIngestSecret(deploymentSettings.cloudflareEmailIngestSecret ?? '')
+    }
   }, [deploymentSettings])
 
   // Sync task defaults
@@ -437,6 +443,7 @@ function SettingsPage() {
     const serverAccessPolicyId = deploymentSettings?.cloudflareAccessPolicyId ?? ''
     const serverCfEmailEnabled = deploymentSettings?.cloudflareEmailEnabled ?? false
     const serverCfEmailFromAddress = deploymentSettings?.cloudflareEmailFromAddress ?? ''
+    const serverCfEmailIngestSecret = deploymentSettings?.cloudflareEmailIngestSecret ?? ''
     // Token: changed if different from server AND not a mask (user entered real value)
     const tokenChanged = localCloudflareToken !== serverToken && !localCloudflareToken.match(/^•+$/)
     // Account ID: changed if different from server AND not a mask
@@ -447,7 +454,9 @@ function SettingsPage() {
     // CF Email — boolean + plain text
     const cfEmailEnabledChanged = localCloudflareEmailEnabled !== serverCfEmailEnabled
     const cfEmailFromChanged = localCloudflareEmailFromAddress !== serverCfEmailFromAddress
-    return tokenChanged || accountIdChanged || accessAppIdChanged || accessPolicyIdChanged || cfEmailEnabledChanged || cfEmailFromChanged
+    // CF Email ingest secret — masked, same handling as token
+    const cfEmailIngestSecretChanged = localCloudflareEmailIngestSecret !== serverCfEmailIngestSecret && !localCloudflareEmailIngestSecret.match(/^•+$/)
+    return tokenChanged || accountIdChanged || accessAppIdChanged || accessPolicyIdChanged || cfEmailEnabledChanged || cfEmailFromChanged || cfEmailIngestSecretChanged
   })()
 
   const hasNotificationChanges = notificationSettings && (
@@ -888,6 +897,7 @@ function SettingsPage() {
       const serverAccessPolicyId = deploymentSettings?.cloudflareAccessPolicyId ?? ''
       const serverCfEmailEnabled = deploymentSettings?.cloudflareEmailEnabled ?? false
       const serverCfEmailFromAddress = deploymentSettings?.cloudflareEmailFromAddress ?? ''
+      const serverCfEmailIngestSecret = deploymentSettings?.cloudflareEmailIngestSecret ?? ''
       const updates: {
         cloudflareApiToken?: string | null
         cloudflareAccountId?: string | null
@@ -895,6 +905,7 @@ function SettingsPage() {
         cloudflareAccessPolicyId?: string | null
         cloudflareEmailEnabled?: boolean | null
         cloudflareEmailFromAddress?: string | null
+        cloudflareEmailIngestSecret?: string | null
       } = {}
 
       // Only send token if it changed and is not a mask (user entered real value)
@@ -920,6 +931,10 @@ function SettingsPage() {
       }
       if (localCloudflareEmailFromAddress !== serverCfEmailFromAddress) {
         updates.cloudflareEmailFromAddress = localCloudflareEmailFromAddress || null
+      }
+      // CF Email ingest secret — masked round-trip like the token
+      if (localCloudflareEmailIngestSecret !== serverCfEmailIngestSecret && !localCloudflareEmailIngestSecret.match(/^•+$/)) {
+        updates.cloudflareEmailIngestSecret = localCloudflareEmailIngestSecret || null
       }
 
       if (Object.keys(updates).length > 0) {
@@ -1573,6 +1588,39 @@ function SettingsPage() {
                       </div>
                       <p className="text-xs text-muted-foreground sm:ml-20 sm:pl-2">
                         Verified sender address — must be on a domain whose DNS is on Cloudflare with SPF/DKIM/DMARC published (set up via the dashboard).
+                      </p>
+                    </div>
+
+                    {/* D-11 PR 4 — bounce-receiver shared secret. The
+                        Worker (deploy/saas/workers/email-bounce-router)
+                        sends this same value as `X-Webhook-Secret` when
+                        POSTing parsed bounce events back to our
+                        /api/email-events endpoint. */}
+                    <div className="space-y-1">
+                      <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+                        <label className="text-sm text-muted-foreground sm:w-20 sm:shrink-0">
+                          Bounce secret
+                        </label>
+                        <div className="flex flex-1 items-center gap-2">
+                          <div className="relative flex-1">
+                            <Input
+                              type="password"
+                              value={localCloudflareEmailIngestSecret}
+                              onChange={(e) => setLocalCloudflareEmailIngestSecret(e.target.value)}
+                              placeholder="Paste output of: openssl rand -hex 32"
+                              disabled={isLoading}
+                              className="flex-1 pr-8 font-mono text-sm"
+                            />
+                            {!!deploymentSettings?.cloudflareEmailIngestSecret && (
+                              <div className="absolute right-2 top-1/2 -translate-y-1/2 text-green-500">
+                                <HugeiconsIcon icon={Tick02Icon} size={14} strokeWidth={2} />
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                      <p className="text-xs text-muted-foreground sm:ml-20 sm:pl-2">
+                        Shared with the CF Email Worker. Same value goes in <code>wrangler secret put FULCRUM_INGEST_SECRET</code>. Worker uses it to POST parsed bounces back to <code>/api/email-events</code>. See <code>deploy/saas/workers/email-bounce-router/README.md</code> for the full setup.
                       </p>
                     </div>
 
