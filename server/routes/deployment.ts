@@ -208,6 +208,9 @@ app.post('/settings', async (c) => {
       // admin doesn't have to drop to the CLI.
       cloudflareAccessAppId?: string | null
       cloudflareAccessPolicyId?: string | null
+      // D-10 PR 8: Cloudflare Email Sending toggle + from address.
+      cloudflareEmailEnabled?: boolean | null
+      cloudflareEmailFromAddress?: string | null
     }>()
 
     // Helper to check if a value is a masked placeholder (all dots)
@@ -229,6 +232,13 @@ app.post('/settings', async (c) => {
 
     if (body.cloudflareAccessPolicyId !== undefined) {
       updateSettingByPath('integrations.cloudflareAccessPolicyId', body.cloudflareAccessPolicyId)
+    }
+
+    if (body.cloudflareEmailEnabled !== undefined) {
+      updateSettingByPath('integrations.cloudflareEmailEnabled', body.cloudflareEmailEnabled)
+    }
+    if (body.cloudflareEmailFromAddress !== undefined) {
+      updateSettingByPath('integrations.cloudflareEmailFromAddress', body.cloudflareEmailFromAddress)
     }
 
     const settings = getSettings()
@@ -270,9 +280,18 @@ app.get('/settings', async (c) => {
     cloudflareAccountId: accountId ? '•'.repeat(accountId.length) : null,
     cloudflareAccessAppId: accessAppId ?? null,
     cloudflareAccessPolicyId: accessPolicyId ?? null,
+    // D-10 PR 8: CF Email Sending state (non-secret).
+    cloudflareEmailEnabled: settings.integrations.cloudflareEmailEnabled ?? false,
+    cloudflareEmailFromAddress: settings.integrations.cloudflareEmailFromAddress ?? null,
     cloudflareConfigured: !!token,
     tunnelsAvailable: !!(token && accountId),
     cfAccessInviteConfigured: !!(token && accountId && accessAppId && accessPolicyId),
+    cfEmailInviteConfigured: !!(
+      token &&
+      accountId &&
+      settings.integrations.cloudflareEmailEnabled &&
+      settings.integrations.cloudflareEmailFromAddress
+    ),
   })
 })
 

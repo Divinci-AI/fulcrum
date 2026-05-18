@@ -414,10 +414,14 @@ adds per-user invites to a CF Access policy).
 1. Open https://dash.cloudflare.com/profile/api-tokens.
 2. Click **"Create Token"** → **"Custom token"** at the bottom.
 3. Name: `fulcrum-saas-<YYYY-MM>` (date the month you created it).
-4. Permissions (exact three, per §3):
+4. Permissions (exact four):
    - **Zone** › **DNS** › **Edit** — *Specific Zone → divinci.ai*
    - **Account** › **Access: Apps and Policies** › **Edit** — *Specific account → Divinci-AI*
    - **Account** › **Cloudflare Tunnel** › **Edit** — *Specific account → Divinci-AI*
+   - **Account** › **Email Sending** › **Edit** — *Specific account → Divinci-AI*
+     (D-10 PR 8 — enables auto-sent invite emails. Optional; only
+     needed if you flip the "Auto-send invite emails via Cloudflare"
+     toggle in Settings → Integrations.)
 5. **TTL**: leave blank for non-expiring (preferred — rotation is manual
    and we'd rather rotate on incident-response than discover the token
    has silently died). If your org policy forbids non-expiring, choose

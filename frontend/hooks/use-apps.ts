@@ -527,9 +527,13 @@ export interface DeploymentSettings {
    * App/Policy hierarchy that the invite flow updates. */
   cloudflareAccessAppId: string | null
   cloudflareAccessPolicyId: string | null
+  /** D-10 PR 8: CF Email Sending toggle + verified sender address. */
+  cloudflareEmailEnabled: boolean
+  cloudflareEmailFromAddress: string | null
   cloudflareConfigured: boolean
   tunnelsAvailable: boolean
   cfAccessInviteConfigured: boolean
+  cfEmailInviteConfigured: boolean
 }
 
 export function useDeploymentSettings() {
@@ -549,6 +553,8 @@ export function useUpdateDeploymentSettings() {
       cloudflareAccountId?: string | null
       cloudflareAccessAppId?: string | null
       cloudflareAccessPolicyId?: string | null
+      cloudflareEmailEnabled?: boolean | null
+      cloudflareEmailFromAddress?: string | null
     }) =>
       fetchJSON<{ success: boolean }>(`${API_BASE}/api/deployment/settings`, {
         method: 'POST',

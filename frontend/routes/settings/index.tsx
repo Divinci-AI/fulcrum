@@ -244,6 +244,9 @@ function SettingsPage() {
   // D-9 PR 1: CF Access (per-user invite policy) IDs — non-secret.
   const [localCloudflareAccessAppId, setLocalCloudflareAccessAppId] = useState('')
   const [localCloudflareAccessPolicyId, setLocalCloudflareAccessPolicyId] = useState('')
+  // D-10 PR 8: Cloudflare Email Sending opt-in + from address.
+  const [localCloudflareEmailEnabled, setLocalCloudflareEmailEnabled] = useState(false)
+  const [localCloudflareEmailFromAddress, setLocalCloudflareEmailFromAddress] = useState('')
 
   // Task defaults local state
   const [localDefaultTaskType, setLocalDefaultTaskType] = useState<TaskType>('worktree')
@@ -345,6 +348,12 @@ function SettingsPage() {
     if (deploymentSettings?.cloudflareAccessPolicyId !== undefined) {
       setLocalCloudflareAccessPolicyId(deploymentSettings.cloudflareAccessPolicyId ?? '')
     }
+    if (deploymentSettings?.cloudflareEmailEnabled !== undefined) {
+      setLocalCloudflareEmailEnabled(deploymentSettings.cloudflareEmailEnabled ?? false)
+    }
+    if (deploymentSettings?.cloudflareEmailFromAddress !== undefined) {
+      setLocalCloudflareEmailFromAddress(deploymentSettings.cloudflareEmailFromAddress ?? '')
+    }
   }, [deploymentSettings])
 
   // Sync task defaults
@@ -426,6 +435,8 @@ function SettingsPage() {
     const serverAccountId = deploymentSettings?.cloudflareAccountId ?? ''
     const serverAccessAppId = deploymentSettings?.cloudflareAccessAppId ?? ''
     const serverAccessPolicyId = deploymentSettings?.cloudflareAccessPolicyId ?? ''
+    const serverCfEmailEnabled = deploymentSettings?.cloudflareEmailEnabled ?? false
+    const serverCfEmailFromAddress = deploymentSettings?.cloudflareEmailFromAddress ?? ''
     // Token: changed if different from server AND not a mask (user entered real value)
     const tokenChanged = localCloudflareToken !== serverToken && !localCloudflareToken.match(/^•+$/)
     // Account ID: changed if different from server AND not a mask
@@ -433,7 +444,10 @@ function SettingsPage() {
     // CF Access IDs aren't masked — plain text round-trip
     const accessAppIdChanged = localCloudflareAccessAppId !== serverAccessAppId
     const accessPolicyIdChanged = localCloudflareAccessPolicyId !== serverAccessPolicyId
-    return tokenChanged || accountIdChanged || accessAppIdChanged || accessPolicyIdChanged
+    // CF Email — boolean + plain text
+    const cfEmailEnabledChanged = localCloudflareEmailEnabled !== serverCfEmailEnabled
+    const cfEmailFromChanged = localCloudflareEmailFromAddress !== serverCfEmailFromAddress
+    return tokenChanged || accountIdChanged || accessAppIdChanged || accessPolicyIdChanged || cfEmailEnabledChanged || cfEmailFromChanged
   })()
 
   const hasNotificationChanges = notificationSettings && (
@@ -872,11 +886,15 @@ function SettingsPage() {
       const serverAccountId = deploymentSettings?.cloudflareAccountId ?? ''
       const serverAccessAppId = deploymentSettings?.cloudflareAccessAppId ?? ''
       const serverAccessPolicyId = deploymentSettings?.cloudflareAccessPolicyId ?? ''
+      const serverCfEmailEnabled = deploymentSettings?.cloudflareEmailEnabled ?? false
+      const serverCfEmailFromAddress = deploymentSettings?.cloudflareEmailFromAddress ?? ''
       const updates: {
         cloudflareApiToken?: string | null
         cloudflareAccountId?: string | null
         cloudflareAccessAppId?: string | null
         cloudflareAccessPolicyId?: string | null
+        cloudflareEmailEnabled?: boolean | null
+        cloudflareEmailFromAddress?: string | null
       } = {}
 
       // Only send token if it changed and is not a mask (user entered real value)
@@ -895,6 +913,13 @@ function SettingsPage() {
       }
       if (localCloudflareAccessPolicyId !== serverAccessPolicyId) {
         updates.cloudflareAccessPolicyId = localCloudflareAccessPolicyId || null
+      }
+      // CF Email — boolean + plain text.
+      if (localCloudflareEmailEnabled !== serverCfEmailEnabled) {
+        updates.cloudflareEmailEnabled = localCloudflareEmailEnabled
+      }
+      if (localCloudflareEmailFromAddress !== serverCfEmailFromAddress) {
+        updates.cloudflareEmailFromAddress = localCloudflareEmailFromAddress || null
       }
 
       if (Object.keys(updates).length > 0) {
@@ -1503,6 +1528,51 @@ function SettingsPage() {
                       </div>
                       <p className="text-xs text-muted-foreground sm:ml-20 sm:pl-2">
                         The companion policy created per RUNBOOK §9. When both IDs are set, admin invites also add the email to this policy's include list.
+                      </p>
+                    </div>
+
+                    {/* D-10 PR 8 — Cloudflare Email Sending (beta) */}
+                    <div className="space-y-1 border-t pt-3">
+                      <div className="flex items-center gap-2">
+                        <Switch
+                          checked={localCloudflareEmailEnabled}
+                          onCheckedChange={setLocalCloudflareEmailEnabled}
+                          disabled={isLoading}
+                        />
+                        <label className="text-sm text-muted-foreground">
+                          Auto-send invite emails via Cloudflare (beta)
+                        </label>
+                      </div>
+                      <p className="text-xs text-muted-foreground sm:pl-12">
+                        When on, admin invites send the email immediately via Cloudflare Email Sending instead of creating a Gmail draft. Requires a verified sender domain on Cloudflare + the API token's <code>Email Sending: Edit</code> permission.
+                      </p>
+                    </div>
+
+                    <div className="space-y-1">
+                      <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+                        <label className="text-sm text-muted-foreground sm:w-20 sm:shrink-0">
+                          From
+                        </label>
+                        <div className="flex flex-1 items-center gap-2">
+                          <div className="relative flex-1">
+                            <Input
+                              type="email"
+                              value={localCloudflareEmailFromAddress}
+                              onChange={(e) => setLocalCloudflareEmailFromAddress(e.target.value)}
+                              placeholder="invites@divinci.ai"
+                              disabled={isLoading || !localCloudflareEmailEnabled}
+                              className="flex-1 pr-8 font-mono text-sm"
+                            />
+                            {!!deploymentSettings?.cloudflareEmailFromAddress && (
+                              <div className="absolute right-2 top-1/2 -translate-y-1/2 text-green-500">
+                                <HugeiconsIcon icon={Tick02Icon} size={14} strokeWidth={2} />
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                      <p className="text-xs text-muted-foreground sm:ml-20 sm:pl-2">
+                        Verified sender address — must be on a domain whose DNS is on Cloudflare with SPF/DKIM/DMARC published (set up via the dashboard).
                       </p>
                     </div>
 

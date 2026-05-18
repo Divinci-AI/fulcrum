@@ -33,6 +33,8 @@ export const FNOX_CONFIG_MAP: Record<string, ConfigEntry> = {
   'integrations.cloudflareAccountId': { fnoxKey: 'FULCRUM_CLOUDFLARE_ACCOUNT_ID', provider: 'age', type: 'string' },
   'integrations.cloudflareAccessAppId': { fnoxKey: 'FULCRUM_CLOUDFLARE_ACCESS_APP_ID', provider: 'plain', type: 'string' },
   'integrations.cloudflareAccessPolicyId': { fnoxKey: 'FULCRUM_CLOUDFLARE_ACCESS_POLICY_ID', provider: 'plain', type: 'string' },
+  'integrations.cloudflareEmailEnabled': { fnoxKey: 'FULCRUM_CLOUDFLARE_EMAIL_ENABLED', provider: 'plain', type: 'boolean' },
+  'integrations.cloudflareEmailFromAddress': { fnoxKey: 'FULCRUM_CLOUDFLARE_EMAIL_FROM', provider: 'plain', type: 'string' },
   'integrations.googleClientId': { fnoxKey: 'FULCRUM_GOOGLE_CLIENT_ID', provider: 'age', type: 'string' },
   'integrations.googleClientSecret': { fnoxKey: 'FULCRUM_GOOGLE_CLIENT_SECRET', provider: 'age', type: 'string' },
 
