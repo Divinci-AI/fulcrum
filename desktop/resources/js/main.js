@@ -217,6 +217,17 @@ async function loadSettings() {
       log.info('Saved migrated settings');
     }
 
+    // D-12 PR 2: ensure profiles shape (independent of _schemaVersion bumps
+    // since the major version controls schemaVersion and we don't want to
+    // gate profile migration on that). Cheap if already migrated.
+    const beforeProfiles = JSON.stringify(settings.connection ?? null);
+    settings = ensureProfilesShape(settings);
+    const afterProfiles = JSON.stringify(settings.connection);
+    if (beforeProfiles !== afterProfiles) {
+      await Neutralino.filesystem.writeFile(settingsPath, JSON.stringify(settings, null, 2));
+      log.info('Migrated connection to profiles shape', { connection: settings.connection });
+    }
+
     desktopSettings = settings;
 
     // Restore zoom level if previously saved
@@ -579,45 +590,24 @@ async function startLocalServer() {
   }
 }
 
-/**
- * Connect to local server
- * Will start the server if it's not already running (e.g., first launch or switching from remote)
- */
-async function connectToLocal() {
-  const localPort = getLocalPort();
-  const localUrl = `http://localhost:${localPort}`;
+// =============================================================================
+// Server-profile management (D-12 PR 2)
+// =============================================================================
+//
+// Settings shape after PR 2 migration:
+//   connection.activeProfileId  — string id of the profile in use
+//   connection.profiles         — array, always includes the synthetic
+//                                  Local profile, plus any user-added remotes
+//
+// A profile is one of:
+//   { id: 'local',   label: 'Local', isLocal: true }
+//   { id: <host>,    label: <name>,  url: 'https://host…' }
+//
+// The Local profile is fixed — never deleted, never duplicated, always at
+// index 0. Remote profile ids are derived from URL host so adding the same
+// URL twice idempotently updates the existing profile.
 
-  setStatus('Connecting to local server...', `localhost:${localPort}${isDevMode ? ' (dev)' : ''}`);
-  log.info('Connecting to local server', { port: localPort, isDevMode });
-
-  // Check if server is already running (launcher may have started it)
-  if (await checkServerHealth(localUrl)) {
-    log.info('Server already running');
-    await saveSettings({
-      ...desktopSettings,
-      lastConnectedHost: 'localhost',
-      connection: { ...(desktopSettings?.connection ?? {}), mode: 'local' },
-    });
-    loadFulcrumApp(localUrl);
-    return true;
-  }
-
-  // Server not running - start it
-  log.info('Server not running, starting...');
-  if (await startLocalServer()) {
-    await saveSettings({
-      ...desktopSettings,
-      lastConnectedHost: 'localhost',
-      connection: { ...(desktopSettings?.connection ?? {}), mode: 'local' },
-    });
-    loadFulcrumApp(localUrl);
-    return true;
-  }
-
-  log.error('Could not start local server');
-  showError('Server Failed', 'Could not start local server. Check ~/.fulcrum/desktop.log for details.');
-  return false;
-}
+const LOCAL_PROFILE = Object.freeze({ id: 'local', label: 'Local', isLocal: true });
 
 /**
  * Normalize a user-typed remote URL.
@@ -642,129 +632,439 @@ function normalizeRemoteUrl(input) {
 }
 
 /**
- * Connect to a remote Fulcrum server.
- *
- * Unlike connectToLocal(), this does NOT spawn a server — the remote one
- * is already running somewhere else (e.g. fulcrum-acme.divinci.ai). We
- * just point the webview at it. Auth flows through the remote's own
- * mechanism (Cloudflare Access SSO sets a cookie inside this webview).
- *
- * The local server keeps running in the background (if it was started)
- * so switching back via connectToLocal() is instant.
+ * Pick a human-readable default label from a hostname. Strips the
+ * `.divinci.ai` suffix for our SaaS tenants so "fulcrum-acme" reads cleanly.
  */
-async function connectToRemote(url) {
+function defaultLabelForHost(host) {
+  return host.replace(/\.divinci\.ai$/, '');
+}
+
+/**
+ * Lazily migrate the connection block to the profiles shape.
+ *
+ * Three input states we handle:
+ *   1. No connection block at all (fresh install / pre-D-12 install)
+ *      → seed with Local-only, activeProfileId='local'.
+ *   2. PR 1 shape: { mode: 'local'|'remote', remoteUrl? }
+ *      → seed Local; if mode=='remote' & remoteUrl is valid, add a remote
+ *        profile and set it active.
+ *   3. PR 2 shape (already has profiles array)
+ *      → no-op (return unchanged).
+ *
+ * Pure: takes a settings object, returns a settings object. Caller decides
+ * whether to persist.
+ */
+function ensureProfilesShape(settings) {
+  const conn = settings?.connection ?? {};
+  if (Array.isArray(conn.profiles)) {
+    if (!conn.profiles.find((p) => p.id === 'local')) {
+      conn.profiles = [LOCAL_PROFILE, ...conn.profiles];
+    }
+    if (!conn.activeProfileId) {
+      conn.activeProfileId = 'local';
+    }
+    return { ...settings, connection: conn };
+  }
+
+  const profiles = [LOCAL_PROFILE];
+  let activeProfileId = 'local';
+
+  // PR 1 → PR 2 migration: pull the single remoteUrl into a profile.
+  if (conn.mode === 'remote' && conn.remoteUrl) {
+    const url = normalizeRemoteUrl(conn.remoteUrl);
+    if (url) {
+      try {
+        const host = new URL(url).host;
+        profiles.push({ id: host, label: defaultLabelForHost(host), url });
+        activeProfileId = host;
+      } catch {
+        // Bad URL — drop the migration and stay local.
+      }
+    }
+  }
+
+  return {
+    ...settings,
+    connection: { activeProfileId, profiles },
+  };
+}
+
+function getProfiles() {
+  return desktopSettings?.connection?.profiles ?? [LOCAL_PROFILE];
+}
+
+function findProfile(id) {
+  return getProfiles().find((p) => p.id === id) ?? null;
+}
+
+function getActiveProfileId() {
+  return desktopSettings?.connection?.activeProfileId ?? 'local';
+}
+
+/**
+ * Connect to local server. Spawns the bundled server if not already running.
+ * Caller is responsible for updating activeProfileId.
+ */
+async function connectToLocal() {
+  const localPort = getLocalPort();
+  const localUrl = `http://localhost:${localPort}`;
+
+  setStatus('Connecting to local server...', `localhost:${localPort}${isDevMode ? ' (dev)' : ''}`);
+  log.info('Connecting to local server', { port: localPort, isDevMode });
+
+  if (await checkServerHealth(localUrl)) {
+    log.info('Server already running');
+    loadFulcrumApp(localUrl);
+    return true;
+  }
+
+  log.info('Server not running, starting...');
+  if (await startLocalServer()) {
+    loadFulcrumApp(localUrl);
+    return true;
+  }
+
+  log.error('Could not start local server');
+  showError('Server Failed', 'Could not start local server. Check ~/.fulcrum/desktop.log for details.');
+  return false;
+}
+
+/**
+ * Connect to a remote Fulcrum server at the given URL. Does NOT spawn a
+ * server. Auth flows through the remote's own mechanism (CF Access SSO
+ * sets a cookie inside this webview). Caller is responsible for updating
+ * activeProfileId.
+ */
+async function connectToRemoteUrl(url) {
   const remoteUrl = normalizeRemoteUrl(url);
   if (!remoteUrl) {
-    showError('Invalid URL', 'Could not parse the remote server URL. Use https://your-server.example.com.');
+    showError('Invalid URL', 'Could not parse the remote server URL.');
     return false;
   }
 
   setStatus('Connecting to remote server...', remoteUrl);
   log.info('Connecting to remote server', { remoteUrl });
 
-  // Soft-check reachability via curl. We don't require /health to be
-  // public — many SaaS deploys gate it behind CF Access. So failure
-  // here is informational; we still try to load the iframe. If the
-  // user is unauthenticated, CF Access redirects them through SSO
-  // inside the webview, which is the expected flow.
   const reachable = await checkServerHealth(remoteUrl);
   if (!reachable) {
     log.warn('Remote /health did not respond OK — continuing anyway (may be CF Access gated)', { remoteUrl });
   }
 
-  await saveSettings({
-    ...desktopSettings,
-    lastConnectedHost: `remote:${remoteUrl}`,
-    connection: { mode: 'remote', remoteUrl },
-  });
   loadFulcrumApp(remoteUrl);
   return true;
 }
 
 /**
- * Main connection logic
- *
- * Routing:
- *   connection.mode === 'remote' → connectToRemote (skip local server)
- *   otherwise                    → connectToLocal (spawn local server if needed)
- *
- * Default for new installs: local (back-compat with pre-D-12 behavior).
+ * Unified entry point for switching connections. Looks up the profile,
+ * updates activeProfileId in settings, and dispatches to local vs remote.
+ */
+async function connectToProfile(id) {
+  const profile = findProfile(id) ?? LOCAL_PROFILE;
+  log.info('Switching to profile', { id: profile.id, label: profile.label });
+
+  await saveSettings({
+    ...desktopSettings,
+    lastConnectedHost: profile.isLocal ? 'localhost' : `remote:${profile.url}`,
+    connection: { ...desktopSettings.connection, activeProfileId: profile.id },
+  });
+
+  await setupMacMenu();
+
+  if (profile.isLocal) {
+    return connectToLocal();
+  }
+  return connectToRemoteUrl(profile.url);
+}
+
+/**
+ * Add (or update if host id collides) a remote profile and connect to it.
+ */
+async function addProfileAndConnect(label, url) {
+  const normalized = normalizeRemoteUrl(url);
+  if (!normalized) {
+    return { ok: false, error: 'Please enter a valid URL (e.g. https://fulcrum-acme.divinci.ai).' };
+  }
+  const host = new URL(normalized).host;
+  if (host === 'localhost' || host.startsWith('127.0.0.1')) {
+    return { ok: false, error: 'Localhost is the Local profile — no need to add it as a remote.' };
+  }
+
+  const cleanLabel = (label || '').trim() || defaultLabelForHost(host);
+  const id = host;
+  const existing = getProfiles();
+  const remotesWithoutCollision = existing.filter((p) => p.id !== id && p.id !== 'local');
+  const updated = [
+    LOCAL_PROFILE,
+    ...remotesWithoutCollision,
+    { id, label: cleanLabel, url: normalized },
+  ];
+
+  await saveSettings({
+    ...desktopSettings,
+    connection: { ...desktopSettings.connection, profiles: updated },
+  });
+
+  await connectToProfile(id);
+  return { ok: true };
+}
+
+/**
+ * Delete a profile by id. 'local' is fixed and cannot be deleted. If the
+ * deleted profile was active, falls back to Local.
+ */
+async function deleteProfile(id) {
+  if (id === 'local') {
+    log.warn('Refusing to delete Local profile');
+    return;
+  }
+  const wasActive = getActiveProfileId() === id;
+  const next = getProfiles().filter((p) => p.id !== id);
+  await saveSettings({
+    ...desktopSettings,
+    connection: {
+      ...desktopSettings.connection,
+      profiles: next,
+      activeProfileId: wasActive ? 'local' : desktopSettings.connection.activeProfileId,
+    },
+  });
+  await setupMacMenu();
+  if (wasActive) {
+    document.body.classList.remove('loaded');
+    await connectToProfile('local');
+  }
+}
+
+/**
+ * Main connection logic — boots into the saved active profile.
  */
 async function tryConnect() {
   log.info('tryConnect() called');
   await loadSettings();
-
-  const mode = desktopSettings?.connection?.mode;
-  const remoteUrl = desktopSettings?.connection?.remoteUrl;
-  if (mode === 'remote' && remoteUrl) {
-    log.info('Routing to remote per saved settings', { remoteUrl });
-    const ok = await connectToRemote(remoteUrl);
-    if (ok) return;
-    // Remote failed entirely (URL parse failed). Fall through to local
-    // so the user isn't stuck on a black screen.
-    log.warn('Remote connect failed, falling back to local');
+  const activeId = getActiveProfileId();
+  log.info('Booting into profile', { activeId });
+  const ok = await connectToProfile(activeId);
+  if (!ok && activeId !== 'local') {
+    log.warn('Active profile failed, falling back to Local', { activeId });
+    await connectToProfile('local');
   }
-  await connectToLocal();
 }
 
-// Expose connection switchers for the macOS menu handler.
-window.fulcrumConnectLocal = connectToLocal;
-window.fulcrumConnectRemote = connectToRemote;
-window.fulcrumGetConnectionState = () => ({
-  mode: desktopSettings?.connection?.mode ?? 'local',
-  remoteUrl: desktopSettings?.connection?.remoteUrl ?? null,
-  current: serverUrl,
-});
+// =============================================================================
+// Add Profile + Manage Profiles modals
+// =============================================================================
 
-/**
- * Open the "Connect to Remote" modal. Pre-fills the URL field with the
- * last-used remote so re-typing isn't required to bounce back and forth.
- */
-function openConnectModal() {
-  const overlay = document.getElementById('connect-overlay');
-  const input = document.getElementById('connect-url');
-  const errorBox = document.getElementById('connect-error');
-  if (!overlay || !input) return;
+function openAddProfileModal() {
+  const overlay = document.getElementById('add-profile-overlay');
+  const labelInput = document.getElementById('add-profile-label');
+  const urlInput = document.getElementById('add-profile-url');
+  const errorBox = document.getElementById('add-profile-error');
+  if (!overlay) return;
   errorBox.style.display = 'none';
   errorBox.textContent = '';
-  input.value = desktopSettings?.connection?.remoteUrl ?? '';
+  labelInput.value = '';
+  urlInput.value = '';
   overlay.classList.add('visible');
-  input.focus();
-  input.select();
+  urlInput.focus();
 }
 
-function closeConnectModal() {
-  const overlay = document.getElementById('connect-overlay');
-  overlay?.classList.remove('visible');
+function closeAddProfileModal() {
+  document.getElementById('add-profile-overlay')?.classList.remove('visible');
 }
 
-async function submitConnectModal() {
-  const input = document.getElementById('connect-url');
-  const errorBox = document.getElementById('connect-error');
-  const raw = (input?.value ?? '').trim();
-  const normalized = normalizeRemoteUrl(raw);
-  if (!normalized) {
-    errorBox.textContent = 'Please enter a valid URL (e.g. https://fulcrum-acme.divinci.ai).';
+async function submitAddProfileModal() {
+  const label = document.getElementById('add-profile-label')?.value ?? '';
+  const url = document.getElementById('add-profile-url')?.value ?? '';
+  const errorBox = document.getElementById('add-profile-error');
+  const result = await addProfileAndConnect(label, url);
+  if (!result.ok) {
+    errorBox.textContent = result.error;
     errorBox.style.display = 'block';
     return;
   }
-  closeConnectModal();
+  closeAddProfileModal();
   document.body.classList.remove('loaded');
-  await connectToRemote(normalized);
 }
 
-window.fulcrumCloseConnectModal = closeConnectModal;
-window.fulcrumSubmitConnectModal = submitConnectModal;
+function openManageProfilesModal() {
+  const overlay = document.getElementById('manage-profiles-overlay');
+  if (!overlay) return;
+  renderProfileList();
+  overlay.classList.add('visible');
+}
 
-// Esc closes the connect modal when it's visible.
+function closeManageProfilesModal() {
+  document.getElementById('manage-profiles-overlay')?.classList.remove('visible');
+}
+
+/**
+ * Render the profile list inside the Manage Profiles modal. Called every
+ * time the modal opens, and after each delete.
+ */
+function renderProfileList() {
+  const listEl = document.getElementById('manage-profiles-list');
+  if (!listEl) return;
+  const profiles = getProfiles();
+  const activeId = getActiveProfileId();
+  // Clear without using innerHTML — safer pattern, avoids XSS hook tripping.
+  while (listEl.firstChild) listEl.removeChild(listEl.firstChild);
+  for (const p of profiles) {
+    const row = document.createElement('div');
+    row.className = 'profile-row';
+    const meta = document.createElement('div');
+    meta.className = 'profile-meta';
+    const labelEl = document.createElement('div');
+    labelEl.className = 'profile-label';
+    labelEl.textContent = p.label + (p.id === activeId ? '  (active)' : '');
+    const urlEl = document.createElement('div');
+    urlEl.className = 'profile-url';
+    urlEl.textContent = p.isLocal ? `localhost:${getLocalPort()}` : p.url;
+    meta.appendChild(labelEl);
+    meta.appendChild(urlEl);
+    row.appendChild(meta);
+    if (!p.isLocal) {
+      const del = document.createElement('button');
+      del.className = 'text-btn profile-delete';
+      del.textContent = 'Delete';
+      del.onclick = async () => {
+        await deleteProfile(p.id);
+        renderProfileList();
+      };
+      row.appendChild(del);
+    }
+    listEl.appendChild(row);
+  }
+}
+
+window.fulcrumOpenAddProfile = openAddProfileModal;
+window.fulcrumCloseAddProfile = closeAddProfileModal;
+window.fulcrumSubmitAddProfile = submitAddProfileModal;
+window.fulcrumOpenManageProfiles = openManageProfilesModal;
+window.fulcrumCloseManageProfiles = closeManageProfilesModal;
+window.fulcrumGetConnectionState = () => ({
+  activeProfileId: getActiveProfileId(),
+  profiles: getProfiles(),
+  current: serverUrl,
+});
+
+// Esc closes whichever overlay is open.
 document.addEventListener('keydown', (e) => {
   if (e.key !== 'Escape') return;
-  const overlay = document.getElementById('connect-overlay');
-  if (overlay?.classList.contains('visible')) {
+  const open = document.querySelector('.connect-overlay.visible');
+  if (open) {
     e.preventDefault();
-    closeConnectModal();
+    open.classList.remove('visible');
   }
 });
+
+// =============================================================================
+// macOS native menu — built dynamically so the Server submenu can reflect
+// the current profile list and active profile.
+// =============================================================================
+
+async function setupMacMenu() {
+  if (NL_OS !== 'Darwin') return;
+
+  // Profile items: one per profile, with a ✓ prefix on the active one.
+  const activeId = getActiveProfileId();
+  const profileItems = getProfiles().map((p) => ({
+    id: `profile:${p.id}`,
+    text: `${p.id === activeId ? '✓ ' : '  '}Connect to ${p.label}`,
+  }));
+
+  await Neutralino.window.setMainMenu([
+    {
+      id: 'app',
+      text: 'Fulcrum',
+      menuItems: [
+        { id: 'about', text: 'About Fulcrum' },
+        { text: '-' },
+        { id: 'quit', text: 'Quit Fulcrum', shortcut: 'q', action: 'terminate:' }
+      ]
+    },
+    {
+      id: 'edit',
+      text: 'Edit',
+      menuItems: [
+        { id: 'undo', text: 'Undo', shortcut: 'z', action: 'undo:' },
+        { id: 'redo', text: 'Redo', shortcut: 'Z', action: 'redo:' },
+        { text: '-' },
+        { id: 'cut', text: 'Cut', shortcut: 'x', action: 'cut:' },
+        { id: 'copy', text: 'Copy', shortcut: 'c', action: 'copy:' },
+        { id: 'paste', text: 'Paste', shortcut: 'v', action: 'paste:' },
+        { id: 'selectAll', text: 'Select All', shortcut: 'a', action: 'selectAll:' }
+      ]
+    },
+    {
+      id: 'view',
+      text: 'View',
+      menuItems: [
+        { id: 'zoomIn', text: 'Zoom In', shortcut: '+' },
+        { id: 'zoomOut', text: 'Zoom Out', shortcut: '-' },
+        { id: 'zoomReset', text: 'Actual Size', shortcut: '0' }
+      ]
+    },
+    {
+      id: 'go',
+      text: 'Go',
+      menuItems: [
+        { id: 'goTasks', text: 'Tasks', shortcut: '1' },
+        { id: 'goTerminals', text: 'Terminals', shortcut: '2' },
+        { id: 'goTaskTerminals', text: 'Task Terminals', shortcut: 'i' },
+        { id: 'goRepositories', text: 'Repositories', shortcut: '3' },
+        { id: 'goReview', text: 'Review', shortcut: '4' },
+        { id: 'goMonitoring', text: 'Monitoring', shortcut: '5' },
+        { text: '-' },
+        { id: 'goSettings', text: 'Settings…', shortcut: ',' },
+        { text: '-' },
+        { id: 'commandPalette', text: 'Command Palette', shortcut: 'k' },
+        { id: 'newTask', text: 'New Task', shortcut: 'j' },
+        { id: 'showHelp', text: 'Keyboard Shortcuts', shortcut: '/' }
+      ]
+    },
+    {
+      id: 'server',
+      text: 'Server',
+      menuItems: [
+        ...profileItems,
+        { text: '-' },
+        { id: 'serverAdd', text: 'Add Remote Profile…' },
+        { id: 'serverManage', text: 'Manage Profiles…' },
+      ]
+    }
+  ]);
+}
+
+function handleMacMenuClick(evt) {
+  const id = evt.detail.id;
+  // Profile switch items: id is "profile:<profileId>"
+  if (typeof id === 'string' && id.startsWith('profile:')) {
+    const profileId = id.slice('profile:'.length);
+    document.body.classList.remove('loaded');
+    connectToProfile(profileId);
+    return;
+  }
+  switch (id) {
+    // Zoom
+    case 'zoomIn': zoomIn(); break;
+    case 'zoomOut': zoomOut(); break;
+    case 'zoomReset': zoomReset(); break;
+    // Navigation
+    case 'goTasks': navigateTo('/tasks'); break;
+    case 'goTerminals': navigateTo('/terminals'); break;
+    case 'goTaskTerminals': navigateTo('/terminals?tab=all-tasks'); break;
+    case 'goRepositories': navigateTo('/repositories'); break;
+    case 'goReview': navigateTo('/review'); break;
+    case 'goMonitoring': navigateTo('/monitoring'); break;
+    case 'goSettings': navigateTo('/settings'); break;
+    // Actions (via postMessage to React app)
+    case 'commandPalette': postMessageToApp('fulcrum:action', { action: 'openCommandPalette' }); break;
+    case 'newTask': postMessageToApp('fulcrum:action', { action: 'openNewTask' }); break;
+    case 'showHelp': postMessageToApp('fulcrum:action', { action: 'showShortcuts' }); break;
+    // Server profile management
+    case 'serverAdd': openAddProfileModal(); break;
+    case 'serverManage': openManageProfilesModal(); break;
+  }
+}
 
 /**
  * Handle extension ready event (when running with local server extension)
@@ -1084,96 +1384,8 @@ async function init() {
 
     // Set up native menu for macOS (required for Cmd+C/V/X/A shortcuts to work)
     if (NL_OS === 'Darwin') {
-      await Neutralino.window.setMainMenu([
-        {
-          id: 'app',
-          text: 'Fulcrum',
-          menuItems: [
-            { id: 'about', text: 'About Fulcrum' },
-            { text: '-' },
-            { id: 'quit', text: 'Quit Fulcrum', shortcut: 'q', action: 'terminate:' }
-          ]
-        },
-        {
-          id: 'edit',
-          text: 'Edit',
-          menuItems: [
-            { id: 'undo', text: 'Undo', shortcut: 'z', action: 'undo:' },
-            { id: 'redo', text: 'Redo', shortcut: 'Z', action: 'redo:' },
-            { text: '-' },
-            { id: 'cut', text: 'Cut', shortcut: 'x', action: 'cut:' },
-            { id: 'copy', text: 'Copy', shortcut: 'c', action: 'copy:' },
-            { id: 'paste', text: 'Paste', shortcut: 'v', action: 'paste:' },
-            { id: 'selectAll', text: 'Select All', shortcut: 'a', action: 'selectAll:' }
-          ]
-        },
-        {
-          id: 'view',
-          text: 'View',
-          menuItems: [
-            { id: 'zoomIn', text: 'Zoom In', shortcut: '+' },
-            { id: 'zoomOut', text: 'Zoom Out', shortcut: '-' },
-            { id: 'zoomReset', text: 'Actual Size', shortcut: '0' }
-          ]
-        },
-        {
-          id: 'go',
-          text: 'Go',
-          menuItems: [
-            { id: 'goTasks', text: 'Tasks', shortcut: '1' },
-            { id: 'goTerminals', text: 'Terminals', shortcut: '2' },
-            { id: 'goTaskTerminals', text: 'Task Terminals', shortcut: 'i' },
-            { id: 'goRepositories', text: 'Repositories', shortcut: '3' },
-            { id: 'goReview', text: 'Review', shortcut: '4' },
-            { id: 'goMonitoring', text: 'Monitoring', shortcut: '5' },
-            { text: '-' },
-            { id: 'goSettings', text: 'Settings…', shortcut: ',' },
-            { text: '-' },
-            { id: 'commandPalette', text: 'Command Palette', shortcut: 'k' },
-            { id: 'newTask', text: 'New Task', shortcut: 'j' },
-            { id: 'showHelp', text: 'Keyboard Shortcuts', shortcut: '/' }
-          ]
-        },
-        {
-          id: 'server',
-          text: 'Server',
-          menuItems: [
-            { id: 'serverLocal', text: 'Connect to Local' },
-            { id: 'serverRemote', text: 'Connect to Remote…' },
-          ]
-        }
-      ]);
-
-      // Handle custom menu actions (zoom, navigation, actions)
-      Neutralino.events.on('mainMenuItemClicked', (evt) => {
-        switch (evt.detail.id) {
-          // Zoom
-          case 'zoomIn': zoomIn(); break;
-          case 'zoomOut': zoomOut(); break;
-          case 'zoomReset': zoomReset(); break;
-          // Navigation
-          case 'goTasks': navigateTo('/tasks'); break;
-          case 'goTerminals': navigateTo('/terminals'); break;
-          case 'goTaskTerminals': navigateTo('/terminals?tab=all-tasks'); break;
-          case 'goRepositories': navigateTo('/repositories'); break;
-          case 'goReview': navigateTo('/review'); break;
-          case 'goMonitoring': navigateTo('/monitoring'); break;
-          case 'goSettings': navigateTo('/settings'); break;
-          // Actions (via postMessage to React app)
-          case 'commandPalette': postMessageToApp('fulcrum:action', { action: 'openCommandPalette' }); break;
-          case 'newTask': postMessageToApp('fulcrum:action', { action: 'openNewTask' }); break;
-          case 'showHelp': postMessageToApp('fulcrum:action', { action: 'showShortcuts' }); break;
-          // Server switching
-          case 'serverLocal':
-            document.body.classList.remove('loaded');
-            connectToLocal();
-            break;
-          case 'serverRemote':
-            openConnectModal();
-            break;
-        }
-      });
-
+      await setupMacMenu();
+      Neutralino.events.on('mainMenuItemClicked', handleMacMenuClick);
       console.log('[Fulcrum] macOS menu configured');
     }
 
