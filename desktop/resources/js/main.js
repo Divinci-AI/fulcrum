@@ -79,14 +79,43 @@ const log = {
 };
 
 /**
- * Get the path to settings file
+ * Get the path to the desktop-side settings file.
+ *
+ * NOTE (D-12 PR 5): historically this was `~/.fulcrum/settings.json` —
+ * but the bundled Fulcrum server runs an fnox migration on startup that
+ * unconditionally renames `~/.fulcrum/settings.json` → `.migrated` (it
+ * thinks the file is its own legacy config). That stole the desktop's
+ * settings every time. New path is `~/.fulcrum/desktop-settings.json`
+ * which the server doesn't touch.
+ *
+ * Returns the new path. `loadSettings` is responsible for one-shot
+ * recovery from the old path (or the `.migrated` orphan) if the new
+ * path doesn't exist yet.
  */
 async function getSettingsPath() {
-  // Get home directory from environment
   const home = NL_OS === 'Windows'
     ? await Neutralino.os.getEnv('USERPROFILE')
     : await Neutralino.os.getEnv('HOME');
-  return `${home}/.fulcrum/settings.json`;
+  return `${home}/.fulcrum/desktop-settings.json`;
+}
+
+/**
+ * Legacy paths to look at when the new desktop-settings.json doesn't
+ * exist yet — covers two cases for users upgrading from <=v5.10.3:
+ *   1. The server hasn't run its fnox migration yet, so the old
+ *      settings.json still exists.
+ *   2. The server already migrated, leaving the orphan at
+ *      settings.json.migrated with the desktop's state inside.
+ * loadSettings tries both in order.
+ */
+async function getLegacySettingsPaths() {
+  const home = NL_OS === 'Windows'
+    ? await Neutralino.os.getEnv('USERPROFILE')
+    : await Neutralino.os.getEnv('HOME');
+  return [
+    `${home}/.fulcrum/settings.json`,
+    `${home}/.fulcrum/settings.json.migrated`,
+  ];
 }
 
 /**
@@ -199,14 +228,52 @@ function migrateSettings(settings, targetVersion) {
 }
 
 /**
- * Load settings from file
+ * Try reading `path`, returning the parsed JSON or null on any error.
+ * Used by loadSettings' multi-path fallback chain.
+ */
+async function tryReadJSON(path) {
+  try {
+    const content = await Neutralino.filesystem.readFile(path);
+    return JSON.parse(content);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Load settings from desktop-settings.json, falling back to the legacy
+ * settings.json paths if the new file doesn't exist (one-shot migration
+ * for users upgrading from <=v5.10.3 — see getSettingsPath comment).
  */
 async function loadSettings() {
   try {
     const settingsPath = await getSettingsPath();
     const schemaVersion = await getSchemaVersion();
-    const content = await Neutralino.filesystem.readFile(settingsPath);
-    let settings = JSON.parse(content);
+
+    // 1. Try the new desktop-settings.json path first.
+    let settings = await tryReadJSON(settingsPath);
+    let recoveredFromLegacy = false;
+
+    // 2. If missing, try the legacy paths (vanilla settings.json, then
+    // the orphan .migrated created by the server's fnox migration).
+    if (!settings) {
+      for (const legacyPath of await getLegacySettingsPaths()) {
+        const legacy = await tryReadJSON(legacyPath);
+        if (legacy) {
+          log.info('Recovering desktop settings from legacy path', { legacyPath });
+          settings = legacy;
+          recoveredFromLegacy = true;
+          break;
+        }
+      }
+    }
+
+    // 3. Still nothing → fresh install. Bail to the catch path so we
+    // hit the defaults branch.
+    if (!settings) {
+      throw new Error('No desktop settings file found at any known path');
+    }
+
     log.debug('Loaded settings', settings);
 
     // Migrate if needed
@@ -226,6 +293,14 @@ async function loadSettings() {
     if (beforeProfiles !== afterProfiles) {
       await Neutralino.filesystem.writeFile(settingsPath, JSON.stringify(settings, null, 2));
       log.info('Migrated connection to profiles shape', { connection: settings.connection });
+    }
+
+    // D-12 PR 5: if we recovered from a legacy path, materialize the
+    // recovered state at the new path so future launches skip the
+    // legacy-fallback dance. Idempotent — writing identical content is fine.
+    if (recoveredFromLegacy) {
+      await Neutralino.filesystem.writeFile(settingsPath, JSON.stringify(settings, null, 2));
+      log.info('Persisted recovered settings to new path', { settingsPath });
     }
 
     desktopSettings = settings;
