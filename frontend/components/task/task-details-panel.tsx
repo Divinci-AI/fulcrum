@@ -15,6 +15,7 @@ import { DescriptionTextarea } from '@/components/ui/description-textarea'
 import { DatePickerPopover } from '@/components/ui/date-picker-popover'
 import { TimeEstimatePicker } from '@/components/task/time-estimate-picker'
 import { PriorityPicker } from '@/components/task/priority-picker'
+import { AssigneePicker } from '@/components/task/assignee-picker'
 import { LinksManager } from '@/components/task/links-manager'
 import { DependencyManager } from '@/components/task/dependency-manager'
 import { AttachmentsManager } from '@/components/task/attachments-manager'
@@ -87,6 +88,13 @@ export function TaskDetailsPanel({ task }: TaskDetailsPanelProps) {
     updateTask.mutate({
       taskId: task.id,
       updates: { priority: value },
+    })
+  }
+
+  const handleAssigneeChange = (userId: string | null) => {
+    updateTask.mutate({
+      taskId: task.id,
+      updates: { assigneeUserId: userId },
     })
   }
 
@@ -342,6 +350,15 @@ export function TaskDetailsPanel({ task }: TaskDetailsPanelProps) {
             <PriorityPicker
               value={task.priority}
               onChange={handlePriorityChange}
+            />
+          </div>
+
+          {/* Assignee (D-13 PR 1) */}
+          <div className="rounded-lg border bg-card p-4">
+            <h3 className="text-sm font-medium text-muted-foreground mb-2">Assignee</h3>
+            <AssigneePicker
+              value={task.assigneeUserId}
+              onChange={handleAssigneeChange}
             />
           </div>
         </div>

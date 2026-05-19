@@ -134,6 +134,10 @@ export interface Task {
   recurrenceEndDate: string | null
   recurrenceSourceTaskId: string | null
   notes: string | null // Free-form notes/comments
+  // D-13 PR 1: optional assignee — references users.id. Single-assignee
+  // by design; the API already supports filtering by `assigneeId=` and
+  // broadcasts `task:assigned` WS events when this changes.
+  assigneeUserId: string | null
   createdAt: string
   updatedAt: string
   links?: TaskLink[]
