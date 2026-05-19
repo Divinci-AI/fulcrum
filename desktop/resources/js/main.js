@@ -418,11 +418,38 @@ function postMessageToApp(type, data = {}) {
 }
 
 /**
+ * Update the floating top-right server indicator. Hidden when on local;
+ * shows the remote host (without scheme) when on remote.
+ */
+function updateServerIndicator(url) {
+  const el = document.getElementById('server-indicator');
+  if (!el) return;
+  let isRemote = false;
+  let label = '';
+  try {
+    const u = new URL(url);
+    const host = u.host;
+    isRemote = !(host.startsWith('localhost') || host.startsWith('127.0.0.1'));
+    label = `remote: ${host}`;
+  } catch {
+    isRemote = false;
+  }
+  if (isRemote) {
+    el.textContent = label;
+    el.classList.add('visible');
+  } else {
+    el.classList.remove('visible');
+    el.textContent = '';
+  }
+}
+
+/**
  * Load the Fulcrum app in an iframe
  */
 async function loadFulcrumApp(url) {
   setStatus('Loading Fulcrum...', url);
   serverUrl = url;
+  updateServerIndicator(url);
 
   log.info('Loading app', { url });
 
@@ -568,7 +595,8 @@ async function connectToLocal() {
     log.info('Server already running');
     await saveSettings({
       ...desktopSettings,
-      lastConnectedHost: 'localhost'
+      lastConnectedHost: 'localhost',
+      connection: { ...(desktopSettings?.connection ?? {}), mode: 'local' },
     });
     loadFulcrumApp(localUrl);
     return true;
@@ -579,7 +607,8 @@ async function connectToLocal() {
   if (await startLocalServer()) {
     await saveSettings({
       ...desktopSettings,
-      lastConnectedHost: 'localhost'
+      lastConnectedHost: 'localhost',
+      connection: { ...(desktopSettings?.connection ?? {}), mode: 'local' },
     });
     loadFulcrumApp(localUrl);
     return true;
@@ -591,18 +620,151 @@ async function connectToLocal() {
 }
 
 /**
+ * Normalize a user-typed remote URL.
+ * - Strips trailing slash.
+ * - Adds https:// when scheme is missing.
+ * - Returns null when the input doesn't look like a URL we can use.
+ */
+function normalizeRemoteUrl(input) {
+  if (!input || typeof input !== 'string') return null;
+  let value = input.trim();
+  if (!value) return null;
+  if (!/^https?:\/\//i.test(value)) {
+    value = 'https://' + value;
+  }
+  try {
+    const parsed = new URL(value);
+    if (!parsed.host) return null;
+    return parsed.origin;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Connect to a remote Fulcrum server.
+ *
+ * Unlike connectToLocal(), this does NOT spawn a server — the remote one
+ * is already running somewhere else (e.g. fulcrum-acme.divinci.ai). We
+ * just point the webview at it. Auth flows through the remote's own
+ * mechanism (Cloudflare Access SSO sets a cookie inside this webview).
+ *
+ * The local server keeps running in the background (if it was started)
+ * so switching back via connectToLocal() is instant.
+ */
+async function connectToRemote(url) {
+  const remoteUrl = normalizeRemoteUrl(url);
+  if (!remoteUrl) {
+    showError('Invalid URL', 'Could not parse the remote server URL. Use https://your-server.example.com.');
+    return false;
+  }
+
+  setStatus('Connecting to remote server...', remoteUrl);
+  log.info('Connecting to remote server', { remoteUrl });
+
+  // Soft-check reachability via curl. We don't require /health to be
+  // public — many SaaS deploys gate it behind CF Access. So failure
+  // here is informational; we still try to load the iframe. If the
+  // user is unauthenticated, CF Access redirects them through SSO
+  // inside the webview, which is the expected flow.
+  const reachable = await checkServerHealth(remoteUrl);
+  if (!reachable) {
+    log.warn('Remote /health did not respond OK — continuing anyway (may be CF Access gated)', { remoteUrl });
+  }
+
+  await saveSettings({
+    ...desktopSettings,
+    lastConnectedHost: `remote:${remoteUrl}`,
+    connection: { mode: 'remote', remoteUrl },
+  });
+  loadFulcrumApp(remoteUrl);
+  return true;
+}
+
+/**
  * Main connection logic
  *
- * Simple flow:
- * 1. Try localhost:7777 (or configured port)
- * 2. If server responds, use it (local or SSH tunnel)
- * 3. If not, start bundled server
+ * Routing:
+ *   connection.mode === 'remote' → connectToRemote (skip local server)
+ *   otherwise                    → connectToLocal (spawn local server if needed)
+ *
+ * Default for new installs: local (back-compat with pre-D-12 behavior).
  */
 async function tryConnect() {
   log.info('tryConnect() called');
   await loadSettings();
+
+  const mode = desktopSettings?.connection?.mode;
+  const remoteUrl = desktopSettings?.connection?.remoteUrl;
+  if (mode === 'remote' && remoteUrl) {
+    log.info('Routing to remote per saved settings', { remoteUrl });
+    const ok = await connectToRemote(remoteUrl);
+    if (ok) return;
+    // Remote failed entirely (URL parse failed). Fall through to local
+    // so the user isn't stuck on a black screen.
+    log.warn('Remote connect failed, falling back to local');
+  }
   await connectToLocal();
 }
+
+// Expose connection switchers for the macOS menu handler.
+window.fulcrumConnectLocal = connectToLocal;
+window.fulcrumConnectRemote = connectToRemote;
+window.fulcrumGetConnectionState = () => ({
+  mode: desktopSettings?.connection?.mode ?? 'local',
+  remoteUrl: desktopSettings?.connection?.remoteUrl ?? null,
+  current: serverUrl,
+});
+
+/**
+ * Open the "Connect to Remote" modal. Pre-fills the URL field with the
+ * last-used remote so re-typing isn't required to bounce back and forth.
+ */
+function openConnectModal() {
+  const overlay = document.getElementById('connect-overlay');
+  const input = document.getElementById('connect-url');
+  const errorBox = document.getElementById('connect-error');
+  if (!overlay || !input) return;
+  errorBox.style.display = 'none';
+  errorBox.textContent = '';
+  input.value = desktopSettings?.connection?.remoteUrl ?? '';
+  overlay.classList.add('visible');
+  input.focus();
+  input.select();
+}
+
+function closeConnectModal() {
+  const overlay = document.getElementById('connect-overlay');
+  overlay?.classList.remove('visible');
+}
+
+async function submitConnectModal() {
+  const input = document.getElementById('connect-url');
+  const errorBox = document.getElementById('connect-error');
+  const raw = (input?.value ?? '').trim();
+  const normalized = normalizeRemoteUrl(raw);
+  if (!normalized) {
+    errorBox.textContent = 'Please enter a valid URL (e.g. https://fulcrum-acme.divinci.ai).';
+    errorBox.style.display = 'block';
+    return;
+  }
+  closeConnectModal();
+  document.body.classList.remove('loaded');
+  await connectToRemote(normalized);
+}
+
+window.fulcrumCloseConnectModal = closeConnectModal;
+window.fulcrumSubmitConnectModal = submitConnectModal;
+
+// Esc closes the connect modal when it's visible.
+document.addEventListener('keydown', (e) => {
+  if (e.key !== 'Escape') return;
+  const overlay = document.getElementById('connect-overlay');
+  if (overlay?.classList.contains('visible')) {
+    e.preventDefault();
+    closeConnectModal();
+  }
+});
 
 /**
  * Handle extension ready event (when running with local server extension)
@@ -971,6 +1133,14 @@ async function init() {
             { id: 'newTask', text: 'New Task', shortcut: 'j' },
             { id: 'showHelp', text: 'Keyboard Shortcuts', shortcut: '/' }
           ]
+        },
+        {
+          id: 'server',
+          text: 'Server',
+          menuItems: [
+            { id: 'serverLocal', text: 'Connect to Local' },
+            { id: 'serverRemote', text: 'Connect to Remote…' },
+          ]
         }
       ]);
 
@@ -993,6 +1163,14 @@ async function init() {
           case 'commandPalette': postMessageToApp('fulcrum:action', { action: 'openCommandPalette' }); break;
           case 'newTask': postMessageToApp('fulcrum:action', { action: 'openNewTask' }); break;
           case 'showHelp': postMessageToApp('fulcrum:action', { action: 'showShortcuts' }); break;
+          // Server switching
+          case 'serverLocal':
+            document.body.classList.remove('loaded');
+            connectToLocal();
+            break;
+          case 'serverRemote':
+            openConnectModal();
+            break;
         }
       });
 
