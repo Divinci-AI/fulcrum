@@ -120,11 +120,23 @@ export function notifyMentions(opts: {
   sourceId: string
   sourceTitle: string
   authorEmail?: string | null
+  /** D-13 PR 3: for comment mentions, the parent task whose page the
+   * recipient should land on when they click the toast/email link. The
+   * comment id itself isn't web-routable. Required when sourceType
+   * is 'comment'. */
+  parentTaskId?: string
 }): void {
   if (opts.added.length === 0) return
   const publicDomain = getSettings().server.publicDomain
   const baseUrl = publicDomain ? `https://${publicDomain}` : ''
-  const path = opts.sourceType === 'task' ? `/tasks/${opts.sourceId}` : `/projects/${opts.sourceId}`
+  const path =
+    opts.sourceType === 'task'
+      ? `/tasks/${opts.sourceId}`
+      : opts.sourceType === 'project'
+        ? `/projects/${opts.sourceId}`
+        : opts.parentTaskId
+          ? `/tasks/${opts.parentTaskId}`
+          : '/'
   const url = baseUrl ? `${baseUrl}${path}` : undefined
   const by = opts.authorEmail ? ` by ${opts.authorEmail}` : ''
 
@@ -172,6 +184,24 @@ export function notifyMentions(opts: {
         },
         { toUserIds: new Set([u.id]) }
       )
+    } else if (opts.sourceType === 'comment' && opts.parentTaskId) {
+      // D-13 PR 3: comment mention → reuse task:mentioned event so the
+      // existing frontend handler (use-task-sync.tsx) toasts and routes
+      // to the parent task. Include the commentId in the payload for
+      // any future deep-link-to-comment UI.
+      broadcastToTopic(
+        `task:${opts.parentTaskId}`,
+        {
+          type: 'task:mentioned',
+          payload: {
+            taskId: opts.parentTaskId,
+            mentionedUserId: u.id,
+            authorEmail: opts.authorEmail ?? null,
+            commentId: opts.sourceId,
+          },
+        },
+        { toUserIds: new Set([u.id]) }
+      )
     }
   }
 
@@ -180,13 +210,29 @@ export function notifyMentions(opts: {
     // notification preferences (toast/desktop/sound/pushover toggles +
     // per-user Pushover key) over the tenant defaults, and limits the UI
     // broadcast to the recipient's own sockets.
+    const messagePrefix =
+      opts.sourceType === 'task'
+        ? 'Task'
+        : opts.sourceType === 'project'
+          ? 'Project'
+          : 'Comment on task'
     sendNotification(
       {
         title: `You were mentioned${by}`,
-        message: `${opts.sourceType === 'task' ? 'Task' : 'Project'}: ${opts.sourceTitle}`,
+        message: `${messagePrefix}: ${opts.sourceTitle}`,
         type: 'mention',
-        taskId: opts.sourceType === 'task' ? opts.sourceId : undefined,
-        taskTitle: opts.sourceType === 'task' ? opts.sourceTitle : undefined,
+        // For comments, taskId points at the parent so the frontend
+        // notification click-handler navigates correctly.
+        taskId:
+          opts.sourceType === 'task'
+            ? opts.sourceId
+            : opts.sourceType === 'comment'
+              ? opts.parentTaskId
+              : undefined,
+        taskTitle:
+          opts.sourceType === 'task' || opts.sourceType === 'comment'
+            ? opts.sourceTitle
+            : undefined,
         url,
       },
       { recipientUserId: u.id }
@@ -225,6 +271,7 @@ export function syncAndNotify(opts: {
   sourceTitle: string
   text: string | null | undefined
   authorEmail?: string | null
+  parentTaskId?: string
 }): SyncResult {
   const result = syncMentionsForSource(opts.sourceType, opts.sourceId, opts.text)
   notifyMentions({
@@ -233,6 +280,7 @@ export function syncAndNotify(opts: {
     sourceId: opts.sourceId,
     sourceTitle: opts.sourceTitle,
     authorEmail: opts.authorEmail,
+    parentTaskId: opts.parentTaskId,
   })
   return result
 }

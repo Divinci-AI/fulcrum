@@ -16,6 +16,13 @@ import { broadcast, broadcastToTopic } from '../websocket/terminal-ws'
 import { updateTaskStatus } from '../services/task-status'
 import { reindexTaskFTS } from '../services/search-service'
 import { buildMentionText, syncAndNotify } from '../services/mention-service'
+import {
+  createTaskComment,
+  deleteTaskComment,
+  getTaskComment,
+  listTaskComments,
+} from '../services/task-comment-service'
+import { requireUser } from '../middleware/current-user'
 import { grantCreatorAdmin, ensureAssigneeViewer, effectiveRole, roleSatisfies } from '../services/access-control-service'
 import { mentions } from '../db'
 import { log } from '../lib/logger'
@@ -1541,6 +1548,79 @@ app.delete('/:id/attachments/:attachmentId', (c) => {
   db.delete(taskAttachments).where(eq(taskAttachments.id, attachmentId)).run()
   broadcast({ type: 'task:updated', payload: { taskId } })
 
+  return c.json({ success: true })
+})
+
+// =============================================================================
+// Task Comments (D-13 PR 3)
+// =============================================================================
+
+// GET /api/tasks/:id/comments — list, chronological
+app.get('/:id/comments', (c) => {
+  const taskId = c.req.param('id')
+  const task = db.select().from(tasks).where(eq(tasks.id, taskId)).get()
+  if (!task) return c.json({ error: 'Task not found' }, 404)
+  const comments = listTaskComments(taskId)
+  return c.json({ comments })
+})
+
+// POST /api/tasks/:id/comments — create, body {body: string}.
+// Parses @<email> mentions and dispatches notifications (Gmail/Slack/etc)
+// to each newly mentioned user. Broadcasts task:comment-added so other
+// open sessions update live.
+app.post('/:id/comments', async (c) => {
+  const author = requireUser(c)
+  const taskId = c.req.param('id')
+  const task = db.select().from(tasks).where(eq(tasks.id, taskId)).get()
+  if (!task) return c.json({ error: 'Task not found' }, 404)
+
+  const body = await c.req.json<{ body?: string }>()
+  const text = (body.body ?? '').trim()
+  if (!text) return c.json({ error: 'body is required' }, 400)
+
+  const comment = createTaskComment({
+    taskId,
+    authorUserId: author.id,
+    body: text,
+  })
+
+  syncAndNotify({
+    sourceType: 'comment',
+    sourceId: comment.id,
+    sourceTitle: task.title,
+    text: comment.body,
+    authorEmail: author.email,
+    parentTaskId: taskId,
+  })
+
+  broadcast({ type: 'task:comment-added', payload: { taskId, commentId: comment.id } })
+  return c.json({ comment }, 201)
+})
+
+// DELETE /api/tasks/:id/comments/:commentId — author-only.
+// Also removes any mention rows pointing at this comment.
+app.delete('/:id/comments/:commentId', (c) => {
+  const author = requireUser(c)
+  const taskId = c.req.param('id')
+  const commentId = c.req.param('commentId')
+
+  const existing = getTaskComment(commentId)
+  if (!existing || existing.taskId !== taskId) {
+    return c.json({ error: 'Comment not found' }, 404)
+  }
+  if (existing.authorUserId !== author.id) {
+    return c.json({ error: 'Only the author can delete this comment' }, 403)
+  }
+
+  const ok = deleteTaskComment(commentId, author.id)
+  if (!ok) return c.json({ error: 'Comment not found' }, 404)
+
+  // Clean up mention rows pointing at this comment.
+  db.delete(mentions)
+    .where(and(eq(mentions.sourceType, 'comment'), eq(mentions.sourceId, commentId)))
+    .run()
+
+  broadcast({ type: 'task:comment-deleted', payload: { taskId, commentId } })
   return c.json({ success: true })
 })
 

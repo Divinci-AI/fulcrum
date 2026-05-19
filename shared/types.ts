@@ -143,6 +143,18 @@ export interface Task {
   links?: TaskLink[]
 }
 
+// Task comment (D-13 PR 3). Flat list, chronological. Body is free-form
+// text and may contain @<email> mentions (parsed server-side by
+// mention-service with sourceType='comment').
+export interface TaskComment {
+  id: string
+  taskId: string
+  authorUserId: string
+  body: string
+  createdAt: string
+  updatedAt: string
+}
+
 // Tag - reusable tags shared between tasks and projects
 export interface Tag {
   id: string
