@@ -79,6 +79,10 @@ cd "$REPO_ROOT"
 # --- Build ---
 if [ "$SKIP_BUILD" -eq 0 ]; then
   ensure_mise
+  # mise refuses to read mise.toml unless the directory is explicitly
+  # trusted — `mise trust` is a one-time per-machine acknowledgement.
+  # Idempotent: noop after the first run.
+  mise trust "$REPO_ROOT" >/dev/null 2>&1 || true
   log "Building desktop package via 'mise run desktop:package' on ${PLATFORM}…"
   log "(This takes ~5-10 min: frontend build + bun compile server + neu build + dmg/AppImage package.)"
   mise run desktop:package
