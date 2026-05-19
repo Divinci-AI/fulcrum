@@ -45,15 +45,17 @@ export function AssigneePicker({ value, onChange, className }: AssigneePickerPro
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
-      <PopoverTrigger asChild>
-        <Button
-          variant="outline"
-          size="sm"
-          className={cn('w-full justify-start text-left font-normal', className)}
-        >
-          {selected ? userLabel(selected) : <span className="text-muted-foreground">Unassigned</span>}
-        </Button>
-      </PopoverTrigger>
+      <PopoverTrigger
+        render={
+          <Button
+            variant="outline"
+            size="sm"
+            className={cn('w-full justify-start text-left font-normal', className)}
+          >
+            {selected ? userLabel(selected) : <span className="text-muted-foreground">Unassigned</span>}
+          </Button>
+        }
+      />
       <PopoverContent className="w-72 p-2" align="start">
         <Input
           autoFocus

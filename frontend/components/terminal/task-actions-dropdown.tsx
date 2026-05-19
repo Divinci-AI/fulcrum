@@ -102,6 +102,7 @@ export function TaskActionsDropdown({
     recurrenceEndDate: null,
     recurrenceSourceTaskId: null,
     notes: null,
+    assigneeUserId: null,
     createdAt: '',
     updatedAt: '',
   }
