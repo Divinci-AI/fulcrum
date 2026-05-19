@@ -32,6 +32,7 @@ import { addEmailToPolicy, removeEmailFromPolicy } from '../services/cloudflare-
 import { draftInviteEmail } from '../services/invite-email-service'
 import { getPageContext } from '../services/page-context-service'
 import { latestEventPerUser } from '../services/email-event-service'
+import { getPublicBaseUrl } from '../lib/public-url'
 import { requireAdminUser, requireUser, type CurrentUserContext } from '../middleware/current-user'
 
 const app = new Hono<CurrentUserContext>()
@@ -256,10 +257,10 @@ app.post('/', async (c) => {
   // send manually. No-op when the admin has no Gmail-enabled Google
   // account; soft-fail (logged) on any draft API error.
   //
-  // The tenant URL is derived from the request origin so the link in
-  // the draft points at this exact tenant.
-  const requestUrl = new URL(c.req.url)
-  const tenantUrl = `${requestUrl.protocol}//${requestUrl.host}`
+  // The tenant URL prefers settings.server.publicDomain (bound via
+  // FULCRUM_SERVER_PUBLIC_DOMAIN). c.req.url is a trap behind cloudflared
+  // — it reports the loopback socket, not the public hostname.
+  const tenantUrl = getPublicBaseUrl(c)
   const draft = await draftInviteEmail({
     inviterUserId: caller.id,
     inviteeEmail: user.email,
@@ -314,8 +315,7 @@ app.post('/:id/resend-invite', async (c) => {
   const target = getUserById(c.req.param('id'))
   if (!target) return c.json({ error: 'User not found' }, 404)
 
-  const requestUrl = new URL(c.req.url)
-  const tenantUrl = `${requestUrl.protocol}//${requestUrl.host}`
+  const tenantUrl = getPublicBaseUrl(c)
   const inviteEmail = await draftInviteEmail({
     inviterUserId: caller.id,
     inviteeEmail: target.email,

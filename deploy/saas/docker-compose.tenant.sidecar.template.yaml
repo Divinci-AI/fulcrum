@@ -14,8 +14,10 @@
 #
 # The tunnel token comes from `cloudflared tunnel token <UUID>` on the
 # Cloudflare dashboard. One tunnel per tenant; tunnel's ingress config
-# routes `<slug>.fulcrum.divinci.ai` to `http://fulcrum:7777`
+# routes `fulcrum-<slug>.divinci.ai` to `http://fulcrum:7777`
 # (service-name resolution on the per-tenant docker network).
+# (Flat-naming, not `<slug>.fulcrum…`. See BUGS.md #8 — free Cloudflare
+# Universal SSL only covers one wildcard depth.)
 #
 # The existing acme deployment still uses the host-cloudflared pattern
 # from docker-compose.tenant.template.yaml. Migrate it when you bring
@@ -33,7 +35,7 @@ services:
       GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID}
       GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET}
       FULCRUM_SERVER_PORT: "7777"
-      FULCRUM_SERVER_PUBLIC_DOMAIN: ${TENANT_SLUG}.fulcrum.divinci.ai
+      FULCRUM_SERVER_PUBLIC_DOMAIN: ${FULCRUM_TENANT_DOMAIN:-fulcrum-${TENANT_SLUG}.divinci.ai}
 
     volumes:
       - ${FULCRUM_SAAS_ROOT:-/opt/fulcrum-saas}/data/${TENANT_SLUG}:/data

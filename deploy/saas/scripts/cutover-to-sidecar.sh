@@ -68,7 +68,7 @@ if [ "${LEGACY:-0}" -eq 0 ]; then
 fi
 log "Confirmed legacy stack on host (port-publish detected)."
 
-DOMAIN="${SLUG}.fulcrum.divinci.ai"
+DOMAIN="${DOMAIN:-fulcrum-${SLUG}.divinci.ai}"
 
 # --- Create a new tunnel for the tenant (the existing one is owned by
 # host systemd cloudflared; better to leave it alone and create a
@@ -91,6 +91,7 @@ trap "rm -f '$TMP_STACK'" EXIT
 
 log "Rendering sidecar template → $TMP_STACK"
 TENANT_SLUG="$SLUG" \
+  FULCRUM_TENANT_DOMAIN="$DOMAIN" \
   GOOGLE_CLIENT_ID="${GOOGLE_CLIENT_ID}" \
   GOOGLE_CLIENT_SECRET="${GOOGLE_CLIENT_SECRET}" \
   CLOUDFLARED_TUNNEL_TOKEN="${TUNNEL_TOKEN}" \

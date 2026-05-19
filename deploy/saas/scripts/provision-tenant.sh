@@ -57,7 +57,7 @@ done
 [ -n "$SLUG" ]  || die "Missing --slug. Try --help."
 [ -n "$OWNER" ] || die "Missing --owner. Try --help."
 validate_slug "$SLUG"
-DOMAIN="${DOMAIN:-${SLUG}.fulcrum.divinci.ai}"
+DOMAIN="${DOMAIN:-fulcrum-${SLUG}.divinci.ai}"
 
 run() {
   if [ "$DRY_RUN" -eq 1 ]; then
@@ -135,6 +135,7 @@ trap "rm -f '$TMP_STACK'" EXIT
 
 log "Rendering compose template → $TMP_STACK"
 TENANT_SLUG="$SLUG" \
+  FULCRUM_TENANT_DOMAIN="$DOMAIN" \
   GOOGLE_CLIENT_ID="${GOOGLE_CLIENT_ID}" \
   GOOGLE_CLIENT_SECRET="${GOOGLE_CLIENT_SECRET}" \
   CLOUDFLARED_TUNNEL_TOKEN="${TUNNEL_TOKEN}" \

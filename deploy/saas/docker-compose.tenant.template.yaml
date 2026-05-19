@@ -38,8 +38,9 @@ services:
       # --- Server ---
       FULCRUM_SERVER_PORT: "7777"
       # The public domain the gateway will route to this container at. Used
-      # by Google OAuth as the redirect URI base.
-      FULCRUM_SERVER_PUBLIC_DOMAIN: ${TENANT_SLUG}.fulcrum.divinci.ai
+      # by Google OAuth as the redirect URI base and embedded in outbound
+      # invite emails. Override via FULCRUM_TENANT_DOMAIN envsubst input.
+      FULCRUM_SERVER_PUBLIC_DOMAIN: ${FULCRUM_TENANT_DOMAIN:-fulcrum-${TENANT_SLUG}.divinci.ai}
 
     volumes:
       # Per-tenant data volume. The host path keeps tenant data inspectable
