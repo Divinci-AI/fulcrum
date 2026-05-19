@@ -455,9 +455,13 @@ function updateServerIndicator(url) {
 }
 
 /**
- * Load the Fulcrum app in an iframe
+ * Load the Fulcrum app in the main window's iframe. As of D-12 PR 4 this
+ * is only called for Local — remote profiles open in their own Neutralino
+ * windows. Removing `loaded` here ensures the loading screen is visible
+ * during the navigation; the iframe's onload re-adds it.
  */
 async function loadFulcrumApp(url) {
+  document.body.classList.remove('loaded');
   setStatus('Loading Fulcrum...', url);
   serverUrl = url;
   updateServerIndicator(url);
@@ -730,33 +734,63 @@ async function connectToLocal() {
 }
 
 /**
- * Connect to a remote Fulcrum server at the given URL. Does NOT spawn a
- * server. Auth flows through the remote's own mechanism (CF Access SSO
- * sets a cookie inside this webview). Caller is responsible for updating
- * activeProfileId.
+ * Open a remote Fulcrum server in its own Neutralino window.
+ *
+ * Why a separate window and not the main iframe: CF Access's SSO challenge
+ * redirects through Google OAuth, which sets `X-Frame-Options: DENY` on the
+ * sign-in page (clickjacking protection). That silently kills the iframe
+ * load → blank black webview. A new top-level Neutralino window doesn't
+ * involve framing, so the OAuth dance works exactly like it does in Safari
+ * or Chrome.
+ *
+ * Side effect: each "Connect to Remote" click spawns a window. The user
+ * may end up with multiple windows for the same profile if they pick the
+ * menu item more than once — that's accepted for v1 to avoid lifecycle
+ * tracking complexity. Cmd+W closes extras.
+ *
+ * Does NOT spawn a server — the remote one already exists. Caller is
+ * responsible for updating activeProfileId in settings.
  */
-async function connectToRemoteUrl(url) {
+async function openRemoteWindow(url, label) {
   const remoteUrl = normalizeRemoteUrl(url);
   if (!remoteUrl) {
     showError('Invalid URL', 'Could not parse the remote server URL.');
     return false;
   }
+  const host = new URL(remoteUrl).host;
+  const title = `Fulcrum — ${label || host}`;
+  log.info('Opening remote window', { remoteUrl, title });
 
-  setStatus('Connecting to remote server...', remoteUrl);
-  log.info('Connecting to remote server', { remoteUrl });
-
-  const reachable = await checkServerHealth(remoteUrl);
-  if (!reachable) {
-    log.warn('Remote /health did not respond OK — continuing anyway (may be CF Access gated)', { remoteUrl });
+  try {
+    await Neutralino.window.create(remoteUrl, {
+      title,
+      width: 1400,
+      height: 900,
+      minWidth: 900,
+      minHeight: 600,
+      enableInspector: false,
+      maximizable: true,
+      icon: '/resources/icons/icon.png',
+    });
+    return true;
+  } catch (err) {
+    log.error('Failed to open remote window', { remoteUrl, error: String(err) });
+    showError('Could not open remote window', `Failed to launch a window for ${remoteUrl}. See ~/.fulcrum/desktop.log.`);
+    return false;
   }
-
-  loadFulcrumApp(remoteUrl);
-  return true;
 }
 
 /**
- * Unified entry point for switching connections. Looks up the profile,
- * updates activeProfileId in settings, and dispatches to local vs remote.
+ * Unified entry point for switching connections.
+ *
+ * Local profile → loads in the main window's iframe (the existing
+ * Mac-app-as-local-Fulcrum experience). Remote profile → opens in a NEW
+ * Neutralino window (CF Access SSO can't be framed; see openRemoteWindow
+ * for the why). Main window stays on Local in both cases.
+ *
+ * activeProfileId is updated in settings so the next launch boots into
+ * the same view — Local in the main window, plus a remote window if the
+ * last-active was remote.
  */
 async function connectToProfile(id) {
   const profile = findProfile(id) ?? LOCAL_PROFILE;
@@ -773,7 +807,7 @@ async function connectToProfile(id) {
   if (profile.isLocal) {
     return connectToLocal();
   }
-  return connectToRemoteUrl(profile.url);
+  return openRemoteWindow(profile.url, profile.label);
 }
 
 /**
@@ -829,23 +863,42 @@ async function deleteProfile(id) {
   });
   await setupMacMenu();
   if (wasActive) {
-    document.body.classList.remove('loaded');
+    // connectToProfile('local') → connectToLocal → loadFulcrumApp will
+    // toggle the loading screen on its own.
     await connectToProfile('local');
   }
 }
 
 /**
- * Main connection logic — boots into the saved active profile.
+ * Main connection logic — boots the main window into Local, and if the
+ * last-active profile was a remote, also spawns a window for it.
+ *
+ * Rationale: the main window is the Mac app's "command center" — it has
+ * the Server menu and access to local terminals/worktrees. Remote
+ * profiles live in their own windows. On launch, we restore "where you
+ * were" by reopening the active remote window in addition to Local.
  */
 async function tryConnect() {
   log.info('tryConnect() called');
   await loadSettings();
+
+  // Always boot the main window into Local first. The Server menu lives
+  // on this window and drives all profile switching.
+  await connectToLocal();
+  await saveSettings({
+    ...desktopSettings,
+    lastConnectedHost: 'localhost',
+  });
+  await setupMacMenu();
+
+  // If the saved active profile is a remote, pop a window for it too.
   const activeId = getActiveProfileId();
-  log.info('Booting into profile', { activeId });
-  const ok = await connectToProfile(activeId);
-  if (!ok && activeId !== 'local') {
-    log.warn('Active profile failed, falling back to Local', { activeId });
-    await connectToProfile('local');
+  if (activeId !== 'local') {
+    const profile = findProfile(activeId);
+    if (profile && !profile.isLocal) {
+      log.info('Auto-opening last-active remote window', { activeId });
+      await openRemoteWindow(profile.url, profile.label);
+    }
   }
 }
 
@@ -882,7 +935,9 @@ async function submitAddProfileModal() {
     return;
   }
   closeAddProfileModal();
-  document.body.classList.remove('loaded');
+  // Main window stays on Local — remote opens in its own window via
+  // openRemoteWindow inside connectToProfile. No need to touch
+  // `body.loaded` here.
 }
 
 function openManageProfilesModal() {
@@ -1036,10 +1091,12 @@ async function setupMacMenu() {
 
 function handleMacMenuClick(evt) {
   const id = evt.detail.id;
-  // Profile switch items: id is "profile:<profileId>"
+  // Profile switch items: id is "profile:<profileId>". connectToProfile
+  // handles the loading-screen toggle internally for Local (via
+  // loadFulcrumApp). Remote profiles open in a new window and leave the
+  // main window untouched.
   if (typeof id === 'string' && id.startsWith('profile:')) {
     const profileId = id.slice('profile:'.length);
-    document.body.classList.remove('loaded');
     connectToProfile(profileId);
     return;
   }
