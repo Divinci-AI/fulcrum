@@ -29,7 +29,24 @@ interface NotificationMessage {
 // alone implies relevance.
 interface TaskMentionedMessage {
   type: 'task:mentioned'
-  payload: { taskId: string; mentionedUserId: string; authorEmail: string | null }
+  payload: {
+    taskId: string
+    mentionedUserId: string
+    authorEmail: string | null
+    // D-13 PR 3: present when the mention came from a comment so callers
+    // can deep-link or distinguish copy. Optional for back-compat.
+    commentId?: string
+  }
+}
+
+// D-13 PR 3: live updates for the comments list on the task panel.
+interface TaskCommentAddedMessage {
+  type: 'task:comment-added'
+  payload: { taskId: string; commentId: string }
+}
+interface TaskCommentDeletedMessage {
+  type: 'task:comment-deleted'
+  payload: { taskId: string; commentId: string }
 }
 interface TaskAssignedMessage {
   type: 'task:assigned'
@@ -50,6 +67,8 @@ type ServerMessage =
   | TaskMentionedMessage
   | TaskAssignedMessage
   | ProjectMentionedMessage
+  | TaskCommentAddedMessage
+  | TaskCommentDeletedMessage
   | { type: string }
 
 function getWsUrl(): string {
@@ -105,6 +124,16 @@ export function useTaskSync() {
             },
           })
           queryClient.invalidateQueries({ queryKey: ['projects'] })
+        } else if (
+          (message.type === 'task:comment-added' || message.type === 'task:comment-deleted') &&
+          'payload' in message
+        ) {
+          // D-13 PR 3: refresh the comments list when any session adds
+          // or deletes a comment on this task. We don't toast — the
+          // author already saw their action complete, and other viewers
+          // get the live update silently.
+          const { taskId } = (message as TaskCommentAddedMessage | TaskCommentDeletedMessage).payload
+          queryClient.invalidateQueries({ queryKey: ['tasks', taskId, 'comments'] })
         } else if (message.type === 'task:assigned' && 'payload' in message) {
           // D-4 PR 3: distinguish "assigned to me" vs "unassigned from me".
           // The server delivers this event to both the previous and new

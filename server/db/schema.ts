@@ -597,9 +597,24 @@ export const observerInvocations = sqliteTable('observer_invocations', {
   createdAt: text('created_at').notNull(),
 })
 
+// Task Comments (D-13 PR 3). One row per author comment on a task.
+// Threaded discussion is intentionally out of scope for v1 — flat list,
+// reverse-chronological. The comment body is free-form text and may
+// contain @<email> mentions; the mention-service parses these on
+// create/edit and reuses the existing dispatch pipeline (notifications,
+// WS events) with sourceType='comment'.
+export const taskComments = sqliteTable('task_comments', {
+  id: text('id').primaryKey(),
+  taskId: text('task_id').notNull(),       // FK → tasks.id; ON DELETE CASCADE in migration
+  authorUserId: text('author_user_id').notNull(), // FK → users.id
+  body: text('body').notNull(),            // free-form; @mentions parsed by mention-service
+  createdAt: text('created_at').notNull(),
+  updatedAt: text('updated_at').notNull(),
+})
+
 // Mentions (Phase D-3). One row per (source, mentioned user) pair. A
 // "source" is any entity that has free-form text where someone can write
-// `@<email>` — tasks and projects today, comments tomorrow. The pair is
+// `@<email>` — tasks, projects, and (D-13 PR 3) comments. The pair is
 // UNIQUE so re-saving the same text doesn't pile up duplicates; the
 // mention-service syncs the table to match the parsed mention set.
 export const mentions = sqliteTable('mentions', {
@@ -878,6 +893,8 @@ export type User = typeof users.$inferSelect
 export type NewUser = typeof users.$inferInsert
 export type Mention = typeof mentions.$inferSelect
 export type NewMention = typeof mentions.$inferInsert
+export type TaskComment = typeof taskComments.$inferSelect
+export type NewTaskComment = typeof taskComments.$inferInsert
 export type Team = typeof teams.$inferSelect
 export type NewTeam = typeof teams.$inferInsert
 export type TeamMember = typeof teamMembers.$inferSelect

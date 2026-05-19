@@ -610,6 +610,13 @@
       "when": 1779110000000,
       "tag": "0086_add_email_send_events",
       "breakpoints": true
+    },
+    {
+      "idx": 87,
+      "version": "6",
+      "when": 1779184600000,
+      "tag": "0087_add_task_comments",
+      "breakpoints": true
     }
   ]
 }

@@ -19,6 +19,7 @@ import { AssigneePicker } from '@/components/task/assignee-picker'
 import { LinksManager } from '@/components/task/links-manager'
 import { DependencyManager } from '@/components/task/dependency-manager'
 import { AttachmentsManager } from '@/components/task/attachments-manager'
+import { TaskComments } from '@/components/task/task-comments'
 import { HugeiconsIcon } from '@hugeicons/react'
 import { Cancel01Icon, GitPullRequestIcon, Link02Icon, Loading03Icon } from '@hugeicons/core-free-icons'
 import { useUpdateTask } from '@/hooks/use-tasks'
@@ -548,6 +549,9 @@ export function TaskDetailsPanel({ task }: TaskDetailsPanelProps) {
           <h3 className="text-sm font-medium text-muted-foreground mb-2">Attachments</h3>
           <AttachmentsManager taskId={task.id} />
         </div>
+
+        {/* Comments (D-13 PR 3) */}
+        <TaskComments taskId={task.id} />
       </div>
     </div>
   )
