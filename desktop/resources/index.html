@@ -362,6 +362,39 @@
     #zoom-controls:hover {
       opacity: 1;
     }
+
+    /* Connection prompt — shown when the user picks Server → Connect to Remote… */
+    #connect-overlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(10, 10, 10, 0.85);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      z-index: 20000;
+      padding: 24px;
+    }
+    #connect-overlay.visible { display: flex; }
+
+    /* "remote: <host>" pill shown in top-right when connected to a remote
+     * Fulcrum, hidden when on local. The Mac app has no URL bar, so this
+     * is the only cue that the user isn't on their local server. */
+    #server-indicator {
+      position: fixed;
+      top: 8px;
+      right: 12px;
+      background: rgba(59, 130, 246, 0.15);
+      border: 1px solid rgba(59, 130, 246, 0.4);
+      color: #93c5fd;
+      font-size: 11px;
+      font-family: 'SF Mono', Monaco, 'Cascadia Code', monospace;
+      padding: 4px 10px;
+      border-radius: 999px;
+      z-index: 10001;
+      display: none;
+      pointer-events: none;
+    }
+    #server-indicator.visible { display: inline-block; }
   </style>
 </head>
 <body>
@@ -375,6 +408,26 @@
   </div>
 
   <iframe id="fulcrum-frame" sandbox="allow-same-origin allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox allow-modals allow-downloads allow-clipboard-read allow-clipboard-write"></iframe>
+
+  <div id="server-indicator"></div>
+
+  <div id="connect-overlay">
+    <div class="prompt-container">
+      <div class="prompt-title">Connect to Remote Fulcrum</div>
+      <div class="prompt-description">Point this app at a remote Fulcrum server (e.g. a SaaS tenant). Sign-in happens via the remote's own auth (Cloudflare Access SSO).</div>
+      <div id="connect-error" class="prompt-error" style="display: none;"></div>
+      <form id="connect-form" class="prompt-form" onsubmit="event.preventDefault(); window.fulcrumSubmitConnectModal(); return false;">
+        <div class="input-group">
+          <label for="connect-url">Server URL</label>
+          <input id="connect-url" type="text" placeholder="https://fulcrum-acme.divinci.ai" autocomplete="off" spellcheck="false">
+        </div>
+        <div class="button-group">
+          <button type="button" class="secondary-btn" onclick="window.fulcrumCloseConnectModal()">Cancel</button>
+          <button type="submit" class="primary-btn">Connect</button>
+        </div>
+      </form>
+    </div>
+  </div>
 
   <div id="zoom-trigger"></div>
   <div id="zoom-controls">
