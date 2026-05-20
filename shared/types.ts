@@ -138,6 +138,11 @@ export interface Task {
   // by design; the API already supports filtering by `assigneeId=` and
   // broadcasts `task:assigned` WS events when this changes.
   assigneeUserId: string | null
+  // D-14 PR 1: set when status transitions to DONE/CANCELED; cleared on
+  // transition back to active. Used by the Archive view for sort + display.
+  // Distinct from updatedAt because any post-completion edit would
+  // otherwise bump the sort key.
+  completedAt: string | null
   createdAt: string
   updatedAt: string
   links?: TaskLink[]

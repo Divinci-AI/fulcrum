@@ -172,7 +172,7 @@ export async function updateTaskStatus(
 
   // Build update object
   const now = new Date().toISOString()
-  const updateData: { status: string; updatedAt: string; position?: number; startedAt?: string; pinned?: boolean; worktreePath?: string; branch?: string; repoPath?: string; repoName?: string; baseBranch?: string } = {
+  const updateData: { status: string; updatedAt: string; position?: number; startedAt?: string; pinned?: boolean; worktreePath?: string; branch?: string; repoPath?: string; repoName?: string; baseBranch?: string; completedAt?: string | null } = {
     status: newStatus,
     updatedAt: now,
   }
@@ -183,6 +183,21 @@ export async function updateTaskStatus(
   // Auto-unpin when moving to terminal statuses
   if (statusChanged && (newStatus === 'DONE' || newStatus === 'CANCELED') && existing.pinned) {
     updateData.pinned = false
+  }
+
+  // D-14 PR 1: maintain completedAt timestamp on status transitions.
+  // Set on entry to a terminal state; clear on exit back to active. Skip
+  // when the status didn't actually change so re-saves keep the original
+  // completion timestamp.
+  if (statusChanged) {
+    const wasTerminal = oldStatus === 'DONE' || oldStatus === 'CANCELED'
+    const isTerminal = newStatus === 'DONE' || newStatus === 'CANCELED'
+    if (isTerminal && !wasTerminal) {
+      updateData.completedAt = now
+    } else if (!isTerminal && wasTerminal) {
+      updateData.completedAt = null
+    }
+    // DONE↔CANCELED (both terminal): leave the existing completedAt alone.
   }
 
   // Handle TO_DO -> IN_PROGRESS transition: set startedAt and create worktree if needed
