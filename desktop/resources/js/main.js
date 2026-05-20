@@ -1143,6 +1143,7 @@ async function setupMacMenu() {
         { id: 'goRepositories', text: 'Repositories', shortcut: '3' },
         { id: 'goReview', text: 'Review', shortcut: '4' },
         { id: 'goMonitoring', text: 'Monitoring', shortcut: '5' },
+        { id: 'goArchive', text: 'Archive', shortcut: '9' },
         { text: '-' },
         { id: 'goSettings', text: 'Settings…', shortcut: ',' },
         { text: '-' },
@@ -1187,6 +1188,7 @@ function handleMacMenuClick(evt) {
     case 'goRepositories': navigateTo('/repositories'); break;
     case 'goReview': navigateTo('/review'); break;
     case 'goMonitoring': navigateTo('/monitoring'); break;
+    case 'goArchive': navigateTo('/archive'); break;
     case 'goSettings': navigateTo('/settings'); break;
     // Actions (via postMessage to React app)
     case 'commandPalette': postMessageToApp('fulcrum:action', { action: 'openCommandPalette' }); break;
