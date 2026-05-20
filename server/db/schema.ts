@@ -43,6 +43,12 @@ export const tasks = sqliteTable('tasks', {
   // gets the tenant-default role (editor) plus whatever ACL elevates them to.
   // 'restricted' = only principals named on the resource's ACL can access it.
   visibility: text('visibility').notNull().default('tenant'),
+  // D-14 PR 1: set when status transitions to DONE or CANCELED; cleared
+  // when the task moves back to an active state. Distinct from updatedAt
+  // so the Archive view can sort by genuine completion time rather than
+  // last edit (any post-completion field change would otherwise bump
+  // updatedAt and reshuffle the archive).
+  completedAt: text('completed_at'),
   createdAt: text('created_at').notNull(),
   updatedAt: text('updated_at').notNull(),
 })
