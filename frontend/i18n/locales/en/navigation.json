@@ -11,6 +11,7 @@
     "review": "Review",
     "calendar": "Calendar",
     "monitoring": "Monitoring",
+    "archive": "Archive",
     "settings": "Settings",
     "commandPalette": "Command Palette ({{shortcut}})",
     "help": "Documentation"
@@ -35,6 +36,7 @@
       "goToReview": "Go to Review",
       "goToCalendar": "Go to Calendar",
       "goToMonitoring": "Go to Monitoring",
+      "goToArchive": "Go to Archive",
       "goToSettings": "Go to Settings",
       "newTask": "New Task",
       "newProject": "New Project",
@@ -63,6 +65,7 @@
       "goToReview": "Go to Review",
       "goToCalendar": "Go to Calendar",
       "goToMonitoring": "Go to Monitoring",
+      "goToArchive": "Go to Archive",
       "goToSettings": "Go to Settings",
       "commandPalette": "Command Palette",
       "newTask": "New Task",

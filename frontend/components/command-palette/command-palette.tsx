@@ -24,6 +24,7 @@ import {
   AiChat02Icon,
   Calendar03Icon,
   Rocket01Icon,
+  Archive01Icon,
 } from '@hugeicons/core-free-icons'
 
 interface CommandPaletteProps {
@@ -141,6 +142,18 @@ export function CommandPalette({ open: controlledOpen, onOpenChange, onNewTask, 
         icon: <HugeiconsIcon icon={ChartLineData01Icon} size={16} strokeWidth={2} />,
         action: () => {
           navigate({ to: '/monitoring' })
+          setOpen(false)
+        },
+      },
+      {
+        id: 'goto-archive',
+        label: t('commandPalette.commands.goToArchive'),
+        shortcut: 'meta+9',
+        keywords: ['archive', 'history', 'completed', 'done', 'canceled', 'cancelled', 'finished'],
+        category: 'navigation',
+        icon: <HugeiconsIcon icon={Archive01Icon} size={16} strokeWidth={2} />,
+        action: () => {
+          navigate({ to: '/archive' })
           setOpen(false)
         },
       },
@@ -276,6 +289,7 @@ export function CommandPalette({ open: controlledOpen, onOpenChange, onNewTask, 
   useHotkeys('meta+6', () => navigate({ to: '/jobs' }), { allowInInput: true, allowInTerminal: true })
   useHotkeys('meta+7', () => navigate({ to: '/apps' }), { allowInInput: true, allowInTerminal: true })
   useHotkeys('meta+8', () => navigate({ to: '/monitoring' }), { allowInInput: true, allowInTerminal: true })
+  useHotkeys('meta+9', () => navigate({ to: '/archive' }), { allowInInput: true, allowInTerminal: true })
   useHotkeys('meta+,', () => navigate({ to: '/settings' }), { allowInInput: true, allowInTerminal: true })
 
   // New task shortcut

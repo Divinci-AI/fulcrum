@@ -20,6 +20,7 @@ import { Route as MonitoringIndexRouteImport } from './routes/monitoring/index'
 import { Route as JobsIndexRouteImport } from './routes/jobs/index'
 import { Route as CalendarIndexRouteImport } from './routes/calendar/index'
 import { Route as AssistantIndexRouteImport } from './routes/assistant/index'
+import { Route as ArchiveIndexRouteImport } from './routes/archive/index'
 import { Route as AppsIndexRouteImport } from './routes/apps/index'
 import { Route as TasksTaskIdRouteImport } from './routes/tasks/$taskId'
 import { Route as RepositoriesRepoIdRouteImport } from './routes/repositories/$repoId'
@@ -82,6 +83,11 @@ const AssistantIndexRoute = AssistantIndexRouteImport.update({
   path: '/assistant/',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ArchiveIndexRoute = ArchiveIndexRouteImport.update({
+  id: '/archive/',
+  path: '/archive/',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const AppsIndexRoute = AppsIndexRouteImport.update({
   id: '/apps/',
   path: '/apps/',
@@ -121,6 +127,7 @@ export interface FileRoutesByFullPath {
   '/repositories/$repoId': typeof RepositoriesRepoIdRoute
   '/tasks/$taskId': typeof TasksTaskIdRoute
   '/apps': typeof AppsIndexRoute
+  '/archive': typeof ArchiveIndexRoute
   '/assistant': typeof AssistantIndexRoute
   '/calendar': typeof CalendarIndexRoute
   '/jobs': typeof JobsIndexRoute
@@ -140,6 +147,7 @@ export interface FileRoutesByTo {
   '/repositories/$repoId': typeof RepositoriesRepoIdRoute
   '/tasks/$taskId': typeof TasksTaskIdRoute
   '/apps': typeof AppsIndexRoute
+  '/archive': typeof ArchiveIndexRoute
   '/assistant': typeof AssistantIndexRoute
   '/calendar': typeof CalendarIndexRoute
   '/jobs': typeof JobsIndexRoute
@@ -160,6 +168,7 @@ export interface FileRoutesById {
   '/repositories/$repoId': typeof RepositoriesRepoIdRoute
   '/tasks/$taskId': typeof TasksTaskIdRoute
   '/apps/': typeof AppsIndexRoute
+  '/archive/': typeof ArchiveIndexRoute
   '/assistant/': typeof AssistantIndexRoute
   '/calendar/': typeof CalendarIndexRoute
   '/jobs/': typeof JobsIndexRoute
@@ -181,6 +190,7 @@ export interface FileRouteTypes {
     | '/repositories/$repoId'
     | '/tasks/$taskId'
     | '/apps'
+    | '/archive'
     | '/assistant'
     | '/calendar'
     | '/jobs'
@@ -200,6 +210,7 @@ export interface FileRouteTypes {
     | '/repositories/$repoId'
     | '/tasks/$taskId'
     | '/apps'
+    | '/archive'
     | '/assistant'
     | '/calendar'
     | '/jobs'
@@ -219,6 +230,7 @@ export interface FileRouteTypes {
     | '/repositories/$repoId'
     | '/tasks/$taskId'
     | '/apps/'
+    | '/archive/'
     | '/assistant/'
     | '/calendar/'
     | '/jobs/'
@@ -239,6 +251,7 @@ export interface RootRouteChildren {
   RepositoriesRepoIdRoute: typeof RepositoriesRepoIdRoute
   TasksTaskIdRoute: typeof TasksTaskIdRoute
   AppsIndexRoute: typeof AppsIndexRoute
+  ArchiveIndexRoute: typeof ArchiveIndexRoute
   AssistantIndexRoute: typeof AssistantIndexRoute
   CalendarIndexRoute: typeof CalendarIndexRoute
   JobsIndexRoute: typeof JobsIndexRoute
@@ -330,6 +343,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AssistantIndexRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/archive/': {
+      id: '/archive/'
+      path: '/archive'
+      fullPath: '/archive'
+      preLoaderRoute: typeof ArchiveIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/apps/': {
       id: '/apps/'
       path: '/apps'
@@ -383,6 +403,7 @@ const rootRouteChildren: RootRouteChildren = {
   RepositoriesRepoIdRoute: RepositoriesRepoIdRoute,
   TasksTaskIdRoute: TasksTaskIdRoute,
   AppsIndexRoute: AppsIndexRoute,
+  ArchiveIndexRoute: ArchiveIndexRoute,
   AssistantIndexRoute: AssistantIndexRoute,
   CalendarIndexRoute: CalendarIndexRoute,
   JobsIndexRoute: JobsIndexRoute,
