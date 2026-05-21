@@ -9,6 +9,21 @@ import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { log } from '../lib/logger'
 
+// Crash-proof logger wrapper. The catch handler in renderCached must never
+// throw — if logger access misfires the way `log.error` did during D-15 deploy,
+// we fall back to console.error so the underlying error still surfaces.
+function safeLog(msg: string, ctx: Record<string, unknown>): void {
+  try {
+    log.og.error(msg, ctx)
+  } catch {
+    try {
+      console.error(JSON.stringify({ src: 'OG', msg, ctx }))
+    } catch {
+      // Last resort — nothing else to do.
+    }
+  }
+}
+
 let satoriMod: typeof SatoriType | null = null
 let ResvgCtor: typeof ResvgType | null = null
 
@@ -507,7 +522,11 @@ export async function renderCached(key: string, fn: () => Promise<Uint8Array>): 
     renderCache.set(key, { png, expires: now + CACHE_TTL_MS })
     return png
   } catch (err) {
-    log.error('OG render failed', { key, err: err instanceof Error ? err.message : String(err) })
+    safeLog('OG render failed', {
+      key,
+      err: err instanceof Error ? err.message : String(err),
+      stack: err instanceof Error ? err.stack : undefined,
+    })
     throw err
   }
 }

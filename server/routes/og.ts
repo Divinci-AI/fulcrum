@@ -12,6 +12,21 @@ import { log } from '../lib/logger'
 
 const app = new Hono()
 
+// Crash-proof error logger. Hit by route catch blocks where a thrown error
+// from logging would mask the underlying failure (as happened in the D-15
+// deploy when `log.error` didn't exist).
+function logOgError(msg: string, ctx: Record<string, unknown>): void {
+  try {
+    log.og.error(msg, ctx)
+  } catch {
+    try {
+      console.error(JSON.stringify({ src: 'OG', msg, ctx }))
+    } catch {
+      // Nothing else to do.
+    }
+  }
+}
+
 // PNG responses are cached server-side for 5min and client-side for 1h.
 // Crawlers re-fetch periodically so a moderately long client cache is fine —
 // stale unfurls just refresh on the next crawl cycle.
@@ -72,7 +87,7 @@ app.get('/task/:id', async (c) => {
     )
     return pngResponse(png)
   } catch (err) {
-    log.error('OG task render failed', { id, err: err instanceof Error ? err.message : String(err) })
+    logOgError('OG task render failed', { id, err: err instanceof Error ? err.message : String(err), stack: err instanceof Error ? err.stack : undefined })
     return c.text('OG render failed', 500)
   }
 })
@@ -110,7 +125,7 @@ app.get('/project/:id', async (c) => {
     )
     return pngResponse(png)
   } catch (err) {
-    log.error('OG project render failed', { id, err: err instanceof Error ? err.message : String(err) })
+    logOgError('OG project render failed', { id, err: err instanceof Error ? err.message : String(err), stack: err instanceof Error ? err.stack : undefined })
     return c.text('OG render failed', 500)
   }
 })
@@ -141,7 +156,7 @@ app.get('/repo/:id', async (c) => {
     )
     return pngResponse(png)
   } catch (err) {
-    log.error('OG repo render failed', { id, err: err instanceof Error ? err.message : String(err) })
+    logOgError('OG repo render failed', { id, err: err instanceof Error ? err.message : String(err), stack: err instanceof Error ? err.stack : undefined })
     return c.text('OG render failed', 500)
   }
 })
@@ -173,7 +188,7 @@ for (const path of ['/apps', '/apps.png']) {
     try {
       return pngResponse(await renderApps(hostFromReq(c)))
     } catch (err) {
-      log.error('OG apps render failed', { err: err instanceof Error ? err.message : String(err) })
+      logOgError('OG apps render failed', { err: err instanceof Error ? err.message : String(err), stack: err instanceof Error ? err.stack : undefined })
       return c.text('OG render failed', 500)
     }
   })
@@ -184,7 +199,7 @@ for (const path of ['/default', '/default.png']) {
     try {
       return pngResponse(await renderDefault(hostFromReq(c)))
     } catch (err) {
-      log.error('OG default render failed', { err: err instanceof Error ? err.message : String(err) })
+      logOgError('OG default render failed', { err: err instanceof Error ? err.message : String(err), stack: err instanceof Error ? err.stack : undefined })
       return c.text('OG render failed', 500)
     }
   })
