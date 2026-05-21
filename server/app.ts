@@ -45,6 +45,8 @@ import serverExposeRoutes from './routes/server-expose'
 import usersRoutes from './routes/users'
 import teamsRoutes from './routes/teams'
 import aclsRoutes from './routes/acls'
+import ogRoutes from './routes/og'
+import { resolveOgMeta, injectOgMeta } from './lib/og-meta'
 import { currentUser } from './middleware/current-user'
 import { writeEntry } from './lib/logger'
 import type { LogEntry } from '../shared/logger'
@@ -168,6 +170,11 @@ export function createApp() {
   // Unified search across all entities
   app.route('/api/search', searchRoutes)
 
+  // Open Graph image generation for link unfurling (Slack, Discord, iMessage, etc.)
+  // Unauthenticated by design — UUIDs in the URL are the access gate. Each
+  // route returns a 1200x630 PNG; SPA fallback below injects matching meta tags.
+  app.route('/og', ogRoutes)
+
   // Logging endpoint for frontend to send batched logs to server
   app.post('/api/logs', async (c) => {
     const { entries } = await c.req.json<{ entries: LogEntry[] }>()
@@ -264,10 +271,24 @@ export function createApp() {
     // SPA fallback - serve index.html for all other routes (except API and WebSocket)
     app.get('*', async (c, next) => {
       const path = c.req.path
-      if (path.startsWith('/api/') || path.startsWith('/ws/') || path === '/health') {
+      if (
+        path.startsWith('/api/') ||
+        path.startsWith('/ws/') ||
+        path.startsWith('/og/') ||
+        path === '/health'
+      ) {
         return next()
       }
-      const html = await readFile(join(distPath, 'index.html'), 'utf-8')
+      let html = await readFile(join(distPath, 'index.html'), 'utf-8')
+      try {
+        const query = c.req.query() as Record<string, string>
+        const meta = resolveOgMeta(path, query, new Headers(c.req.raw.headers))
+        if (meta) {
+          html = injectOgMeta(html, meta)
+        }
+      } catch {
+        // Meta injection is best-effort — fall back to the plain shell.
+      }
       return c.html(html, {
         headers: { 'Cache-Control': 'no-cache, must-revalidate' },
       })
