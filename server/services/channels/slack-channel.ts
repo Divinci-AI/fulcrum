@@ -475,37 +475,60 @@ export class SlackChannel implements MessagingChannel {
 
   /**
    * Handle slash command interactions.
-   * Commands are routed to the message handler and acknowledged with an ephemeral response.
+   * The trigger command (e.g. "/fulcrum") and its text argument are forwarded as
+   * the message content; the response is posted back via response_url so the
+   * answer lands in the channel where the user typed the command (not as a DM).
    */
   private async handleSlashCommand(
     command: SlashCommand,
     respond: RespondFn
   ): Promise<void> {
+    const text = (command.text || '').trim()
+
     log.messaging.info('Slack slash command received', {
       connectionId: this.connectionId,
       command: command.command,
+      hasText: text.length > 0,
       userId: command.user_id,
       userName: command.user_name,
+      channelId: command.channel_id,
     })
 
-    // Convert slash command to an IncomingMessage for the standard command handler
+    // Bare invocation with no argument: show a quick usage tip and return.
+    if (!text && command.command === '/fulcrum') {
+      await respond({
+        text: 'Tip: `/fulcrum <message>` to chat with me, or DM me directly. Try `/fulcrum what can you do?`',
+        response_type: 'ephemeral',
+      })
+      return
+    }
+
+    // The slash command itself acts as a meta-command (e.g. /reset registered
+    // separately at the workspace level): forward the bare command string so
+    // the shared command router can match RESET/HELP/STATUS. Otherwise forward
+    // the user's free-text argument as the message content.
+    const isMetaCommand = !text && command.command !== '/fulcrum'
+    const content = isMetaCommand ? command.command : text
+
     const incomingMessage: IncomingMessage = {
       channelType: 'slack',
       connectionId: this.connectionId,
       senderId: command.user_id,
       senderName: command.user_name,
-      content: command.command, // e.g., "/reset"
+      content,
       timestamp: new Date(),
       metadata: {
         isSlashCommand: true,
+        slashCommandName: command.command,
+        slackChannelId: command.channel_id,
+        slackResponseUrl: command.response_url,
       },
     }
 
     try {
+      // Quick ephemeral ack while the assistant works
+      await respond({ text: 'Thinking…', response_type: 'ephemeral' })
       await this.events?.onMessage(incomingMessage)
-
-      // Ephemeral acknowledgment to the user
-      await respond({ text: '✓ Command received', response_type: 'ephemeral' })
     } catch (err) {
       log.messaging.error('Error processing Slack slash command', {
         connectionId: this.connectionId,
@@ -516,6 +539,47 @@ export class SlackChannel implements MessagingChannel {
         text: 'Sorry, something went wrong processing your command.',
         response_type: 'ephemeral',
       })
+    }
+  }
+
+  /**
+   * Post a message back to a Slack channel via the slash command's response_url.
+   * Works without the bot being a member of the channel and without
+   * chat:write.public scope, but is capped at 5 responses per 30 minutes.
+   * Ephemeral posts are visible only to the user who triggered the command.
+   */
+  private async postViaResponseUrl(
+    responseUrl: string,
+    content: string,
+    blocks?: KnownBlock[],
+    ephemeral = false
+  ): Promise<boolean> {
+    const payload: Record<string, unknown> = {
+      response_type: ephemeral ? 'ephemeral' : 'in_channel',
+      text: content,
+    }
+    if (blocks) payload.blocks = blocks
+
+    try {
+      const res = await fetch(responseUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      })
+      if (!res.ok) {
+        log.messaging.warn('Slack response_url POST returned non-ok', {
+          connectionId: this.connectionId,
+          status: res.status,
+          statusText: res.statusText,
+        })
+      }
+      return res.ok
+    } catch (err) {
+      log.messaging.error('Failed to POST to Slack response_url', {
+        connectionId: this.connectionId,
+        error: String(err),
+      })
+      return false
     }
   }
 
@@ -748,6 +812,20 @@ export class SlackChannel implements MessagingChannel {
         status: this.status,
       })
       return false
+    }
+
+    // Slash command path: post back to the channel where the command was
+    // invoked via the response_url. No DM is created; the user sees the
+    // answer in-channel along with their original `/fulcrum …` line.
+    // Meta-commands (/reset, /help, /info) post ephemerally to avoid noise.
+    const responseUrl = metadata?.slackResponseUrl as string | undefined
+    if (responseUrl) {
+      return await this.postViaResponseUrl(
+        responseUrl,
+        content,
+        metadata?.blocks as KnownBlock[] | undefined,
+        metadata?.slackEphemeral === true
+      )
     }
 
     try {
