@@ -167,17 +167,34 @@ async function sendPushoverNotification(
 // to the unified `sendMessageToChannel`. When the user has no mapping for
 // this channel, the channel adapter falls back to its tenant-default
 // auto-resolved recipient — same behavior as before per-user routing.
+//
+// D-15 PR 3 (Slack only): when `slackConfig.eventChannels[payload.type]` (or
+// `slackConfig.defaultChannel`) is set, the notification posts to that Slack
+// channel instead of being DM'd to a user. Event-channel routing takes
+// precedence over per-user DM — the typical use is "post all deploy events
+// to #deploys" overriding "DM each subscribed user".
 async function sendViaMessagingChannel(
   channel: 'whatsapp' | 'discord' | 'telegram' | 'slack',
   payload: NotificationPayload,
-  recipientUserId?: string
+  recipientUserId?: string,
+  slackConfig?: SlackNotificationConfig
 ): Promise<NotificationResult> {
   const text = `*${payload.title}*\n${payload.message}${payload.url ? `\n${payload.url}` : ''}`
-  const recipientChannelId = recipientUserId
-    ? getChannelIdentityForUser(recipientUserId, channel as ChannelType) ?? undefined
-    : undefined
+
+  const slackChannelId =
+    channel === 'slack' && slackConfig
+      ? slackConfig.eventChannels?.[payload.type] ?? slackConfig.defaultChannel ?? undefined
+      : undefined
+
+  // When routing to a channel, skip per-user DM resolution entirely.
+  const recipientChannelId = slackChannelId
+    ? undefined
+    : recipientUserId
+      ? getChannelIdentityForUser(recipientUserId, channel as ChannelType) ?? undefined
+      : undefined
+
   try {
-    const result = await sendNotificationViaMessaging(channel, text, recipientChannelId)
+    const result = await sendNotificationViaMessaging(channel, text, recipientChannelId, slackChannelId)
     if (result.success) {
       return { channel, success: true }
     }
@@ -276,7 +293,7 @@ function getChannelDispatchers(
     dispatchers.push({
       channel: 'slack',
       send: () => settings.slack!.useMessagingChannel
-        ? sendViaMessagingChannel('slack', payload, recipientUserId)
+        ? sendViaMessagingChannel('slack', payload, recipientUserId, settings.slack!)
         : sendSlackNotification(settings.slack!, payload),
     })
   }

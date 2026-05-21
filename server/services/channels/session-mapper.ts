@@ -238,6 +238,27 @@ export function resetSession(
 }
 
 /**
+ * D-15 PR 5: returns true when a session mapping already exists for the
+ * given lookup key. Used by Slack thread continuity to decide whether a
+ * non-mention message in a channel-thread should be routed to the assistant
+ * (because the bot was previously @-mentioned in that thread) or ignored
+ * (the thread is just a regular team conversation the bot has no business in).
+ */
+export function sessionExists(connectionId: string, sessionKey: string): boolean {
+  const row = db
+    .select({ id: messagingSessionMappings.id })
+    .from(messagingSessionMappings)
+    .where(
+      and(
+        eq(messagingSessionMappings.connectionId, connectionId),
+        eq(messagingSessionMappings.channelUserId, sessionKey)
+      )
+    )
+    .get()
+  return !!row
+}
+
+/**
  * List all session mappings for a connection.
  */
 export function listSessionMappings(connectionId: string): MessagingSessionMapping[] {

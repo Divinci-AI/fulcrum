@@ -54,6 +54,8 @@ export function getNotificationSettings(): NotificationSettings {
       enabled: (fv('notifications.slack.enabled') as boolean | null) ?? false,
       webhookUrl: (fv('notifications.slack.webhookUrl') as string | undefined) ?? undefined,
       useMessagingChannel: (fv('notifications.slack.useMessagingChannel') as boolean | undefined) ?? undefined,
+      eventChannels: (fv('notifications.slack.eventChannels') as Record<string, string> | null) ?? undefined,
+      defaultChannel: (fv('notifications.slack.defaultChannel') as string | undefined) ?? undefined,
     },
     discord: {
       enabled: (fv('notifications.discord.enabled') as boolean | null) ?? false,
@@ -163,6 +165,14 @@ export function updateNotificationSettingsSync(
   }
   if (updated.slack.useMessagingChannel !== undefined) {
     setFnoxValue('notifications.slack.useMessagingChannel', updated.slack.useMessagingChannel)
+  }
+  if (updated.slack.eventChannels !== undefined) {
+    // Empty object collapses to null so an admin can fully clear the routing
+    const value = Object.keys(updated.slack.eventChannels).length > 0 ? updated.slack.eventChannels : null
+    setFnoxValue('notifications.slack.eventChannels', value)
+  }
+  if (updated.slack.defaultChannel !== undefined) {
+    setFnoxValue('notifications.slack.defaultChannel', updated.slack.defaultChannel || null)
   }
   setFnoxValue('notifications.discord.enabled', updated.discord.enabled)
   if (updated.discord.webhookUrl !== undefined) {

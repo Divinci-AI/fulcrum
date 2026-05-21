@@ -4,14 +4,15 @@
  */
 
 import { App, LogLevel, type SlashCommand, type RespondFn } from '@slack/bolt'
-import type { KnownBlock, ChatPostMessageArguments } from '@slack/web-api'
-import { eq } from 'drizzle-orm'
+import type { KnownBlock, ChatPostMessageArguments, View } from '@slack/web-api'
+import { eq, and, inArray, desc } from 'drizzle-orm'
 import { nanoid } from 'nanoid'
 import { readFileSync } from 'fs'
 import { basename } from 'path'
-import { db, messagingConnections, slackReactions } from '../../db'
+import { db, messagingConnections, slackReactions, tasks } from '../../db'
 import { log } from '../../lib/logger'
 import { getSettings } from '../../lib/settings'
+import { getUserIdForChannelIdentity } from '../channel-identity-service'
 import type { AttachmentData } from '../../../shared/types'
 import type {
   MessagingChannel,
@@ -20,6 +21,7 @@ import type {
   IncomingMessage,
 } from './types'
 import { parseSlackResponse } from './slack-utils'
+import { sessionExists } from './session-mapper'
 
 /** Shape of a Slack file object attached to a message */
 interface SlackFile {
@@ -123,14 +125,27 @@ export class SlackChannel implements MessagingChannel {
         await this.handleSlashCommand(command, respond)
       })
 
-      // Handle DM messages only
-      // Note: app.message() handles all message events including DMs
-      // We filter to only process direct messages (im channel type)
+      // Handle DM messages AND thread followups in channels we've been @-mentioned in.
+      // Direct mentions in channels still flow through the dedicated app_mention event;
+      // this branch keeps a conversation alive when the user replies in the same thread
+      // *without* re-pinging the bot (which would otherwise drop on the floor pre D-15 PR 5).
       this.app.message(async ({ message }) => {
-        // Only process DMs, ignore channel/group messages (channel mentions
-        // are handled separately via the app_mention event below).
-        if ((message as Record<string, unknown>).channel_type === 'im') {
-          await this.handleMessage(message)
+        const m = message as Record<string, unknown>
+        const channelType = m.channel_type as string | undefined
+        if (channelType === 'im') {
+          await this.handleMessage(m)
+          return
+        }
+        // Non-DM message: only handle if it's a follow-up in a thread the bot is
+        // already part of (i.e. we have an active session keyed on that thread).
+        const threadTs = m.thread_ts as string | undefined
+        const channelId = m.channel as string | undefined
+        if (!threadTs || !channelId) return
+        // Ignore the bot's own messages (they also arrive as message events)
+        if (m.bot_id || m.subtype === 'bot_message') return
+        const sessionKey = `${channelId}:${threadTs}`
+        if (sessionExists(this.connectionId, sessionKey)) {
+          await this.handleMessage(m)
         }
       })
 
@@ -149,6 +164,17 @@ export class SlackChannel implements MessagingChannel {
       })
       this.app.event('reaction_removed', async ({ event }) => {
         await this.handleReactionEvent('removed', event as unknown as Record<string, unknown>)
+      })
+
+      // App Home tab: render a Fulcrum dashboard when a user opens the bot's
+      // Home tab (Slack sidebar → Apps → Fulcrum → Home). Requires the
+      // manifest to enable app_home.home_tab_enabled and subscribe to the
+      // app_home_opened bot_event — both manifest-only changes; no scope
+      // additions, no reinstall.
+      this.app.event('app_home_opened', async ({ event }) => {
+        const ev = event as unknown as { user: string; tab?: string }
+        if (ev.tab && ev.tab !== 'home') return  // Ignore 'messages' tab opens
+        await this.publishHomeView(ev.user)
       })
 
       // Start the app
@@ -305,6 +331,24 @@ export class SlackChannel implements MessagingChannel {
       }
     }
 
+    // For thread followups in a channel (D-15 PR 5), thread the channel/thread
+    // through metadata so the response posts back to the same thread and
+    // session-mapper keys to the thread for continuity.
+    const channelId = message.channel as string | undefined
+    const threadTs = message.thread_ts as string | undefined
+    const channelType = message.channel_type as string | undefined
+    const isChannelThread = channelType !== 'im' && !!channelId && !!threadTs
+
+    const metadata: Record<string, unknown> = {}
+    if (files?.length) {
+      metadata.files = files.map((f) => ({ name: f.name, type: f.mimetype, size: f.size }))
+    }
+    if (isChannelThread) {
+      metadata.isChannelMention = true
+      metadata.slackChannelId = channelId
+      metadata.slackThreadTs = threadTs
+    }
+
     const incomingMessage: IncomingMessage = {
       channelType: 'slack',
       connectionId: this.connectionId,
@@ -313,9 +357,7 @@ export class SlackChannel implements MessagingChannel {
       content,
       attachments,
       timestamp: new Date(parseFloat(message.ts as string) * 1000),
-      metadata: files?.length ? {
-        files: files.map((f) => ({ name: f.name, type: f.mimetype, size: f.size })),
-      } : undefined,
+      metadata: Object.keys(metadata).length > 0 ? metadata : undefined,
     }
 
     log.messaging.info('Slack message received', {
@@ -324,6 +366,7 @@ export class SlackChannel implements MessagingChannel {
       contentLength: content.length,
       fileCount: files?.length ?? 0,
       attachmentCount: attachments?.length ?? 0,
+      isChannelThread,
     })
 
     try {
@@ -491,6 +534,150 @@ export class SlackChannel implements MessagingChannel {
       data: buffer.toString('base64'),
       filename: file.name,
       type,
+    }
+  }
+
+  /**
+   * Render and publish the App Home tab for a given Slack user. Looks up the
+   * Fulcrum user via channel_identity_mappings; when there's no mapping, the
+   * view becomes a "link your account" hint instead of a task list.
+   *
+   * Failures here are non-fatal — log and swallow; the user just sees the
+   * last published view (or the default "no Home view" Slack message).
+   */
+  private async publishHomeView(slackUserId: string): Promise<void> {
+    if (!this.app) return
+
+    try {
+      const fulcrumUserId = getUserIdForChannelIdentity('slack', slackUserId)
+
+      const baseUrl = getSettings().server.publicDomain
+        ? `https://${getSettings().server.publicDomain}`
+        : null
+
+      const blocks: KnownBlock[] = [
+        {
+          type: 'header',
+          text: { type: 'plain_text', text: 'Fulcrum', emoji: true },
+        },
+        {
+          type: 'context',
+          elements: [
+            { type: 'mrkdwn', text: '_The Vibe Engineer\'s Cockpit_' },
+          ],
+        },
+        { type: 'divider' },
+      ]
+
+      if (!fulcrumUserId) {
+        blocks.push(
+          {
+            type: 'section',
+            text: {
+              type: 'mrkdwn',
+              text:
+                ':link: *Link your Fulcrum account*\n\n' +
+                'Your Slack ID isn\'t mapped to a Fulcrum user yet, so I can\'t show your tasks here. ' +
+                'Head to Fulcrum → Settings → *My Channel Identities*, add Slack, and paste your Slack ' +
+                `member id \`${slackUserId}\`.`,
+            },
+          },
+          { type: 'divider' }
+        )
+      } else {
+        // Pull up to 10 of the user's open tasks, newest first
+        const userTasks = db
+          .select({
+            id: tasks.id,
+            title: tasks.title,
+            status: tasks.status,
+            updatedAt: tasks.updatedAt,
+          })
+          .from(tasks)
+          .where(
+            and(
+              eq(tasks.assigneeUserId, fulcrumUserId),
+              inArray(tasks.status, ['TO_DO', 'IN_PROGRESS'])
+            )
+          )
+          .orderBy(desc(tasks.updatedAt))
+          .limit(10)
+          .all()
+
+        if (userTasks.length === 0) {
+          blocks.push({
+            type: 'section',
+            text: {
+              type: 'mrkdwn',
+              text: ':white_check_mark: *Nothing on your plate.* No open tasks assigned to you.',
+            },
+          })
+        } else {
+          blocks.push({
+            type: 'section',
+            text: { type: 'mrkdwn', text: `*Your open tasks* (${userTasks.length})` },
+          })
+          for (const t of userTasks) {
+            const statusEmoji = t.status === 'IN_PROGRESS' ? ':construction:' : ':inbox_tray:'
+            const taskLink = baseUrl ? `<${baseUrl}/tasks?task=${t.id}|${t.title}>` : t.title
+            blocks.push({
+              type: 'section',
+              text: {
+                type: 'mrkdwn',
+                text: `${statusEmoji} ${taskLink}`,
+              },
+            })
+          }
+        }
+        blocks.push({ type: 'divider' })
+      }
+
+      // Always-on footer: quick commands + web link
+      blocks.push({
+        type: 'section',
+        text: {
+          type: 'mrkdwn',
+          text:
+            '*Quick commands* (in DM):\n' +
+            '• `/reset` — start a fresh conversation\n' +
+            '• `/help` — show available commands\n' +
+            '• `/info` — session status',
+        },
+      })
+      if (baseUrl) {
+        blocks.push({
+          type: 'context',
+          elements: [
+            {
+              type: 'mrkdwn',
+              text: `Open the cockpit → <${baseUrl}/tasks|${baseUrl.replace(/^https?:\/\//, '')}>`,
+            },
+          ],
+        })
+      }
+
+      const view: View = {
+        type: 'home',
+        blocks,
+      }
+
+      await this.app.client.views.publish({
+        user_id: slackUserId,
+        view,
+      })
+
+      log.messaging.info('Slack App Home view published', {
+        connectionId: this.connectionId,
+        slackUserId,
+        fulcrumUserId,
+        blockCount: blocks.length,
+      })
+    } catch (err) {
+      log.messaging.warn('Failed to publish Slack App Home view', {
+        connectionId: this.connectionId,
+        slackUserId,
+        error: String(err),
+      })
     }
   }
 
@@ -692,12 +879,14 @@ export class SlackChannel implements MessagingChannel {
   }
 
   /**
-   * Post a reply to a Slack channel as a threaded message. Used to respond
-   * to @-mentions so the conversation stays where the team can see it.
+   * Post a message to a Slack channel. When `threadTs` is provided, the
+   * message lands inside that thread (used to reply to @-mentions); when
+   * undefined, the message posts at the channel's top level (used for
+   * per-event notification routing).
    */
   private async postToChannelThread(
     channelId: string,
-    threadTs: string,
+    threadTs: string | undefined,
     content: string,
     blocks?: KnownBlock[],
     filePath?: string
@@ -714,14 +903,15 @@ export class SlackChannel implements MessagingChannel {
             channel_id: channelId,
             file: fileData,
             filename,
-            thread_ts: threadTs,
+            ...(threadTs && { thread_ts: threadTs }),
             initial_comment: content || undefined,
           })
           return true
         } catch (fileErr) {
-          log.messaging.error('Failed to upload Slack file to thread', {
+          log.messaging.error('Failed to upload Slack file to channel', {
             connectionId: this.connectionId,
             channelId,
+            threadTs,
             filePath,
             error: String(fileErr),
           })
@@ -735,9 +925,9 @@ export class SlackChannel implements MessagingChannel {
         const part = parts[i]
         const options: ChatPostMessageArguments = {
           channel: channelId,
-          thread_ts: threadTs,
           text: part,
         }
+        if (threadTs) options.thread_ts = threadTs
         if (i === 0 && blocks) {
           options.blocks = blocks
         } else {
@@ -749,7 +939,7 @@ export class SlackChannel implements MessagingChannel {
         }
       }
 
-      log.messaging.info('Slack channel reply sent', {
+      log.messaging.info('Slack channel message sent', {
         connectionId: this.connectionId,
         channelId,
         threadTs,
@@ -758,7 +948,7 @@ export class SlackChannel implements MessagingChannel {
       })
       return true
     } catch (err) {
-      log.messaging.error('Failed to post Slack channel reply', {
+      log.messaging.error('Failed to post Slack channel message', {
         connectionId: this.connectionId,
         channelId,
         threadTs,
@@ -1054,13 +1244,16 @@ export class SlackChannel implements MessagingChannel {
       )
     }
 
-    // Channel @-mention path: reply in the same channel and thread.
-    const mentionChannelId = metadata?.slackChannelId as string | undefined
-    const mentionThreadTs = metadata?.slackThreadTs as string | undefined
-    if (mentionChannelId && mentionThreadTs) {
+    // Channel post path: reply to @-mentions (with thread_ts) and per-event
+    // notifications (no thread, top-level channel post). The presence of
+    // slackChannelId alone is enough to trigger this path; slackThreadTs is
+    // optional and only used to land replies inside an existing thread.
+    const targetChannelId = metadata?.slackChannelId as string | undefined
+    const targetThreadTs = metadata?.slackThreadTs as string | undefined
+    if (targetChannelId) {
       return await this.postToChannelThread(
-        mentionChannelId,
-        mentionThreadTs,
+        targetChannelId,
+        targetThreadTs,
         content,
         metadata?.blocks as KnownBlock[] | undefined,
         metadata?.filePath as string | undefined

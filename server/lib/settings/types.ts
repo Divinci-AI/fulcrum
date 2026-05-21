@@ -405,10 +405,31 @@ export interface DesktopNotificationConfig {
   enabled: boolean
 }
 
+/**
+ * Notification event types — must mirror NotificationPayload['type'].
+ * Used as keys in per-event channel routing.
+ */
+export type NotificationEventType =
+  | 'task_status_change'
+  | 'pr_merged'
+  | 'plan_complete'
+  | 'deployment_success'
+  | 'deployment_failed'
+  | 'mention'
+
 export interface SlackNotificationConfig {
   enabled: boolean
   webhookUrl?: string
   useMessagingChannel?: boolean // Send via messaging channel instead of webhook
+  /**
+   * Per-event channel routing (messaging-channel mode only). Map an event type
+   * to a Slack channel ID (e.g. "C0123ABC") so each notification posts to the
+   * right team channel. Falls back to `defaultChannel` when an event has no
+   * explicit mapping; when neither is set, the legacy per-user DM path applies.
+   */
+  eventChannels?: Partial<Record<NotificationEventType, string>>
+  /** Default channel for messaging-channel mode when no event-specific channel is mapped. */
+  defaultChannel?: string
 }
 
 export interface DiscordNotificationConfig {
