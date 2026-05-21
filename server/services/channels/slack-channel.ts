@@ -20,6 +20,7 @@ import type {
   IncomingMessage,
 } from './types'
 import { parseSlackResponse } from './slack-utils'
+import { sessionExists } from './session-mapper'
 
 /** Shape of a Slack file object attached to a message */
 interface SlackFile {
@@ -123,14 +124,27 @@ export class SlackChannel implements MessagingChannel {
         await this.handleSlashCommand(command, respond)
       })
 
-      // Handle DM messages only
-      // Note: app.message() handles all message events including DMs
-      // We filter to only process direct messages (im channel type)
+      // Handle DM messages AND thread followups in channels we've been @-mentioned in.
+      // Direct mentions in channels still flow through the dedicated app_mention event;
+      // this branch keeps a conversation alive when the user replies in the same thread
+      // *without* re-pinging the bot (which would otherwise drop on the floor pre D-15 PR 5).
       this.app.message(async ({ message }) => {
-        // Only process DMs, ignore channel/group messages (channel mentions
-        // are handled separately via the app_mention event below).
-        if ((message as Record<string, unknown>).channel_type === 'im') {
-          await this.handleMessage(message)
+        const m = message as Record<string, unknown>
+        const channelType = m.channel_type as string | undefined
+        if (channelType === 'im') {
+          await this.handleMessage(m)
+          return
+        }
+        // Non-DM message: only handle if it's a follow-up in a thread the bot is
+        // already part of (i.e. we have an active session keyed on that thread).
+        const threadTs = m.thread_ts as string | undefined
+        const channelId = m.channel as string | undefined
+        if (!threadTs || !channelId) return
+        // Ignore the bot's own messages (they also arrive as message events)
+        if (m.bot_id || m.subtype === 'bot_message') return
+        const sessionKey = `${channelId}:${threadTs}`
+        if (sessionExists(this.connectionId, sessionKey)) {
+          await this.handleMessage(m)
         }
       })
 
@@ -306,6 +320,24 @@ export class SlackChannel implements MessagingChannel {
       }
     }
 
+    // For thread followups in a channel (D-15 PR 5), thread the channel/thread
+    // through metadata so the response posts back to the same thread and
+    // session-mapper keys to the thread for continuity.
+    const channelId = message.channel as string | undefined
+    const threadTs = message.thread_ts as string | undefined
+    const channelType = message.channel_type as string | undefined
+    const isChannelThread = channelType !== 'im' && !!channelId && !!threadTs
+
+    const metadata: Record<string, unknown> = {}
+    if (files?.length) {
+      metadata.files = files.map((f) => ({ name: f.name, type: f.mimetype, size: f.size }))
+    }
+    if (isChannelThread) {
+      metadata.isChannelMention = true
+      metadata.slackChannelId = channelId
+      metadata.slackThreadTs = threadTs
+    }
+
     const incomingMessage: IncomingMessage = {
       channelType: 'slack',
       connectionId: this.connectionId,
@@ -314,9 +346,7 @@ export class SlackChannel implements MessagingChannel {
       content,
       attachments,
       timestamp: new Date(parseFloat(message.ts as string) * 1000),
-      metadata: files?.length ? {
-        files: files.map((f) => ({ name: f.name, type: f.mimetype, size: f.size })),
-      } : undefined,
+      metadata: Object.keys(metadata).length > 0 ? metadata : undefined,
     }
 
     log.messaging.info('Slack message received', {
@@ -325,6 +355,7 @@ export class SlackChannel implements MessagingChannel {
       contentLength: content.length,
       fileCount: files?.length ?? 0,
       attachmentCount: attachments?.length ?? 0,
+      isChannelThread,
     })
 
     try {
