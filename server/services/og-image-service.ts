@@ -71,9 +71,17 @@ type FontWeight = 400 | 700
 let cachedFonts: { name: string; data: ArrayBuffer; weight: FontWeight; style: 'normal' }[] | null = null
 
 function getFontDir(): string {
-  if (process.env.FULCRUM_PACKAGE_ROOT) {
-    return join(process.env.FULCRUM_PACKAGE_ROOT, 'dist', 'og-fonts')
+  // Production (SaaS Docker container, CLI bundle, desktop bundle): vite
+  // already copied public/og-fonts/* to dist/og-fonts/. The Dockerfile only
+  // ships dist/, not public/, so we MUST read from dist in any production
+  // mode — matches the logic in server/app.ts getDistPath().
+  if (process.env.NODE_ENV === 'production' || process.env.FULCRUM_PACKAGE_ROOT) {
+    const distBase = process.env.FULCRUM_PACKAGE_ROOT
+      ? join(process.env.FULCRUM_PACKAGE_ROOT, 'dist')
+      : join(process.cwd(), 'dist')
+    return join(distBase, 'og-fonts')
   }
+  // Dev / tests: vite hasn't run, read directly from the source tree.
   return join(process.cwd(), 'public', 'og-fonts')
 }
 
