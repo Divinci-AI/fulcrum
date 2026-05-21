@@ -230,6 +230,10 @@ function SettingsPage() {
   const [gmailNotifAccountId, setGmailNotifAccountId] = useState('')
   const [slackUseMessaging, setSlackUseMessaging] = useState(false)
   const [discordUseMessaging, setDiscordUseMessaging] = useState(false)
+  // D-15 PR 3: per-event Slack channel routing. Each event type can target a
+  // specific Slack channel; defaultChannel covers anything not explicitly mapped.
+  const [slackEventChannels, setSlackEventChannels] = useState<Record<string, string>>({})
+  const [slackDefaultChannel, setSlackDefaultChannel] = useState('')
 
   // z.ai settings local state
   const [zAiEnabled, setZAiEnabled] = useState(false)
@@ -321,6 +325,8 @@ function SettingsPage() {
       setGmailNotifAccountId(notificationSettings.gmail?.googleAccountId ?? '')
       setSlackUseMessaging(notificationSettings.slack?.useMessagingChannel ?? false)
       setDiscordUseMessaging(notificationSettings.discord?.useMessagingChannel ?? false)
+      setSlackEventChannels(notificationSettings.slack?.eventChannels ?? {})
+      setSlackDefaultChannel(notificationSettings.slack?.defaultChannel ?? '')
     }
   }, [notificationSettings])
 
@@ -468,6 +474,8 @@ function SettingsPage() {
     slackEnabled !== (notificationSettings.slack?.enabled ?? false) ||
     slackWebhook !== (notificationSettings.slack?.webhookUrl ?? '') ||
     slackUseMessaging !== (notificationSettings.slack?.useMessagingChannel ?? false) ||
+    JSON.stringify(slackEventChannels) !== JSON.stringify(notificationSettings.slack?.eventChannels ?? {}) ||
+    slackDefaultChannel !== (notificationSettings.slack?.defaultChannel ?? '') ||
     discordEnabled !== (notificationSettings.discord?.enabled ?? false) ||
     discordWebhook !== (notificationSettings.discord?.webhookUrl ?? '') ||
     discordUseMessaging !== (notificationSettings.discord?.useMessagingChannel ?? false) ||
@@ -683,7 +691,13 @@ function SettingsPage() {
               toast: { enabled: toastEnabled },
               desktop: { enabled: desktopEnabled },
               sound: { enabled: soundEnabled, silenceTaskMoves },
-              slack: { enabled: slackEnabled, webhookUrl: slackWebhook, useMessagingChannel: slackUseMessaging },
+              slack: {
+                enabled: slackEnabled,
+                webhookUrl: slackWebhook,
+                useMessagingChannel: slackUseMessaging,
+                eventChannels: slackEventChannels,
+                defaultChannel: slackDefaultChannel || undefined,
+              },
               discord: { enabled: discordEnabled, webhookUrl: discordWebhook, useMessagingChannel: discordUseMessaging },
               pushover: { enabled: pushoverEnabled, appToken: pushoverAppToken, userKey: pushoverUserKey },
               whatsapp: { enabled: whatsappNotifEnabled },
@@ -2652,6 +2666,53 @@ function SettingsPage() {
                           <p className="text-xs text-muted-foreground">
                             {t('notifications.messagingChannelNote') || 'Sends via connected Slack messaging channel'}
                           </p>
+                        )}
+                        {slackUseMessaging && (
+                          <div className="space-y-2 rounded-md border border-border bg-muted/30 p-3">
+                            <div className="text-xs font-medium text-foreground">
+                              Per-event channel routing
+                            </div>
+                            <p className="text-xs text-muted-foreground">
+                              Route specific events to specific Slack channels (channel id, e.g. <code className="rounded bg-muted px-1">C0123ABC</code>). Falls back to the default below; if both are blank, the bot DMs the recipient.
+                            </p>
+                            {([
+                              ['task_status_change', 'Task status changes'],
+                              ['pr_merged', 'PR merged'],
+                              ['plan_complete', 'Plan complete'],
+                              ['deployment_success', 'Deploy success'],
+                              ['deployment_failed', 'Deploy failed'],
+                              ['mention', 'Mentions'],
+                            ] as const).map(([eventKey, label]) => (
+                              <div key={eventKey} className="flex items-center gap-2">
+                                <label className="w-36 text-xs text-muted-foreground">{label}</label>
+                                <Input
+                                  type="text"
+                                  value={slackEventChannels[eventKey] ?? ''}
+                                  onChange={(e) => {
+                                    const next = { ...slackEventChannels }
+                                    const v = e.target.value.trim()
+                                    if (v) next[eventKey] = v
+                                    else delete next[eventKey]
+                                    setSlackEventChannels(next)
+                                  }}
+                                  placeholder="C0123ABC"
+                                  disabled={isLoading || !notificationsEnabled}
+                                  className="flex-1 font-mono text-xs"
+                                />
+                              </div>
+                            ))}
+                            <div className="flex items-center gap-2 border-t border-border pt-2">
+                              <label className="w-36 text-xs text-muted-foreground">Default channel</label>
+                              <Input
+                                type="text"
+                                value={slackDefaultChannel}
+                                onChange={(e) => setSlackDefaultChannel(e.target.value.trim())}
+                                placeholder="C0123ABC (fallback)"
+                                disabled={isLoading || !notificationsEnabled}
+                                className="flex-1 font-mono text-xs"
+                              />
+                            </div>
+                          </div>
                         )}
                       </div>
                     )}

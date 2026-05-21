@@ -628,12 +628,14 @@ export class SlackChannel implements MessagingChannel {
   }
 
   /**
-   * Post a reply to a Slack channel as a threaded message. Used to respond
-   * to @-mentions so the conversation stays where the team can see it.
+   * Post a message to a Slack channel. When `threadTs` is provided, the
+   * message lands inside that thread (used to reply to @-mentions); when
+   * undefined, the message posts at the channel's top level (used for
+   * per-event notification routing).
    */
   private async postToChannelThread(
     channelId: string,
-    threadTs: string,
+    threadTs: string | undefined,
     content: string,
     blocks?: KnownBlock[],
     filePath?: string
@@ -650,14 +652,15 @@ export class SlackChannel implements MessagingChannel {
             channel_id: channelId,
             file: fileData,
             filename,
-            thread_ts: threadTs,
+            ...(threadTs && { thread_ts: threadTs }),
             initial_comment: content || undefined,
           })
           return true
         } catch (fileErr) {
-          log.messaging.error('Failed to upload Slack file to thread', {
+          log.messaging.error('Failed to upload Slack file to channel', {
             connectionId: this.connectionId,
             channelId,
+            threadTs,
             filePath,
             error: String(fileErr),
           })
@@ -671,9 +674,9 @@ export class SlackChannel implements MessagingChannel {
         const part = parts[i]
         const options: ChatPostMessageArguments = {
           channel: channelId,
-          thread_ts: threadTs,
           text: part,
         }
+        if (threadTs) options.thread_ts = threadTs
         if (i === 0 && blocks) {
           options.blocks = blocks
         } else {
@@ -685,7 +688,7 @@ export class SlackChannel implements MessagingChannel {
         }
       }
 
-      log.messaging.info('Slack channel reply sent', {
+      log.messaging.info('Slack channel message sent', {
         connectionId: this.connectionId,
         channelId,
         threadTs,
@@ -694,7 +697,7 @@ export class SlackChannel implements MessagingChannel {
       })
       return true
     } catch (err) {
-      log.messaging.error('Failed to post Slack channel reply', {
+      log.messaging.error('Failed to post Slack channel message', {
         connectionId: this.connectionId,
         channelId,
         threadTs,
@@ -990,13 +993,16 @@ export class SlackChannel implements MessagingChannel {
       )
     }
 
-    // Channel @-mention path: reply in the same channel and thread.
-    const mentionChannelId = metadata?.slackChannelId as string | undefined
-    const mentionThreadTs = metadata?.slackThreadTs as string | undefined
-    if (mentionChannelId && mentionThreadTs) {
+    // Channel post path: reply to @-mentions (with thread_ts) and per-event
+    // notifications (no thread, top-level channel post). The presence of
+    // slackChannelId alone is enough to trigger this path; slackThreadTs is
+    // optional and only used to land replies inside an existing thread.
+    const targetChannelId = metadata?.slackChannelId as string | undefined
+    const targetThreadTs = metadata?.slackThreadTs as string | undefined
+    if (targetChannelId) {
       return await this.postToChannelThread(
-        mentionChannelId,
-        mentionThreadTs,
+        targetChannelId,
+        targetThreadTs,
         content,
         metadata?.blocks as KnownBlock[] | undefined,
         metadata?.filePath as string | undefined

@@ -478,7 +478,14 @@ export interface NotificationSettings {
   toast: { enabled: boolean }
   desktop: { enabled: boolean }
   sound: { enabled: boolean; customSoundFile?: string; silenceTaskMoves?: boolean }
-  slack: { enabled: boolean; webhookUrl: string; useMessagingChannel?: boolean }
+  slack: {
+    enabled: boolean
+    webhookUrl: string
+    useMessagingChannel?: boolean
+    // D-15 PR 3: per-event channel routing (messaging-channel mode only)
+    eventChannels?: Record<string, string>
+    defaultChannel?: string
+  }
   discord: { enabled: boolean; webhookUrl: string; useMessagingChannel?: boolean }
   pushover: { enabled: boolean; appToken: string; userKey: string }
   whatsapp: { enabled: boolean }
