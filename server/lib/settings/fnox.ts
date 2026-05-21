@@ -109,6 +109,8 @@ export const FNOX_CONFIG_MAP: Record<string, ConfigEntry> = {
   'notifications.slack.enabled': { fnoxKey: 'FULCRUM_NOTIF_SLACK_ENABLED', provider: 'plain', type: 'boolean' },
   'notifications.slack.webhookUrl': { fnoxKey: 'FULCRUM_SLACK_WEBHOOK_URL', provider: 'age', type: 'string' },
   'notifications.slack.useMessagingChannel': { fnoxKey: 'FULCRUM_NOTIF_SLACK_USE_MESSAGING', provider: 'plain', type: 'boolean' },
+  'notifications.slack.eventChannels': { fnoxKey: 'FULCRUM_NOTIF_SLACK_EVENT_CHANNELS', provider: 'plain', type: 'json' },
+  'notifications.slack.defaultChannel': { fnoxKey: 'FULCRUM_NOTIF_SLACK_DEFAULT_CHANNEL', provider: 'plain', type: 'string' },
   'notifications.discord.enabled': { fnoxKey: 'FULCRUM_NOTIF_DISCORD_ENABLED', provider: 'plain', type: 'boolean' },
   'notifications.discord.webhookUrl': { fnoxKey: 'FULCRUM_DISCORD_WEBHOOK_URL', provider: 'age', type: 'string' },
   'notifications.discord.useMessagingChannel': { fnoxKey: 'FULCRUM_NOTIF_DISCORD_USE_MESSAGING', provider: 'plain', type: 'boolean' },

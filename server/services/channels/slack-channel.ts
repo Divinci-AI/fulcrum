@@ -72,6 +72,7 @@ export class SlackChannel implements MessagingChannel {
   private isShuttingDown = false
   private botToken: string | null = null
   private appToken: string | null = null
+  private botUserId: string | null = null  // U… id used to strip self-mentions from channel @-mentions
 
   /** How often to verify the connection is alive (ms) */
   private static HEALTH_CHECK_INTERVAL = 5 * 60 * 1000 // 5 minutes
@@ -126,10 +127,18 @@ export class SlackChannel implements MessagingChannel {
       // Note: app.message() handles all message events including DMs
       // We filter to only process direct messages (im channel type)
       this.app.message(async ({ message }) => {
-        // Only process DMs, ignore channel/group messages
+        // Only process DMs, ignore channel/group messages (channel mentions
+        // are handled separately via the app_mention event below).
         if ((message as Record<string, unknown>).channel_type === 'im') {
           await this.handleMessage(message)
         }
+      })
+
+      // Handle @-mentions of the bot in public/private channels.
+      // Replies are posted as threaded responses on the same channel,
+      // not as DMs, so the conversation stays where the team can see it.
+      this.app.event('app_mention', async ({ event }) => {
+        await this.handleAppMention(event as unknown as Record<string, unknown>)
       })
 
       // App Home tab: render a Fulcrum dashboard when a user opens the bot's
@@ -151,6 +160,7 @@ export class SlackChannel implements MessagingChannel {
 
       // Get bot info
       const authTest = await this.app.client.auth.test()
+      this.botUserId = (authTest.user_id as string | undefined) ?? null
 
       log.messaging.info('Slack bot connected', {
         connectionId: this.connectionId,
@@ -630,38 +640,136 @@ export class SlackChannel implements MessagingChannel {
   }
 
   /**
-   * Handle slash command interactions.
-   * Commands are routed to the message handler and acknowledged with an ephemeral response.
+   * Handle an @-mention of the bot in a channel.
+   * The reply is posted as a threaded message on the same channel so the
+   * conversation stays in context for the team; per-thread session keying
+   * means a single thread is one continuous conversation with the assistant,
+   * even across multiple mentions.
    */
-  private async handleSlashCommand(
-    command: SlashCommand,
-    respond: RespondFn
-  ): Promise<void> {
-    log.messaging.info('Slack slash command received', {
+  private async handleAppMention(event: Record<string, unknown>): Promise<void> {
+    // Slack delivers app_mention for our own messages too if the bot
+    // self-references — drop those.
+    if (event.bot_id || event.subtype === 'bot_message') return
+
+    const userId = event.user as string | undefined
+    if (!userId) return
+
+    const rawText = (event.text as string | undefined) ?? ''
+    const channelId = event.channel as string | undefined
+    if (!channelId) return
+
+    // Slack guarantees thread_ts is the parent if we're in an existing thread;
+    // for a fresh top-level @-mention, use the event's own ts as the thread root
+    // so the assistant's reply starts a new thread under the user's message.
+    const threadTs = (event.thread_ts as string | undefined) ?? (event.ts as string)
+
+    // Strip the bot's own self-mention from the start of the text so the
+    // assistant doesn't see "<@U123> what's up" — just "what's up".
+    let content = rawText
+    if (this.botUserId) {
+      const selfMention = new RegExp(`<@${this.botUserId}>\\s*`, 'g')
+      content = content.replace(selfMention, '').trim()
+    }
+
+    // Resolve sender display name (best effort)
+    let senderName: string | undefined
+    try {
+      if (this.app) {
+        const userInfo = await this.app.client.users.info({ user: userId })
+        senderName = userInfo.user?.real_name || userInfo.user?.name
+      }
+    } catch {
+      // Non-fatal
+    }
+
+    log.messaging.info('Slack app_mention received', {
       connectionId: this.connectionId,
-      command: command.command,
-      userId: command.user_id,
-      userName: command.user_name,
+      from: userId,
+      channelId,
+      threadTs,
+      contentLength: content.length,
     })
 
-    // Convert slash command to an IncomingMessage for the standard command handler
     const incomingMessage: IncomingMessage = {
       channelType: 'slack',
       connectionId: this.connectionId,
-      senderId: command.user_id,
-      senderName: command.user_name,
-      content: command.command, // e.g., "/reset"
-      timestamp: new Date(),
+      senderId: userId,
+      senderName,
+      content,
+      timestamp: new Date(parseFloat(event.ts as string) * 1000),
       metadata: {
-        isSlashCommand: true,
+        isChannelMention: true,
+        slackChannelId: channelId,
+        slackThreadTs: threadTs,
       },
     }
 
     try {
       await this.events?.onMessage(incomingMessage)
+    } catch (err) {
+      log.messaging.error('Error processing Slack app_mention', {
+        connectionId: this.connectionId,
+        error: String(err),
+      })
+    }
+  }
 
-      // Ephemeral acknowledgment to the user
-      await respond({ text: '✓ Command received', response_type: 'ephemeral' })
+  /**
+   * Handle slash command interactions.
+   * The trigger command (e.g. "/fulcrum") and its text argument are forwarded as
+   * the message content; the response is posted back via response_url so the
+   * answer lands in the channel where the user typed the command (not as a DM).
+   */
+  private async handleSlashCommand(
+    command: SlashCommand,
+    respond: RespondFn
+  ): Promise<void> {
+    const text = (command.text || '').trim()
+
+    log.messaging.info('Slack slash command received', {
+      connectionId: this.connectionId,
+      command: command.command,
+      hasText: text.length > 0,
+      userId: command.user_id,
+      userName: command.user_name,
+      channelId: command.channel_id,
+    })
+
+    // Bare invocation with no argument: show a quick usage tip and return.
+    if (!text && command.command === '/fulcrum') {
+      await respond({
+        text: 'Tip: `/fulcrum <message>` to chat with me, or DM me directly. Try `/fulcrum what can you do?`',
+        response_type: 'ephemeral',
+      })
+      return
+    }
+
+    // The slash command itself acts as a meta-command (e.g. /reset registered
+    // separately at the workspace level): forward the bare command string so
+    // the shared command router can match RESET/HELP/STATUS. Otherwise forward
+    // the user's free-text argument as the message content.
+    const isMetaCommand = !text && command.command !== '/fulcrum'
+    const content = isMetaCommand ? command.command : text
+
+    const incomingMessage: IncomingMessage = {
+      channelType: 'slack',
+      connectionId: this.connectionId,
+      senderId: command.user_id,
+      senderName: command.user_name,
+      content,
+      timestamp: new Date(),
+      metadata: {
+        isSlashCommand: true,
+        slashCommandName: command.command,
+        slackChannelId: command.channel_id,
+        slackResponseUrl: command.response_url,
+      },
+    }
+
+    try {
+      // Quick ephemeral ack while the assistant works
+      await respond({ text: 'Thinking…', response_type: 'ephemeral' })
+      await this.events?.onMessage(incomingMessage)
     } catch (err) {
       log.messaging.error('Error processing Slack slash command', {
         connectionId: this.connectionId,
@@ -672,6 +780,127 @@ export class SlackChannel implements MessagingChannel {
         text: 'Sorry, something went wrong processing your command.',
         response_type: 'ephemeral',
       })
+    }
+  }
+
+  /**
+   * Post a message to a Slack channel. When `threadTs` is provided, the
+   * message lands inside that thread (used to reply to @-mentions); when
+   * undefined, the message posts at the channel's top level (used for
+   * per-event notification routing).
+   */
+  private async postToChannelThread(
+    channelId: string,
+    threadTs: string | undefined,
+    content: string,
+    blocks?: KnownBlock[],
+    filePath?: string
+  ): Promise<boolean> {
+    if (!this.app) return false
+
+    try {
+      // Upload file first if provided (initial_comment carries the text)
+      if (filePath) {
+        try {
+          const fileData = readFileSync(filePath)
+          const filename = basename(filePath)
+          await this.app.client.files.uploadV2({
+            channel_id: channelId,
+            file: fileData,
+            filename,
+            ...(threadTs && { thread_ts: threadTs }),
+            initial_comment: content || undefined,
+          })
+          return true
+        } catch (fileErr) {
+          log.messaging.error('Failed to upload Slack file to channel', {
+            connectionId: this.connectionId,
+            channelId,
+            threadTs,
+            filePath,
+            error: String(fileErr),
+          })
+          // Fall through to text-only
+        }
+      }
+
+      // Split overly long content the same way the DM path does
+      const parts = content.length <= 4000 ? [content] : this.splitMessage(content, 4000)
+      for (let i = 0; i < parts.length; i++) {
+        const part = parts[i]
+        const options: ChatPostMessageArguments = {
+          channel: channelId,
+          text: part,
+        }
+        if (threadTs) options.thread_ts = threadTs
+        if (i === 0 && blocks) {
+          options.blocks = blocks
+        } else {
+          options.mrkdwn = true
+        }
+        await this.app.client.chat.postMessage(options)
+        if (parts.length > 1) {
+          await new Promise((resolve) => setTimeout(resolve, 100))
+        }
+      }
+
+      log.messaging.info('Slack channel message sent', {
+        connectionId: this.connectionId,
+        channelId,
+        threadTs,
+        contentLength: content.length,
+        hasBlocks: !!blocks,
+      })
+      return true
+    } catch (err) {
+      log.messaging.error('Failed to post Slack channel message', {
+        connectionId: this.connectionId,
+        channelId,
+        threadTs,
+        error: String(err),
+      })
+      return false
+    }
+  }
+
+  /**
+   * Post a message back to a Slack channel via the slash command's response_url.
+   * Works without the bot being a member of the channel and without
+   * chat:write.public scope, but is capped at 5 responses per 30 minutes.
+   * Ephemeral posts are visible only to the user who triggered the command.
+   */
+  private async postViaResponseUrl(
+    responseUrl: string,
+    content: string,
+    blocks?: KnownBlock[],
+    ephemeral = false
+  ): Promise<boolean> {
+    const payload: Record<string, unknown> = {
+      response_type: ephemeral ? 'ephemeral' : 'in_channel',
+      text: content,
+    }
+    if (blocks) payload.blocks = blocks
+
+    try {
+      const res = await fetch(responseUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      })
+      if (!res.ok) {
+        log.messaging.warn('Slack response_url POST returned non-ok', {
+          connectionId: this.connectionId,
+          status: res.status,
+          statusText: res.statusText,
+        })
+      }
+      return res.ok
+    } catch (err) {
+      log.messaging.error('Failed to POST to Slack response_url', {
+        connectionId: this.connectionId,
+        error: String(err),
+      })
+      return false
     }
   }
 
@@ -904,6 +1133,36 @@ export class SlackChannel implements MessagingChannel {
         status: this.status,
       })
       return false
+    }
+
+    // Slash command path: post back to the channel where the command was
+    // invoked via the response_url. No DM is created; the user sees the
+    // answer in-channel along with their original `/fulcrum …` line.
+    // Meta-commands (/reset, /help, /info) post ephemerally to avoid noise.
+    const responseUrl = metadata?.slackResponseUrl as string | undefined
+    if (responseUrl) {
+      return await this.postViaResponseUrl(
+        responseUrl,
+        content,
+        metadata?.blocks as KnownBlock[] | undefined,
+        metadata?.slackEphemeral === true
+      )
+    }
+
+    // Channel post path: reply to @-mentions (with thread_ts) and per-event
+    // notifications (no thread, top-level channel post). The presence of
+    // slackChannelId alone is enough to trigger this path; slackThreadTs is
+    // optional and only used to land replies inside an existing thread.
+    const targetChannelId = metadata?.slackChannelId as string | undefined
+    const targetThreadTs = metadata?.slackThreadTs as string | undefined
+    if (targetChannelId) {
+      return await this.postToChannelThread(
+        targetChannelId,
+        targetThreadTs,
+        content,
+        metadata?.blocks as KnownBlock[] | undefined,
+        metadata?.filePath as string | undefined
+      )
     }
 
     try {

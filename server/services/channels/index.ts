@@ -233,12 +233,13 @@ async function sendViaWhatsApp(
 
 // Build Slack-specific metadata from options
 function buildSlackMetadata(
-  options?: { slackBlocks?: Array<Record<string, unknown>>; filePath?: string },
+  options?: { slackBlocks?: Array<Record<string, unknown>>; filePath?: string; slackChannelId?: string },
 ): Record<string, unknown> | undefined {
-  if (!options?.slackBlocks && !options?.filePath) return undefined
+  if (!options?.slackBlocks && !options?.filePath && !options?.slackChannelId) return undefined
   return {
     ...(options.slackBlocks && { blocks: options.slackBlocks }),
     ...(options.filePath && { filePath: options.filePath }),
+    ...(options.slackChannelId && { slackChannelId: options.slackChannelId }),
   }
 }
 
@@ -265,6 +266,12 @@ export async function sendMessageToChannel(
     filePath?: string
     /** D-7 PR 4: channel-native recipient id to override the auto-resolver. */
     to?: string
+    /**
+     * D-15 PR 3: post to a specific Slack channel id (e.g. "C0123ABC") instead of
+     * a user DM. The bot's sendMessage routes via chat.postMessage; no DM is opened.
+     * `to` is still required as a fallback but is ignored when this is set.
+     */
+    slackChannelId?: string
   }
 ): Promise<{ success: boolean; messageId?: string; error?: string }> {
   if (!body) {
@@ -272,7 +279,7 @@ export async function sendMessageToChannel(
   }
 
   const explicitTo = options?.to?.trim()
-  const resolvedTo = explicitTo || resolveRecipient(channel) || undefined
+  const resolvedTo = explicitTo || resolveRecipient(channel) || options?.slackChannelId
   if (!resolvedTo) {
     const channelName = channel.charAt(0).toUpperCase() + channel.slice(1)
     return { success: false, error: `No ${channelName} recipient found — no user has messaged via ${channelName} yet` }
