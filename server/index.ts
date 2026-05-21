@@ -12,6 +12,7 @@ import { pruneLegacyGithubPatFnoxKey } from './services/github-account-service'
 import { startPRMonitor, stopPRMonitor } from './services/pr-monitor'
 import { startMetricsCollector, stopMetricsCollector } from './services/metrics-collector'
 import { startGitWatcher, stopGitWatcher } from './services/git-watcher'
+import { startZAiRefresh, stopZAiRefresh } from './services/zai-refresh'
 import { startMessagingChannels, stopMessagingChannels } from './services/channels'
 import { startAssistantScheduler, stopAssistantScheduler } from './services/assistant-scheduler'
 import { startCaldavSync, stopCaldavSync } from './services/caldav'
@@ -196,6 +197,9 @@ startCaldavSync()
 // Start Google Calendar sync
 startGoogleCalendarSync()
 
+// Start z.ai model auto-refresh (poll every 24h, skip when disabled or no key)
+startZAiRefresh()
+
 // Graceful shutdown - detach PTYs but keep dtach sessions running for persistence
 process.on('SIGINT', async () => {
   log.server.info('Shutting down (terminals will persist)')
@@ -205,6 +209,7 @@ process.on('SIGINT', async () => {
   stopAssistantScheduler()
   stopCaldavSync()
   stopGoogleCalendarSync()
+  stopZAiRefresh()
   await stopMessagingChannels()
   ptyManager.detachAll()
   server.close()
@@ -219,6 +224,7 @@ process.on('SIGTERM', async () => {
   stopAssistantScheduler()
   stopCaldavSync()
   stopGoogleCalendarSync()
+  stopZAiRefresh()
   await stopMessagingChannels()
   ptyManager.detachAll()
   server.close()
