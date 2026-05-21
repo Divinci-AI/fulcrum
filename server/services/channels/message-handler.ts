@@ -201,16 +201,23 @@ export async function handleIncomingMessage(msg: IncomingMessage): Promise<void>
       ...(channelHistory.length > 0 && { channelHistory }),
     })
 
-    // For Slack DMs: try streaming the response incrementally via chat.postMessage + chat.update.
-    // Slash-command responses are posted via response_url (which can't be updated reliably),
-    // and channel @-mention responses go to a thread via chat.postMessage — both skip streaming
-    // and use the collect-then-send path for now (channel streaming is a future PR).
+    // For Slack: stream the response incrementally via chat.postMessage + chat.update.
+    // DMs and channel @-mention/thread followups both stream now (D-15 PR 7).
+    // Slash-command responses go via response_url which can't be updated reliably,
+    // so they keep the collect-then-send path.
     const isSlashCommand = msg.metadata?.isSlashCommand === true
     const isChannelMention = msg.metadata?.isChannelMention === true
-    if (isSlack && !isSlashCommand && !isChannelMention) {
+    if (isSlack && !isSlashCommand) {
       const slackChannel = activeChannels.get(msg.connectionId) as SlackChannel | undefined
       if (slackChannel && typeof slackChannel.streamResponse === 'function') {
-        const result = await slackChannel.streamResponse(msg.senderId, stream)
+        const target = isChannelMention
+          ? {
+              type: 'channel' as const,
+              channelId: msg.metadata!.slackChannelId as string,
+              threadTs: msg.metadata!.slackThreadTs as string,
+            }
+          : { type: 'dm' as const, userId: msg.senderId }
+        const result = await slackChannel.streamResponse(target, stream)
 
         // Mark channel history as synced
         if (channelHistory.length > 0) {
