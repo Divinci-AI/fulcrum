@@ -780,11 +780,17 @@ export class SlackChannel implements MessagingChannel {
    * Stream an AI response into Slack by posting on the first delta,
    * throttling chat.update calls, and doing a final Block Kit update.
    *
+   * `target` controls where the stream lands:
+   *  - `{ type: 'dm', userId }` opens a DM with the user (legacy DM path)
+   *  - `{ type: 'channel', channelId, threadTs }` posts directly to a
+   *    channel/thread without opening a DM (D-15 PR 7 — used for @-mention
+   *    replies and thread followups so streaming works in-channel)
+   *
    * Returns { streamed: true } on success, or { streamed: false, fullText }
    * to signal the caller should fall back to normal sendMessage.
    */
   async streamResponse(
-    recipientId: string,
+    target: { type: 'dm'; userId: string } | { type: 'channel'; channelId: string; threadTs?: string },
     stream: AsyncIterable<{ type: string; data: unknown }>,
   ): Promise<{ streamed: boolean; fullText: string; filePath?: string }> {
     if (!this.app || this.status !== 'connected') {
@@ -800,26 +806,32 @@ export class SlackChannel implements MessagingChannel {
       return { streamed: false, fullText }
     }
 
-    // Open DM channel once
+    // Resolve destination channel
     let channelId: string
-    try {
-      const conversation = await this.app.client.conversations.open({ users: recipientId })
-      channelId = conversation.channel?.id ?? ''
-      if (!channelId) throw new Error('No channel ID returned')
-    } catch (err) {
-      log.messaging.error('Failed to open Slack DM for streaming', {
-        connectionId: this.connectionId, to: recipientId, error: String(err),
-      })
-      // Drain stream
-      let fullText = ''
-      for await (const event of stream) {
-        if (event.type === 'content:delta') {
-          fullText += (event.data as { text: string }).text
-        } else if (event.type === 'message:complete') {
-          fullText = (event.data as { content: string }).content
+    let threadTs: string | undefined
+    if (target.type === 'channel') {
+      channelId = target.channelId
+      threadTs = target.threadTs
+    } else {
+      try {
+        const conversation = await this.app.client.conversations.open({ users: target.userId })
+        channelId = conversation.channel?.id ?? ''
+        if (!channelId) throw new Error('No channel ID returned')
+      } catch (err) {
+        log.messaging.error('Failed to open Slack DM for streaming', {
+          connectionId: this.connectionId, to: target.userId, error: String(err),
+        })
+        // Drain stream
+        let fullText = ''
+        for await (const event of stream) {
+          if (event.type === 'content:delta') {
+            fullText += (event.data as { text: string }).text
+          } else if (event.type === 'message:complete') {
+            fullText = (event.data as { content: string }).content
+          }
         }
+        return { streamed: false, fullText }
       }
-      return { streamed: false, fullText }
     }
 
     let messageTs: string | undefined  // Slack message timestamp (acts as message ID)
@@ -846,6 +858,7 @@ export class SlackChannel implements MessagingChannel {
               channel: channelId,
               text: accumulatedText + ' :writing_hand:',
               mrkdwn: true,
+              ...(threadTs && { thread_ts: threadTs }),
             })
             messageTs = result.ts
             lastUpdateAt = Date.now()
@@ -856,7 +869,8 @@ export class SlackChannel implements MessagingChannel {
             updateFailed = true
           }
         } else if (messageTs && !updateFailed) {
-          // Throttled update
+          // Throttled update (chat.update doesn't take thread_ts — the message
+          // identity is fixed by channel+ts which was set at post time)
           const now = Date.now()
           if (now - lastUpdateAt >= UPDATE_INTERVAL_MS) {
             try {
@@ -947,7 +961,7 @@ export class SlackChannel implements MessagingChannel {
       return { streamed: false, fullText: accumulatedText, filePath: parsed?.filePath }
     }
 
-    // Upload file if specified
+    // Upload file if specified (lands in the same thread if streaming was threaded)
     if (filePath && messageTs) {
       try {
         const fileData = readFileSync(filePath)
@@ -956,6 +970,7 @@ export class SlackChannel implements MessagingChannel {
           channel_id: channelId,
           file: fileData,
           filename,
+          ...(threadTs && { thread_ts: threadTs }),
         })
       } catch (err) {
         log.messaging.warn('Failed to upload file after streaming', {
@@ -966,7 +981,9 @@ export class SlackChannel implements MessagingChannel {
 
     log.messaging.info('Slack streaming response complete', {
       connectionId: this.connectionId,
-      to: recipientId,
+      target: target.type,
+      channelId,
+      threadTs,
       length: accumulatedText.length,
       hadBlocks: !!parsed?.blocks,
     })
