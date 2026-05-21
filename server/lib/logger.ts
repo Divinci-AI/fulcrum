@@ -168,4 +168,5 @@ export const log = {
   messaging: createLogger('Messaging'),
   claude: createLogger('Claude'),
   caldav: createLogger('CalDAV'),
+  og: createLogger('OG'),
 }
