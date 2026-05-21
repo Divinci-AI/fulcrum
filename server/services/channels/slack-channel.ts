@@ -71,6 +71,7 @@ export class SlackChannel implements MessagingChannel {
   private isShuttingDown = false
   private botToken: string | null = null
   private appToken: string | null = null
+  private botUserId: string | null = null  // U… id used to strip self-mentions from channel @-mentions
 
   /** How often to verify the connection is alive (ms) */
   private static HEALTH_CHECK_INTERVAL = 5 * 60 * 1000 // 5 minutes
@@ -125,10 +126,18 @@ export class SlackChannel implements MessagingChannel {
       // Note: app.message() handles all message events including DMs
       // We filter to only process direct messages (im channel type)
       this.app.message(async ({ message }) => {
-        // Only process DMs, ignore channel/group messages
+        // Only process DMs, ignore channel/group messages (channel mentions
+        // are handled separately via the app_mention event below).
         if ((message as Record<string, unknown>).channel_type === 'im') {
           await this.handleMessage(message)
         }
+      })
+
+      // Handle @-mentions of the bot in public/private channels.
+      // Replies are posted as threaded responses on the same channel,
+      // not as DMs, so the conversation stays where the team can see it.
+      this.app.event('app_mention', async ({ event }) => {
+        await this.handleAppMention(event as unknown as Record<string, unknown>)
       })
 
       // Start the app
@@ -139,6 +148,7 @@ export class SlackChannel implements MessagingChannel {
 
       // Get bot info
       const authTest = await this.app.client.auth.test()
+      this.botUserId = (authTest.user_id as string | undefined) ?? null
 
       log.messaging.info('Slack bot connected', {
         connectionId: this.connectionId,
@@ -474,6 +484,81 @@ export class SlackChannel implements MessagingChannel {
   }
 
   /**
+   * Handle an @-mention of the bot in a channel.
+   * The reply is posted as a threaded message on the same channel so the
+   * conversation stays in context for the team; per-thread session keying
+   * means a single thread is one continuous conversation with the assistant,
+   * even across multiple mentions.
+   */
+  private async handleAppMention(event: Record<string, unknown>): Promise<void> {
+    // Slack delivers app_mention for our own messages too if the bot
+    // self-references — drop those.
+    if (event.bot_id || event.subtype === 'bot_message') return
+
+    const userId = event.user as string | undefined
+    if (!userId) return
+
+    const rawText = (event.text as string | undefined) ?? ''
+    const channelId = event.channel as string | undefined
+    if (!channelId) return
+
+    // Slack guarantees thread_ts is the parent if we're in an existing thread;
+    // for a fresh top-level @-mention, use the event's own ts as the thread root
+    // so the assistant's reply starts a new thread under the user's message.
+    const threadTs = (event.thread_ts as string | undefined) ?? (event.ts as string)
+
+    // Strip the bot's own self-mention from the start of the text so the
+    // assistant doesn't see "<@U123> what's up" — just "what's up".
+    let content = rawText
+    if (this.botUserId) {
+      const selfMention = new RegExp(`<@${this.botUserId}>\\s*`, 'g')
+      content = content.replace(selfMention, '').trim()
+    }
+
+    // Resolve sender display name (best effort)
+    let senderName: string | undefined
+    try {
+      if (this.app) {
+        const userInfo = await this.app.client.users.info({ user: userId })
+        senderName = userInfo.user?.real_name || userInfo.user?.name
+      }
+    } catch {
+      // Non-fatal
+    }
+
+    log.messaging.info('Slack app_mention received', {
+      connectionId: this.connectionId,
+      from: userId,
+      channelId,
+      threadTs,
+      contentLength: content.length,
+    })
+
+    const incomingMessage: IncomingMessage = {
+      channelType: 'slack',
+      connectionId: this.connectionId,
+      senderId: userId,
+      senderName,
+      content,
+      timestamp: new Date(parseFloat(event.ts as string) * 1000),
+      metadata: {
+        isChannelMention: true,
+        slackChannelId: channelId,
+        slackThreadTs: threadTs,
+      },
+    }
+
+    try {
+      await this.events?.onMessage(incomingMessage)
+    } catch (err) {
+      log.messaging.error('Error processing Slack app_mention', {
+        connectionId: this.connectionId,
+        error: String(err),
+      })
+    }
+  }
+
+  /**
    * Handle slash command interactions.
    * The trigger command (e.g. "/fulcrum") and its text argument are forwarded as
    * the message content; the response is posted back via response_url so the
@@ -539,6 +624,83 @@ export class SlackChannel implements MessagingChannel {
         text: 'Sorry, something went wrong processing your command.',
         response_type: 'ephemeral',
       })
+    }
+  }
+
+  /**
+   * Post a reply to a Slack channel as a threaded message. Used to respond
+   * to @-mentions so the conversation stays where the team can see it.
+   */
+  private async postToChannelThread(
+    channelId: string,
+    threadTs: string,
+    content: string,
+    blocks?: KnownBlock[],
+    filePath?: string
+  ): Promise<boolean> {
+    if (!this.app) return false
+
+    try {
+      // Upload file first if provided (initial_comment carries the text)
+      if (filePath) {
+        try {
+          const fileData = readFileSync(filePath)
+          const filename = basename(filePath)
+          await this.app.client.files.uploadV2({
+            channel_id: channelId,
+            file: fileData,
+            filename,
+            thread_ts: threadTs,
+            initial_comment: content || undefined,
+          })
+          return true
+        } catch (fileErr) {
+          log.messaging.error('Failed to upload Slack file to thread', {
+            connectionId: this.connectionId,
+            channelId,
+            filePath,
+            error: String(fileErr),
+          })
+          // Fall through to text-only
+        }
+      }
+
+      // Split overly long content the same way the DM path does
+      const parts = content.length <= 4000 ? [content] : this.splitMessage(content, 4000)
+      for (let i = 0; i < parts.length; i++) {
+        const part = parts[i]
+        const options: ChatPostMessageArguments = {
+          channel: channelId,
+          thread_ts: threadTs,
+          text: part,
+        }
+        if (i === 0 && blocks) {
+          options.blocks = blocks
+        } else {
+          options.mrkdwn = true
+        }
+        await this.app.client.chat.postMessage(options)
+        if (parts.length > 1) {
+          await new Promise((resolve) => setTimeout(resolve, 100))
+        }
+      }
+
+      log.messaging.info('Slack channel reply sent', {
+        connectionId: this.connectionId,
+        channelId,
+        threadTs,
+        contentLength: content.length,
+        hasBlocks: !!blocks,
+      })
+      return true
+    } catch (err) {
+      log.messaging.error('Failed to post Slack channel reply', {
+        connectionId: this.connectionId,
+        channelId,
+        threadTs,
+        error: String(err),
+      })
+      return false
     }
   }
 
@@ -825,6 +987,19 @@ export class SlackChannel implements MessagingChannel {
         content,
         metadata?.blocks as KnownBlock[] | undefined,
         metadata?.slackEphemeral === true
+      )
+    }
+
+    // Channel @-mention path: reply in the same channel and thread.
+    const mentionChannelId = metadata?.slackChannelId as string | undefined
+    const mentionThreadTs = metadata?.slackThreadTs as string | undefined
+    if (mentionChannelId && mentionThreadTs) {
+      return await this.postToChannelThread(
+        mentionChannelId,
+        mentionThreadTs,
+        content,
+        metadata?.blocks as KnownBlock[] | undefined,
+        metadata?.filePath as string | undefined
       )
     }
 
