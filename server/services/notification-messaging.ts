@@ -9,13 +9,21 @@
  * notification has a `recipientUserId` and that user has registered an
  * id for this channel. Without it, the channel adapter falls back to
  * the legacy auto-resolved recipient.
+ *
+ * D-15 PR 3: optional `slackChannelId` routes the notification to a
+ * specific Slack channel (e.g. "C0123ABC") instead of a user DM. Takes
+ * precedence over `recipientChannelId` when both are provided.
  */
 import { sendMessageToChannel } from './channels'
 
 export async function sendNotificationViaMessaging(
   channel: 'whatsapp' | 'discord' | 'telegram' | 'slack',
   body: string,
-  recipientChannelId?: string
+  recipientChannelId?: string,
+  slackChannelId?: string
 ): Promise<{ success: boolean; error?: string }> {
-  return sendMessageToChannel(channel, body, { to: recipientChannelId })
+  return sendMessageToChannel(channel, body, {
+    to: recipientChannelId,
+    ...(slackChannelId && { slackChannelId }),
+  })
 }
