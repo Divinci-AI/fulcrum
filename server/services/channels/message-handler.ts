@@ -192,8 +192,11 @@ export async function handleIncomingMessage(msg: IncomingMessage): Promise<void>
       ...(channelHistory.length > 0 && { channelHistory }),
     })
 
-    // For Slack: try streaming the response incrementally via chat.postMessage + chat.update
-    if (isSlack) {
+    // For Slack DMs: try streaming the response incrementally via chat.postMessage + chat.update.
+    // Slash-command responses are posted via response_url (which can't be updated reliably),
+    // so we skip streaming for those and use the collect-then-send path.
+    const isSlashCommand = msg.metadata?.isSlashCommand === true
+    if (isSlack && !isSlashCommand) {
       const slackChannel = activeChannels.get(msg.connectionId) as SlackChannel | undefined
       if (slackChannel && typeof slackChannel.streamResponse === 'function') {
         const result = await slackChannel.streamResponse(msg.senderId, stream)
@@ -312,7 +315,7 @@ async function handleResetCommand(msg: IncomingMessage): Promise<void> {
         },
       },
     ]
-    await sendResponse(msg, 'Conversation reset!', { blocks })
+    await sendResponse(msg, 'Conversation reset!', { blocks, slackEphemeral: true })
     return
   }
 
@@ -360,7 +363,7 @@ async function handleHelpCommand(msg: IncomingMessage): Promise<void> {
         ],
       },
     ]
-    await sendResponse(msg, 'AI Assistant Help', { blocks })
+    await sendResponse(msg, 'AI Assistant Help', { blocks, slackEphemeral: true })
     return
   }
 
@@ -428,7 +431,7 @@ async function handleStatusCommand(msg: IncomingMessage): Promise<void> {
         ],
       },
     ]
-    await sendResponse(msg, 'Session Status', { blocks })
+    await sendResponse(msg, 'Session Status', { blocks, slackEphemeral: true })
     return
   }
 
