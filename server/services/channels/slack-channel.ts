@@ -6,9 +6,10 @@
 import { App, LogLevel, type SlashCommand, type RespondFn } from '@slack/bolt'
 import type { KnownBlock, ChatPostMessageArguments, View } from '@slack/web-api'
 import { eq, and, inArray, desc } from 'drizzle-orm'
+import { nanoid } from 'nanoid'
 import { readFileSync } from 'fs'
 import { basename } from 'path'
-import { db, messagingConnections, tasks } from '../../db'
+import { db, messagingConnections, slackReactions, tasks } from '../../db'
 import { log } from '../../lib/logger'
 import { getSettings } from '../../lib/settings'
 import { getUserIdForChannelIdentity } from '../channel-identity-service'
@@ -153,6 +154,16 @@ export class SlackChannel implements MessagingChannel {
       // not as DMs, so the conversation stays where the team can see it.
       this.app.event('app_mention', async ({ event }) => {
         await this.handleAppMention(event as unknown as Record<string, unknown>)
+      })
+
+      // D-15 PR 6: capture reactions on the bot's messages as a quality signal.
+      // We filter to only persist reactions where the reacted-to item author
+      // is this bot — everything else is unrelated team chatter.
+      this.app.event('reaction_added', async ({ event }) => {
+        await this.handleReactionEvent('added', event as unknown as Record<string, unknown>)
+      })
+      this.app.event('reaction_removed', async ({ event }) => {
+        await this.handleReactionEvent('removed', event as unknown as Record<string, unknown>)
       })
 
       // App Home tab: render a Fulcrum dashboard when a user opens the bot's
@@ -740,6 +751,59 @@ export class SlackChannel implements MessagingChannel {
     } catch (err) {
       log.messaging.error('Error processing Slack app_mention', {
         connectionId: this.connectionId,
+        error: String(err),
+      })
+    }
+  }
+
+  /**
+   * Capture a reaction_added / reaction_removed event. Only persisted when
+   * the reacted-to item is one of the bot's own messages — quality signal
+   * on assistant responses, not a general reaction archive.
+   */
+  private async handleReactionEvent(
+    action: 'added' | 'removed',
+    event: Record<string, unknown>
+  ): Promise<void> {
+    const reactor = event.user as string | undefined
+    const reaction = event.reaction as string | undefined
+    const itemUser = event.item_user as string | undefined
+    const item = event.item as { type?: string; channel?: string; ts?: string } | undefined
+
+    if (!reactor || !reaction || !item || item.type !== 'message' || !item.channel || !item.ts) {
+      return
+    }
+
+    // Only persist reactions on the bot's own messages
+    if (!this.botUserId || itemUser !== this.botUserId) {
+      return
+    }
+
+    try {
+      db.insert(slackReactions).values({
+        id: nanoid(),
+        connectionId: this.connectionId,
+        action,
+        reactorSlackUserId: reactor,
+        reaction,
+        itemTs: item.ts,
+        itemChannel: item.channel,
+        itemUser: itemUser ?? null,
+        createdAt: new Date().toISOString(),
+      }).run()
+
+      log.messaging.info('Slack reaction captured', {
+        connectionId: this.connectionId,
+        action,
+        reaction,
+        reactor,
+        itemTs: item.ts,
+      })
+    } catch (err) {
+      log.messaging.warn('Failed to persist Slack reaction', {
+        connectionId: this.connectionId,
+        action,
+        reaction,
         error: String(err),
       })
     }

@@ -893,6 +893,30 @@ export const emailSendEvents = sqliteTable('email_send_events', {
 export type EmailSendEvent = typeof emailSendEvents.$inferSelect
 export type NewEmailSendEvent = typeof emailSendEvents.$inferInsert
 
+// D-15 PR 6: Slack reactions on bot messages — captured as a quality
+// signal so we can later analyze which assistant responses got positive
+// vs negative feedback. Filtered at ingest to only persist reactions to
+// the bot's own messages (item_user === botUserId) — everything else is
+// just team chatter we have no business storing.
+export const slackReactions = sqliteTable('slack_reactions', {
+  id: text('id').primaryKey(),
+  connectionId: text('connection_id').notNull(),
+  // 'added' | 'removed' — both event types share this table
+  action: text('action').notNull(),
+  // Slack user_id of the person who clicked the reaction
+  reactorSlackUserId: text('reactor_slack_user_id').notNull(),
+  // Emoji name without colons (e.g. "+1", "thumbsdown", "tada")
+  reaction: text('reaction').notNull(),
+  // Slack ts of the item reacted to (the bot's message)
+  itemTs: text('item_ts').notNull(),
+  itemChannel: text('item_channel').notNull(),
+  // Author of the reacted-to message — always the bot per the ingest filter
+  itemUser: text('item_user'),
+  createdAt: text('created_at').notNull(),
+})
+export type SlackReaction = typeof slackReactions.$inferSelect
+export type NewSlackReaction = typeof slackReactions.$inferInsert
+
 export type GmailDraft = typeof gmailDrafts.$inferSelect
 export type NewGmailDraft = typeof gmailDrafts.$inferInsert
 export type User = typeof users.$inferSelect
