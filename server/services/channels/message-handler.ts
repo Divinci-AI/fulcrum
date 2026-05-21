@@ -144,14 +144,23 @@ export async function handleIncomingMessage(msg: IncomingMessage): Promise<void>
   }
 
   // Route to AI assistant
-  // For email, use threadId as session key (each email thread = separate conversation)
-  // For other channels, use senderId (each user = separate conversation)
+  // Session keying strategy:
+  //   - Email: threadId so each email thread is a separate conversation
+  //   - Slack channel @-mention: `${channelId}:${threadTs}` so a thread stays
+  //     one continuous conversation across multiple mentions, regardless of
+  //     which user mentioned the bot
+  //   - All other cases: senderId (per-user conversations)
   const emailThreadId = msg.channelType === 'email' ? (msg.metadata?.threadId as string) : undefined
+  const slackThreadKey =
+    msg.channelType === 'slack' && msg.metadata?.isChannelMention === true
+      ? `${msg.metadata?.slackChannelId as string}:${msg.metadata?.slackThreadTs as string}`
+      : undefined
+  const sessionKey = emailThreadId ?? slackThreadKey
   const { session } = getOrCreateSession(
     msg.connectionId,
     msg.senderId,
     msg.senderName,
-    emailThreadId,
+    sessionKey,
     msg.channelType
   )
 
@@ -194,9 +203,11 @@ export async function handleIncomingMessage(msg: IncomingMessage): Promise<void>
 
     // For Slack DMs: try streaming the response incrementally via chat.postMessage + chat.update.
     // Slash-command responses are posted via response_url (which can't be updated reliably),
-    // so we skip streaming for those and use the collect-then-send path.
+    // and channel @-mention responses go to a thread via chat.postMessage — both skip streaming
+    // and use the collect-then-send path for now (channel streaming is a future PR).
     const isSlashCommand = msg.metadata?.isSlashCommand === true
-    if (isSlack && !isSlashCommand) {
+    const isChannelMention = msg.metadata?.isChannelMention === true
+    if (isSlack && !isSlashCommand && !isChannelMention) {
       const slackChannel = activeChannels.get(msg.connectionId) as SlackChannel | undefined
       if (slackChannel && typeof slackChannel.streamResponse === 'function') {
         const result = await slackChannel.streamResponse(msg.senderId, stream)
