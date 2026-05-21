@@ -4,13 +4,14 @@
  */
 
 import { App, LogLevel, type SlashCommand, type RespondFn } from '@slack/bolt'
-import type { KnownBlock, ChatPostMessageArguments } from '@slack/web-api'
-import { eq } from 'drizzle-orm'
+import type { KnownBlock, ChatPostMessageArguments, View } from '@slack/web-api'
+import { eq, and, inArray, desc } from 'drizzle-orm'
 import { readFileSync } from 'fs'
 import { basename } from 'path'
-import { db, messagingConnections } from '../../db'
+import { db, messagingConnections, tasks } from '../../db'
 import { log } from '../../lib/logger'
 import { getSettings } from '../../lib/settings'
+import { getUserIdForChannelIdentity } from '../channel-identity-service'
 import type { AttachmentData } from '../../../shared/types'
 import type {
   MessagingChannel,
@@ -129,6 +130,17 @@ export class SlackChannel implements MessagingChannel {
         if ((message as Record<string, unknown>).channel_type === 'im') {
           await this.handleMessage(message)
         }
+      })
+
+      // App Home tab: render a Fulcrum dashboard when a user opens the bot's
+      // Home tab (Slack sidebar → Apps → Fulcrum → Home). Requires the
+      // manifest to enable app_home.home_tab_enabled and subscribe to the
+      // app_home_opened bot_event — both manifest-only changes; no scope
+      // additions, no reinstall.
+      this.app.event('app_home_opened', async ({ event }) => {
+        const ev = event as unknown as { user: string; tab?: string }
+        if (ev.tab && ev.tab !== 'home') return  // Ignore 'messages' tab opens
+        await this.publishHomeView(ev.user)
       })
 
       // Start the app
@@ -470,6 +482,150 @@ export class SlackChannel implements MessagingChannel {
       data: buffer.toString('base64'),
       filename: file.name,
       type,
+    }
+  }
+
+  /**
+   * Render and publish the App Home tab for a given Slack user. Looks up the
+   * Fulcrum user via channel_identity_mappings; when there's no mapping, the
+   * view becomes a "link your account" hint instead of a task list.
+   *
+   * Failures here are non-fatal — log and swallow; the user just sees the
+   * last published view (or the default "no Home view" Slack message).
+   */
+  private async publishHomeView(slackUserId: string): Promise<void> {
+    if (!this.app) return
+
+    try {
+      const fulcrumUserId = getUserIdForChannelIdentity('slack', slackUserId)
+
+      const baseUrl = getSettings().server.publicDomain
+        ? `https://${getSettings().server.publicDomain}`
+        : null
+
+      const blocks: KnownBlock[] = [
+        {
+          type: 'header',
+          text: { type: 'plain_text', text: 'Fulcrum', emoji: true },
+        },
+        {
+          type: 'context',
+          elements: [
+            { type: 'mrkdwn', text: '_The Vibe Engineer\'s Cockpit_' },
+          ],
+        },
+        { type: 'divider' },
+      ]
+
+      if (!fulcrumUserId) {
+        blocks.push(
+          {
+            type: 'section',
+            text: {
+              type: 'mrkdwn',
+              text:
+                ':link: *Link your Fulcrum account*\n\n' +
+                'Your Slack ID isn\'t mapped to a Fulcrum user yet, so I can\'t show your tasks here. ' +
+                'Head to Fulcrum → Settings → *My Channel Identities*, add Slack, and paste your Slack ' +
+                `member id \`${slackUserId}\`.`,
+            },
+          },
+          { type: 'divider' }
+        )
+      } else {
+        // Pull up to 10 of the user's open tasks, newest first
+        const userTasks = db
+          .select({
+            id: tasks.id,
+            title: tasks.title,
+            status: tasks.status,
+            updatedAt: tasks.updatedAt,
+          })
+          .from(tasks)
+          .where(
+            and(
+              eq(tasks.assigneeUserId, fulcrumUserId),
+              inArray(tasks.status, ['TO_DO', 'IN_PROGRESS'])
+            )
+          )
+          .orderBy(desc(tasks.updatedAt))
+          .limit(10)
+          .all()
+
+        if (userTasks.length === 0) {
+          blocks.push({
+            type: 'section',
+            text: {
+              type: 'mrkdwn',
+              text: ':white_check_mark: *Nothing on your plate.* No open tasks assigned to you.',
+            },
+          })
+        } else {
+          blocks.push({
+            type: 'section',
+            text: { type: 'mrkdwn', text: `*Your open tasks* (${userTasks.length})` },
+          })
+          for (const t of userTasks) {
+            const statusEmoji = t.status === 'IN_PROGRESS' ? ':construction:' : ':inbox_tray:'
+            const taskLink = baseUrl ? `<${baseUrl}/tasks?task=${t.id}|${t.title}>` : t.title
+            blocks.push({
+              type: 'section',
+              text: {
+                type: 'mrkdwn',
+                text: `${statusEmoji} ${taskLink}`,
+              },
+            })
+          }
+        }
+        blocks.push({ type: 'divider' })
+      }
+
+      // Always-on footer: quick commands + web link
+      blocks.push({
+        type: 'section',
+        text: {
+          type: 'mrkdwn',
+          text:
+            '*Quick commands* (in DM):\n' +
+            '• `/reset` — start a fresh conversation\n' +
+            '• `/help` — show available commands\n' +
+            '• `/info` — session status',
+        },
+      })
+      if (baseUrl) {
+        blocks.push({
+          type: 'context',
+          elements: [
+            {
+              type: 'mrkdwn',
+              text: `Open the cockpit → <${baseUrl}/tasks|${baseUrl.replace(/^https?:\/\//, '')}>`,
+            },
+          ],
+        })
+      }
+
+      const view: View = {
+        type: 'home',
+        blocks,
+      }
+
+      await this.app.client.views.publish({
+        user_id: slackUserId,
+        view,
+      })
+
+      log.messaging.info('Slack App Home view published', {
+        connectionId: this.connectionId,
+        slackUserId,
+        fulcrumUserId,
+        blockCount: blocks.length,
+      })
+    } catch (err) {
+      log.messaging.warn('Failed to publish Slack App Home view', {
+        connectionId: this.connectionId,
+        slackUserId,
+        error: String(err),
+      })
     }
   }
 
