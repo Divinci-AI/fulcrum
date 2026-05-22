@@ -1,7 +1,7 @@
-// @ts-nocheck — pre-existing type errors that surfaced when tsconfig.server.json was added in D-15 OG wrap-up. Remove this directive + fix the errors in a focused follow-up PR.
 import os from 'node:os'
 import fs from 'node:fs'
 import { execSync } from 'node:child_process'
+import type { Changes } from 'bun:sqlite'
 import { db } from '../db'
 import { systemMetrics } from '../db/schema'
 import { desc, lt } from 'drizzle-orm'
@@ -248,7 +248,7 @@ function collectMetrics(): void {
 
 function pruneOldMetrics(): void {
   const cutoff = Math.floor(Date.now() / 1000) - RETENTION_HOURS * 60 * 60 // 24 hours ago
-  const result = db.delete(systemMetrics).where(lt(systemMetrics.timestamp, cutoff)).run()
+  const result = db.delete(systemMetrics).where(lt(systemMetrics.timestamp, cutoff)).run() as unknown as Changes
 
   if (result.changes > 0) {
     log.metrics.debug('Pruned old metrics records', { count: result.changes })

@@ -1,4 +1,3 @@
-// @ts-nocheck — pre-existing type errors that surfaced when tsconfig.server.json was added in D-15 OG wrap-up. Remove this directive + fix the errors in a focused follow-up PR.
 /**
  * Gmail Service
  *
@@ -358,12 +357,19 @@ export async function listDrafts(
   for (const draft of drafts) {
     if (!draft.id) continue
 
-    const full = await gmail.users.drafts.get({
+    // Two SDK quirks force the casts here:
+    //   1. Params$Resource$Users$Drafts$Get is missing `metadataHeaders`
+    //      (the Gmail REST API accepts it, types are stale upstream).
+    //   2. drafts.get has callback overloads that return void, and TS
+    //      resolves the union to `void` when params don't strictly match
+    //      a single overload — so we narrow the awaited result here.
+    // Drop both casts when @types/googleapis catches up.
+    const full = (await gmail.users.drafts.get({
       userId: 'me',
       id: draft.id,
       format: 'metadata',
       metadataHeaders: ['To', 'Cc', 'Subject'],
-    })
+    } as unknown as Parameters<typeof gmail.users.drafts.get>[0])) as unknown as { data: gmail_v1.Schema$Draft }
 
     const headers = full.data.message?.payload?.headers ?? []
     const getHeader = (name: string) =>

@@ -1,4 +1,3 @@
-// @ts-nocheck — pre-existing type errors that surfaced when tsconfig.server.json was added in D-15 OG wrap-up. Remove this directive + fix the errors in a focused follow-up PR.
 import { Hono } from 'hono'
 import { nanoid } from 'nanoid'
 import { existsSync, rmSync } from 'node:fs'
@@ -1013,12 +1012,16 @@ app.post('/:id/create-app', async (c) => {
       const parsed = await parseComposeFile(repo.path, composeFile)
       servicesToCreate = parsed.services.map((svc) => ({
         serviceName: svc.name,
-        containerPort: svc.ports?.[0]?.container ?? null,
+        // `undefined` (not null) — the AppService type expects `number | undefined`.
+        containerPort: svc.ports?.[0]?.container ?? undefined,
         exposed: false,
       }))
     }
 
-    for (const svc of servicesToCreate) {
+    // After the if-block servicesToCreate is guaranteed defined (either the
+    // original non-empty array or the freshly-parsed one); the ! tells TS
+    // what it can't infer from the reassign-inside-condition pattern.
+    for (const svc of servicesToCreate!) {
       db.insert(appServices)
         .values({
           id: nanoid(),
@@ -1095,7 +1098,7 @@ app.delete('/:id/app', async (c) => {
 // Returns which repos have projects vs just repositories vs neither
 app.post('/scan', async (c) => {
   try {
-    const body = await c.req.json<{ directory?: string }>().catch(() => ({}))
+    const body = await c.req.json<{ directory?: string }>().catch((): { directory?: string } => ({}))
     const { existsSync, readdirSync } = await import('node:fs')
     const { join } = await import('node:path')
     const { getSettings, expandPath } = await import('../lib/settings')
