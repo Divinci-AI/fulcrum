@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 import {
   buildChatCompletionsUrl,
+  buildHermesBaseline,
   formatUserTurnWithHistory,
   parseOpenAISseStream,
 } from './hermes-chat-service'
@@ -50,6 +51,27 @@ describe('hermes-chat-service.buildChatCompletionsUrl', () => {
   test('malformed baseUrl falls back to bare-host convention without throwing', () => {
     // The fetch() in streamHermesMessage will surface the real error; the helper just doesn't crash
     expect(() => buildChatCompletionsUrl('not a url')).not.toThrow()
+  })
+})
+
+describe('hermes-chat-service.buildHermesBaseline', () => {
+  test('includes Fulcrum core identity + data model + no-tool disclaimer', () => {
+    const baseline = buildHermesBaseline()
+    // From getCoreIdentity()
+    expect(baseline).toContain("Fulcrum")
+    // From getDataModel()
+    expect(baseline).toContain('Tasks')
+    // The B8 capability note keeping Hermes honest about tool access
+    expect(baseline).toContain('Capability Note')
+    expect(baseline).toContain('do NOT have tool access')
+  })
+
+  test('does NOT mention tools the Claude path advertises (no false promises)', () => {
+    const baseline = buildHermesBaseline()
+    // These are tool names from getCondensedKnowledge() that Hermes can't call
+    expect(baseline).not.toContain('create-task')
+    expect(baseline).not.toContain('execute-command')
+    expect(baseline).not.toContain('Key tools available')
   })
 })
 
