@@ -466,6 +466,16 @@ export interface ProjectMentionedMessage {
   type: 'project:mentioned'
   payload: { projectId: string; mentionedUserId: string; authorEmail: string | null }
 }
+// D-13 PR 3 task-comments. Broadcast on create/delete so other open
+// sessions can refresh the comment list live.
+export interface TaskCommentAddedMessage {
+  type: 'task:comment-added'
+  payload: { taskId: string; commentId: string }
+}
+export interface TaskCommentDeletedMessage {
+  type: 'task:comment-deleted'
+  payload: { taskId: string; commentId: string }
+}
 
 export type ServerMessage =
   | TerminalCreatedMessage
@@ -496,3 +506,5 @@ export type ServerMessage =
   | TaskMentionedMessage
   | TaskAssignedMessage
   | ProjectMentionedMessage
+  | TaskCommentAddedMessage
+  | TaskCommentDeletedMessage

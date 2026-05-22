@@ -1,4 +1,3 @@
-// @ts-nocheck — pre-existing type errors that surfaced when tsconfig.server.json was added in D-15 OG wrap-up. Remove this directive + fix the errors in a focused follow-up PR.
 import { spawnSync } from 'node:child_process'
 import { mkdirSync, writeFileSync, existsSync, rmSync, readFileSync } from 'node:fs'
 import { homedir } from 'node:os'
@@ -8,13 +7,13 @@ import { CliError, ExitCodes } from '../utils/errors'
 import { globalArgs } from './shared'
 
 // Plugin bundle: import all files as text using Bun
-// @ts-expect-error - Bun text import
+// Bun text import for the four JSON files — TS now recognizes the
+// `with { type: 'text' }` assertion on .json modules (returns string),
+// so the previous @ts-expect-error directives became "unused" and were
+// removed. The .md imports below still need them — no .md ambient type.
 import MARKETPLACE_JSON from '../../../plugins/fulcrum/.claude-plugin/marketplace.json' with { type: 'text' }
-// @ts-expect-error - Bun text import
 import PLUGIN_JSON from '../../../plugins/fulcrum/.claude-plugin/plugin.json' with { type: 'text' }
-// @ts-expect-error - Bun text import
 import HOOKS_JSON from '../../../plugins/fulcrum/hooks/hooks.json' with { type: 'text' }
-// @ts-expect-error - Bun text import
 import MCP_JSON from '../../../plugins/fulcrum/.mcp.json' with { type: 'text' }
 // @ts-expect-error - Bun text import
 import CMD_PR from '../../../plugins/fulcrum/commands/pr.md' with { type: 'text' }
@@ -53,7 +52,10 @@ function runClaude(args: string[]): { success: boolean; output: string } {
 
 function getBundledVersion(): string {
   try {
-    const parsed = JSON.parse(MARKETPLACE_JSON)
+    // TS sees the `with { type: 'text' }` import as parsed JSON despite the
+    // assertion; cast to string for JSON.parse. At runtime Bun returns the
+    // raw text, so JSON.parse works.
+    const parsed = JSON.parse(MARKETPLACE_JSON as unknown as string)
     return parsed.plugins?.[0]?.version || '1.0.0'
   } catch {
     return '1.0.0'
