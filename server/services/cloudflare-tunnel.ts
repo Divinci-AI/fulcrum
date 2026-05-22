@@ -1,4 +1,3 @@
-// @ts-nocheck — pre-existing type errors that surfaced when tsconfig.server.json was added in D-15 OG wrap-up. Remove this directive + fix the errors in a focused follow-up PR.
 import Cloudflare from 'cloudflare'
 import { getSettings } from '../lib/settings'
 import { log } from '../lib/logger'
@@ -184,21 +183,24 @@ export async function createTunnelCname(
     const fullName = subdomain ? `${subdomain}.${domain}` : domain
     const cnameTarget = `${tunnelId}.cfargotunnel.com`
 
-    // Check if CNAME record already exists
+    // Check if CNAME record already exists. The CF SDK changed `name` on
+    // list from a bare string to a Name-filter object — use `exact`.
     const existing = await ctx.client.dns.records.list({
       zone_id: zoneId,
       type: 'CNAME',
-      name: fullName,
+      name: { exact: fullName },
     })
 
     if (existing.result?.length) {
-      // Update existing record
+      // Update existing record. CNAMERecord create/update params require
+      // `ttl` (1 = automatic) since SDK 5.x.
       const recordId = existing.result[0].id
       await ctx.client.dns.records.update(recordId, {
         zone_id: zoneId,
         type: 'CNAME',
         name: fullName,
         content: cnameTarget,
+        ttl: 1,
         proxied: true, // Must be proxied for tunnels
       })
       log.deploy.info('Updated tunnel CNAME', { fullName, cnameTarget })
@@ -209,6 +211,7 @@ export async function createTunnelCname(
         type: 'CNAME',
         name: fullName,
         content: cnameTarget,
+        ttl: 1,
         proxied: true,
       })
       log.deploy.info('Created tunnel CNAME', { fullName, cnameTarget })
