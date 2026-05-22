@@ -14,7 +14,10 @@ import { db, chatMessages } from '../db'
 import { eq, sql } from 'drizzle-orm'
 import { log } from '../lib/logger'
 import { getSettings } from '../lib/settings'
+import { getInstanceContext } from '../lib/settings/paths'
 import { addMessage } from './assistant-service'
+import { getObserverKnowledge } from './assistant-knowledge'
+import { readMemoryFile } from './memory-file-service'
 import type { ChannelHistoryMessage } from './channels/message-storage'
 import type { AttachmentData } from '../../shared/types'
 
@@ -126,10 +129,16 @@ export async function* streamHermesMessage(
   const userText = formatUserTurnWithHistory(userMessage, options.channelHistory)
   userBlocks.push({ type: 'text', text: userText || '(no text)' })
 
+  // D-16 B8: prepend a Hermes-appropriate baseline system prompt so the
+  // assistant knows what Fulcrum is and what it can/can't do. Uses the
+  // observer-knowledge bundle (CoreIdentity + DataModel, no tool descriptions)
+  // so the model doesn't pretend it can call tools it doesn't have access to.
   const messages: ChatMessage[] = []
-  if (options.systemPromptAdditions) {
-    messages.push({ role: 'system', content: options.systemPromptAdditions })
-  }
+  const baseline = buildHermesBaseline()
+  const fullSystem = options.systemPromptAdditions
+    ? `${baseline}\n\n${options.systemPromptAdditions}`
+    : baseline
+  messages.push({ role: 'system', content: fullSystem })
   for (const m of history) {
     messages.push({ role: m.role as 'user' | 'assistant', content: m.content })
   }
@@ -213,6 +222,43 @@ export async function* streamHermesMessage(
   })
 
   yield { type: 'done', data: { content: assembled } }
+}
+
+/**
+ * Build the baseline system prompt that's always present in a Hermes chat.
+ *
+ * Composed of:
+ *   - Instance context (documents dir, hostname, etc.)
+ *   - Observer-tier knowledge: CoreIdentity ("you are Fulcrum's assistant") +
+ *     DataModel ("tasks, projects, repositories, …"). NO tool descriptions —
+ *     Hermes doesn't have MCP / Claude Code tool surface today (B2 follow-up).
+ *   - The master memory file content (MEMORY.md) injected verbatim, matching
+ *     the Claude path's behavior so persistent user prefs / project context
+ *     flow into Hermes too.
+ *   - A short "you don't have tool access today" disclaimer so the model
+ *     describes what's possible rather than hallucinating tool calls.
+ *
+ * Exported for unit testing.
+ */
+export function buildHermesBaseline(): string {
+  const settings = getSettings()
+  const instanceContext = getInstanceContext(settings.assistant.documentsDir)
+  const knowledge = getObserverKnowledge()
+  const memoryFileContent = readMemoryFile()
+
+  const memorySection = memoryFileContent.trim()
+    ? `\n\n## Master Memory File
+
+This is your persistent memory (MEMORY.md), injected into every conversation.
+
+${memoryFileContent}`
+    : ''
+
+  const toolDisclaimer = `\n\n## Capability Note
+
+You're running on the Hermes provider, which routes to an OpenAI-compatible chat endpoint. You can read context (recent channel activity, the memory file, the user's message) and answer in natural language — but you do NOT have tool access today. If the user asks you to create a task, send a notification, or modify state, describe what they should do (which UI panel, which command) rather than claiming you can act. Tool support is planned for a follow-up release.`
+
+  return `${instanceContext}\n\n${knowledge}${memorySection}${toolDisclaimer}`
 }
 
 /**
