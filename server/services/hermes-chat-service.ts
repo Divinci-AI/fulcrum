@@ -14,6 +14,7 @@ import { db, chatMessages } from '../db'
 import { eq, sql } from 'drizzle-orm'
 import { log } from '../lib/logger'
 import { getSettings } from '../lib/settings'
+import { addMessage } from './assistant-service'
 import type { AttachmentData } from '../../shared/types'
 
 /** OpenAI-compatible chat message shape, including vision content blocks. */
@@ -130,15 +131,11 @@ export async function* streamHermesMessage(
     content: onlyTextBlock ? onlyTextBlock.text : userBlocks,
   })
 
-  // Persist the user turn (unless ephemeral). Mirrors the Claude/OpenCode paths.
+  // Persist the user turn (unless ephemeral). Goes through assistant-service.addMessage
+  // so chatSessions.messageCount / lastMessageAt / updatedAt stay current — matters for
+  // session-list sorting and the WS broadcast.
   if (!options.ephemeral) {
-    db.insert(chatMessages).values({
-      id: crypto.randomUUID(),
-      sessionId,
-      role: 'user',
-      content: userMessage,
-      createdAt: new Date().toISOString(),
-    }).run()
+    addMessage(sessionId, { sessionId, role: 'user', content: userMessage })
   }
 
   const url = buildChatCompletionsUrl(cfg.baseUrl)
@@ -178,20 +175,23 @@ export async function* streamHermesMessage(
     }
   } catch (err) {
     log.chat.error('Hermes stream parse failed', { error: String(err) })
-    yield { type: 'error', data: { message: `Hermes stream parse failed: ${err instanceof Error ? err.message : String(err)}` } }
+    // Yield message:complete *before* error so Slack's streamResponse finalizes the
+    // partial bubble (removing the :writing_hand: emoji) instead of leaving it hanging.
+    yield {
+      type: 'message:complete',
+      data: { content: assembled ? `${assembled}\n\n_(stream interrupted)_` : '' },
+    }
+    yield {
+      type: 'error',
+      data: { message: `Hermes stream parse failed: ${err instanceof Error ? err.message : String(err)}` },
+    }
     return
   }
 
   yield { type: 'message:complete', data: { content: assembled } }
 
   if (!options.ephemeral && assembled.trim()) {
-    db.insert(chatMessages).values({
-      id: crypto.randomUUID(),
-      sessionId,
-      role: 'assistant',
-      content: assembled,
-      createdAt: new Date().toISOString(),
-    }).run()
+    addMessage(sessionId, { sessionId, role: 'assistant', content: assembled })
   }
 
   log.chat.info('Hermes chat complete', {

@@ -36,7 +36,7 @@ import { Folder01Icon } from '@hugeicons/core-free-icons'
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
 import { useBranches, checkIsGitRepo } from '@/hooks/use-filesystem'
 import { useWorktreeBasePath, useDefaultGitReposDir, useDefaultAgent, useOpencodeModel } from '@/hooks/use-config'
-import { AGENT_DISPLAY_NAMES, type AgentType } from '@/types'
+import { AGENT_DISPLAY_NAMES, WORKTREE_AGENT_TYPES, type AgentType } from '@/types'
 import { useRepositories } from '@/hooks/use-repositories'
 import { useProjects } from '@/hooks/use-projects'
 import { FilesystemBrowser } from '@/components/ui/filesystem-browser'
@@ -350,7 +350,7 @@ export function InitializeWorktreeTaskModal({ task, open, onOpenChange }: Initia
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    {(Object.keys(AGENT_DISPLAY_NAMES) as AgentType[]).map((agentType) => (
+                    {WORKTREE_AGENT_TYPES.map((agentType) => (
                       <SelectItem key={agentType} value={agentType}>
                         {AGENT_DISPLAY_NAMES[agentType]}
                       </SelectItem>

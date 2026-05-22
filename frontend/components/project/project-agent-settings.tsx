@@ -17,7 +17,7 @@ import {
 } from '@/components/ui/select'
 import { HugeiconsIcon } from '@hugeicons/react'
 import { ArrowRight01Icon, ArrowDown01Icon, Tick02Icon } from '@hugeicons/core-free-icons'
-import { AGENT_DISPLAY_NAMES, type AgentType, type ProjectWithDetails } from '@/types'
+import { AGENT_DISPLAY_NAMES, WORKTREE_AGENT_TYPES, type AgentType, type ProjectWithDetails } from '@/types'
 import { Textarea } from '@/components/ui/textarea'
 import { AgentOptionsEditor } from '@/components/repositories/agent-options-editor'
 import { ModelPicker } from '@/components/opencode/model-picker'
@@ -177,7 +177,7 @@ export function ProjectAgentSettings({ project }: ProjectAgentSettingsProps) {
                     <SelectItem value="inherit">
                       {t('agentSettings.useGlobalDefault')}
                     </SelectItem>
-                    {(Object.keys(AGENT_DISPLAY_NAMES) as AgentType[]).map((agentType) => (
+                    {WORKTREE_AGENT_TYPES.map((agentType) => (
                       <SelectItem key={agentType} value={agentType}>
                         {AGENT_DISPLAY_NAMES[agentType]}
                       </SelectItem>
