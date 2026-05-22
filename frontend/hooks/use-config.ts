@@ -1,4 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { toast } from 'sonner'
 import { fetchJSON } from '@/lib/api'
 export { CONFIG_KEYS } from '@shared/config-keys'
 import { CONFIG_KEYS } from '@shared/config-keys'
@@ -482,6 +483,13 @@ export function useUpdateConfig() {
       }),
     onSuccess: (_, { key }) => {
       queryClient.invalidateQueries({ queryKey: ['config', key] })
+    },
+    // D-16 followup: per-mutation error toast. The PUT /api/config/:key route
+    // returns 400 "Unknown or read-only config key" for any path not in
+    // VALID_SETTING_PATHS — without this, the failure was silent and the
+    // operator walked away thinking their save worked.
+    onError: (err: Error, { key }) => {
+      toast.error(`Failed to save ${key}: ${err.message}`)
     },
   })
 }

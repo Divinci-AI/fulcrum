@@ -1008,6 +1008,12 @@ function SettingsPage() {
     await Promise.all(promises)
     setSaved(true)
     setTimeout(() => setSaved(false), 2000)
+    // D-16 followup: explicit save confirmation. The "Saved" pill is subtle and
+    // operators have walked away thinking nothing happened. Individual failures
+    // are surfaced as their own error toasts by useUpdateConfig's onError.
+    if (promises.length > 0) {
+      toast.success(`Settings saved (${promises.length} ${promises.length === 1 ? 'change' : 'changes'})`)
+    }
   }
 
   const handleResetPort = () => {
