@@ -375,6 +375,13 @@ export const VALID_SETTING_PATHS = new Set([
   'assistant.morningRitual.prompt',
   'assistant.eveningRitual.time',
   'assistant.eveningRitual.prompt',
+  // D-16 PR 1: Hermes provider config. Without these in VALID_SETTING_PATHS,
+  // PUT /api/config/assistant.hermes.* silently 400s ("Unknown or read-only
+  // config key") and the save UI shows no error — operators see nothing
+  // happen when they click Save.
+  'assistant.hermes.baseUrl',
+  'assistant.hermes.apiKey',
+  'assistant.hermes.model',
   'channels.email.enabled',
   'channels.email.backend',
   'channels.email.googleAccountId',
