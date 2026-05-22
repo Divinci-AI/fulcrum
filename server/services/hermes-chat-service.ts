@@ -59,6 +59,14 @@ export interface StreamHermesOptions {
    * the Claude path's channelHistory option.
    */
   channelHistory?: ChannelHistoryMessage[]
+  /**
+   * D-16 B2b: security tier scopes the available tool set. 'observer' = no
+   * tools (Hermes just observes channel chatter, no mutations). 'trusted' =
+   * full HERMES_TOOLS (default). Mirrors the Claude path's securityTier
+   * concept where observer mode runs through `/mcp/observer` with a
+   * restricted scope.
+   */
+  securityTier?: 'observer' | 'trusted'
 }
 
 /**
@@ -167,29 +175,35 @@ export async function* streamHermesMessage(
 
   const url = buildChatCompletionsUrl(cfg.baseUrl)
 
-  // D-16 B2a: tool-call loop. We run up to MAX_TOOL_ITERATIONS rounds:
-  //   1. Send the current message stack with `tools: HERMES_TOOLS`
-  //   2. If the model returns `tool_calls`, execute each, append the
-  //      assistant tool-call turn + tool result messages, loop again
-  //   3. When the model returns a content-only response, that's the final
-  //      answer — chunk it into content:delta events for streaming-consumer
-  //      compatibility (true streaming-with-tools is B2b)
+  // D-16 B2b: streaming tool-call loop. Each iteration sends a streaming
+  // request, accumulates content + tool_call deltas from the SSE stream,
+  // and decides at finish_reason whether to execute tools (and loop) or
+  // emit the buffered content as the final answer.
+  //
+  // Why we buffer content rather than yield it during the stream: interstitial
+  // iterations may emit preamble text ("Sure, let me check…") before the
+  // tool_calls arrive. Yielding those would pollute the Slack bubble — which
+  // accumulates content via chat.update — with the model's pre-tool reasoning.
+  // Instead we hold content until we know finish_reason !== 'tool_calls', then
+  // emit it as content:delta chunks for streaming consumers.
   const MAX_TOOL_ITERATIONS = 5
+  // Observer tier gets no tools — pure-chat observation with no mutation surface.
+  const toolsForCall = options.securityTier === 'observer' ? [] : HERMES_TOOLS
   let finalContent = ''
   let lastError: string | null = null
 
   for (let iter = 0; iter < MAX_TOOL_ITERATIONS; iter++) {
     let response: Response
     try {
+      const requestBody: Record<string, unknown> = { model, messages, stream: true }
+      if (toolsForCall.length > 0) requestBody.tools = toolsForCall
       response = await fetch(url, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${cfg.apiKey}`,
         },
-        // stream:false during the tool loop so we get a single JSON response
-        // with tool_calls cleanly. B2b will lift this to streaming.
-        body: JSON.stringify({ model, messages, tools: HERMES_TOOLS, stream: false }),
+        body: JSON.stringify(requestBody),
       })
     } catch (err) {
       log.chat.error('Hermes fetch failed', { url, iter, error: String(err) })
@@ -197,36 +211,51 @@ export async function* streamHermesMessage(
       break
     }
 
-    if (!response.ok) {
+    if (!response.ok || !response.body) {
       const detail = await response.text().catch(() => '')
       log.chat.error('Hermes responded non-ok', { status: response.status, iter, detail: detail.slice(0, 500) })
       lastError = `Hermes returned ${response.status}: ${detail.slice(0, 200) || response.statusText}`
       break
     }
 
-    let body: HermesNonStreamResponse
+    // Accumulate streamed events for this iteration. tool_calls stream
+    // field-by-field across chunks, identified by `index`.
+    let contentBuffer = ''
+    const toolCallSlots = new Map<number, OpenAIToolCall>()
+    let finishReason: string | null = null
+
     try {
-      body = (await response.json()) as HermesNonStreamResponse
+      for await (const ev of parseOpenAISseStream(response.body)) {
+        if (ev.type === 'content') {
+          contentBuffer += ev.text
+        } else if (ev.type === 'tool_call') {
+          const slot =
+            toolCallSlots.get(ev.index) ??
+            ({ id: '', type: 'function' as const, function: { name: '', arguments: '' } } as OpenAIToolCall)
+          if (ev.id) slot.id = ev.id
+          if (ev.name) slot.function.name = ev.name
+          if (ev.argsDelta) slot.function.arguments += ev.argsDelta
+          toolCallSlots.set(ev.index, slot)
+        } else if (ev.type === 'finish') {
+          finishReason = ev.reason
+        }
+      }
     } catch (err) {
-      lastError = `Hermes response not JSON: ${err instanceof Error ? err.message : String(err)}`
+      log.chat.error('Hermes stream parse failed', { iter, error: String(err) })
+      lastError = `Hermes stream parse failed: ${err instanceof Error ? err.message : String(err)}`
       break
     }
 
-    const choice = body.choices?.[0]
-    if (!choice) {
-      lastError = 'Hermes returned no choices'
-      break
-    }
-
-    const toolCalls = choice.message?.tool_calls
-    if (toolCalls && toolCalls.length > 0) {
-      // Push the assistant's tool-call turn into the conversation
+    // If the model decided to call tools, execute and loop. Note: we check
+    // BOTH finishReason === 'tool_calls' AND toolCallSlots.size — some
+    // providers don't always set finish_reason cleanly when streaming.
+    if (toolCallSlots.size > 0 && (finishReason === 'tool_calls' || finishReason === null)) {
+      const toolCalls = [...toolCallSlots.values()]
       messages.push({
         role: 'assistant',
-        content: choice.message?.content ?? null,
+        content: contentBuffer || null,
         tool_calls: toolCalls,
       })
-      // Execute each tool call and append the result message
       for (const call of toolCalls) {
         const result = await executeToolCall(call)
         messages.push({
@@ -244,8 +273,8 @@ export async function* streamHermesMessage(
       continue
     }
 
-    // No tool_calls: this is the final assistant message
-    finalContent = choice.message?.content ?? ''
+    // No tool_calls (or finish_reason='stop'): this is the final answer.
+    finalContent = contentBuffer
     break
   }
 
@@ -277,22 +306,11 @@ export async function* streamHermesMessage(
   yield { type: 'done', data: { content: finalContent } }
 }
 
-/** Shape of the non-streaming chat-completions response (the subset we care about). */
-interface HermesNonStreamResponse {
-  choices?: Array<{
-    message?: {
-      role?: string
-      content?: string | null
-      tool_calls?: OpenAIToolCall[]
-    }
-    finish_reason?: string
-  }>
-}
-
 /**
  * Split a string into chunks of up to `size` characters, prefer breaking at
- * whitespace where possible. Used to fake streaming for downstream Slack
- * consumers when the underlying call was non-streaming (B2a tool loop).
+ * whitespace where possible. Used to emit content:delta events from the
+ * final-iteration content buffer (the streaming loop holds content during
+ * tool iterations to avoid polluting Slack bubbles with model preamble).
  */
 function chunkText(text: string, size: number): string[] {
   if (!text) return []
@@ -413,16 +431,32 @@ function getSessionHistoryForHermes(sessionId: string): Array<{ role: string; co
 }
 
 /**
- * Parse an OpenAI-style SSE stream and yield content deltas.
- * Each SSE chunk is `data: {…JSON…}\n\n`; the terminating message is
- * `data: [DONE]\n\n`. We only surface the assistant content tokens.
+ * Rich SSE-stream event. D-16 B2b — replaces the content-only generator
+ * with a typed union so callers can react to tool_calls and finish_reason
+ * separately. The B2a non-streaming tool loop is gone; streamHermesMessage
+ * now consumes this directly.
+ */
+export type StreamEvent =
+  | { type: 'content'; text: string }
+  | {
+      type: 'tool_call'
+      index: number
+      id?: string
+      name?: string
+      argsDelta?: string
+    }
+  | { type: 'finish'; reason: string | null }
+
+/**
+ * Parse an OpenAI-style SSE stream and yield typed events for content
+ * deltas, tool_call deltas (which OpenAI streams field-by-field across
+ * chunks, identified by `index`), and finish markers.
  *
- * Exported for direct unit testing — the wrapper above ties the parser to
- * the fetched Response body.
+ * Exported for direct unit testing.
  */
 export async function* parseOpenAISseStream(
   body: ReadableStream<Uint8Array>,
-): AsyncGenerator<string> {
+): AsyncGenerator<StreamEvent> {
   const reader = body.getReader()
   const decoder = new TextDecoder()
   let buffer = ''
@@ -430,19 +464,15 @@ export async function* parseOpenAISseStream(
     const { value, done } = await reader.read()
     if (done) break
     buffer += decoder.decode(value, { stream: true })
-    // OpenAI uses `\n\n` between SSE events; some servers use `\r\n\r\n`.
     let sep: number
     while ((sep = findEventBoundary(buffer)) >= 0) {
       const eventText = buffer.slice(0, sep)
       buffer = buffer.slice(sep).replace(/^(\r?\n){2}/, '')
-      const delta = extractContentFromEvent(eventText)
-      if (delta) yield delta
+      yield* extractEventsFromSse(eventText)
     }
   }
-  // Flush any trailing partial event (best-effort)
   if (buffer.trim()) {
-    const delta = extractContentFromEvent(buffer)
-    if (delta) yield delta
+    yield* extractEventsFromSse(buffer)
   }
 }
 
@@ -454,23 +484,73 @@ function findEventBoundary(buf: string): number {
   return Math.min(a, b)
 }
 
-function extractContentFromEvent(eventText: string): string | null {
-  // Each event is a sequence of `field: value` lines; we only care about `data:`
+/**
+ * Yields a sequence of StreamEvents for a single SSE block. A single block
+ * can contain content, multiple tool_call slices (one per index), and/or
+ * a finish_reason.
+ */
+function* extractEventsFromSse(eventText: string): Generator<StreamEvent> {
   for (const line of eventText.split(/\r?\n/)) {
     if (!line.startsWith('data:')) continue
     const payload = line.slice(5).trim()
     if (!payload || payload === '[DONE]') continue
+    let obj: SseDataPayload
     try {
-      const obj = JSON.parse(payload) as {
-        choices?: Array<{ delta?: { content?: string }; message?: { content?: string } }>
-      }
-      // Streaming chunk: choices[0].delta.content. Non-streaming fallback: message.content.
-      const c = obj.choices?.[0]
-      const text = c?.delta?.content ?? c?.message?.content
-      if (typeof text === 'string') return text
+      obj = JSON.parse(payload) as SseDataPayload
     } catch {
-      // Ignore lines that aren't valid JSON (e.g. comments, keepalives)
+      continue
+    }
+    const choice = obj.choices?.[0]
+    if (!choice) continue
+
+    // Content (streaming delta or non-streaming message.content fallback)
+    const contentText = choice.delta?.content ?? choice.message?.content
+    if (typeof contentText === 'string' && contentText.length > 0) {
+      yield { type: 'content', text: contentText }
+    }
+
+    // Tool call deltas — streaming spec: choices[0].delta.tool_calls[].{id?, function.{name?, arguments?}}
+    const toolCallDeltas = choice.delta?.tool_calls ?? choice.message?.tool_calls
+    if (Array.isArray(toolCallDeltas)) {
+      for (const tc of toolCallDeltas) {
+        const out: Extract<StreamEvent, { type: 'tool_call' }> = {
+          type: 'tool_call',
+          index: typeof tc.index === 'number' ? tc.index : 0,
+        }
+        if (tc.id) out.id = tc.id
+        if (tc.function?.name) out.name = tc.function.name
+        if (typeof tc.function?.arguments === 'string') out.argsDelta = tc.function.arguments
+        yield out
+      }
+    }
+
+    // Finish marker
+    if (choice.finish_reason) {
+      yield { type: 'finish', reason: choice.finish_reason }
     }
   }
-  return null
+}
+
+interface SseDataPayload {
+  choices?: Array<{
+    delta?: {
+      content?: string
+      tool_calls?: Array<{
+        index?: number
+        id?: string
+        type?: string
+        function?: { name?: string; arguments?: string }
+      }>
+    }
+    message?: {
+      content?: string
+      tool_calls?: Array<{
+        index?: number
+        id?: string
+        type?: string
+        function?: { name?: string; arguments?: string }
+      }>
+    }
+    finish_reason?: string | null
+  }>
 }
