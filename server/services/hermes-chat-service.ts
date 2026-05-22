@@ -321,27 +321,48 @@ export async function* streamHermesMessage(
     return
   }
 
+  // D-16 followup: when the model returns nothing (no content, no tool_calls,
+  // some providers do this under safety filters / token-limit truncation /
+  // when overwhelmed by tool defs / format-handshake bugs), surface a fallback
+  // so the user gets something instead of dead silence. The downstream Slack
+  // consumer's "Sorry, I ran into an issue" path only fires when at least one
+  // content:delta was yielded — so for zero-content responses we yield the
+  // fallback ourselves and log a warn for diagnostics.
+  let outboundContent = finalContent
+  if (!finalContent.trim()) {
+    log.chat.warn('Hermes returned empty response — emitting fallback', {
+      sessionId,
+      model,
+      messageCount: messages.length,
+      hint: 'Common causes: safety filter, prompt-too-large, model confused by tool defs, or provider tool_call format mismatch',
+    })
+    outboundContent =
+      "I couldn't generate a response just now. The model returned no content — try rephrasing, asking something more specific, or splitting the request into smaller asks."
+  }
+
   // Chunk the final content into content:delta events for downstream
   // streaming consumers (Slack chat.update path). Each chunk is ~80 chars
   // which gives a "watch it appear" feel without spamming Slack's rate limit.
-  for (const chunk of chunkText(finalContent, 80)) {
+  for (const chunk of chunkText(outboundContent, 80)) {
     yield { type: 'content:delta', data: { text: chunk } }
   }
 
-  yield { type: 'message:complete', data: { content: finalContent } }
+  yield { type: 'message:complete', data: { content: outboundContent } }
 
-  if (!options.ephemeral && finalContent.trim()) {
-    addMessage(sessionId, { sessionId, role: 'assistant', content: finalContent })
+  if (!options.ephemeral && outboundContent.trim()) {
+    addMessage(sessionId, { sessionId, role: 'assistant', content: outboundContent })
   }
 
   log.chat.info('Hermes chat complete', {
     sessionId,
     model,
-    length: finalContent.length,
+    length: outboundContent.length,
+    originalLength: finalContent.length,
     messageCount: messages.length,
+    fallbackEmitted: !finalContent.trim(),
   })
 
-  yield { type: 'done', data: { content: finalContent } }
+  yield { type: 'done', data: { content: outboundContent } }
 }
 
 /**
