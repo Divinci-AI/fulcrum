@@ -22,6 +22,8 @@
 import { and, desc, eq, inArray, like, type SQL } from 'drizzle-orm'
 import { db, tasks } from '../db'
 import { log } from '../lib/logger'
+import { search } from './search-service'
+import { searchMemories, storeMemory } from './memory-service'
 import type { TaskStatus } from '../../shared/types'
 
 /** OpenAI's tool definition shape. */
@@ -57,6 +59,117 @@ const TASK_STATUSES = ['TO_DO', 'IN_PROGRESS', 'IN_REVIEW', 'DONE', 'CANCELED'] 
  * the model's context window.
  */
 export const HERMES_TOOLS: OpenAITool[] = [
+  {
+    type: 'function',
+    function: {
+      name: 'create_task',
+      description:
+        'Create a new Fulcrum task. Use for "add a task for X" requests. Defaults to TO_DO status and manual type (no worktree/scratch dir).',
+      parameters: {
+        type: 'object',
+        required: ['title'],
+        properties: {
+          title: { type: 'string', description: 'Task title.' },
+          description: { type: 'string', description: 'Optional longer description.' },
+          status: {
+            type: 'string',
+            enum: TASK_STATUSES,
+            description: 'Initial status. Defaults to TO_DO.',
+          },
+          priority: {
+            type: 'string',
+            enum: ['high', 'medium', 'low'],
+            description: 'Priority. Defaults to medium.',
+          },
+          dueDate: {
+            type: 'string',
+            description: 'Due date in YYYY-MM-DD format.',
+          },
+          projectId: {
+            type: 'string',
+            description: 'Optional project to link the task to.',
+          },
+        },
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'search',
+      description:
+        'Unified full-text search across tasks, projects, channel messages, calendar events, memories, and conversations. Returns top results across all entity types. Use for any "find X" or "what do I have about Y?" request.',
+      parameters: {
+        type: 'object',
+        required: ['query'],
+        properties: {
+          query: {
+            type: 'string',
+            description: 'Search query. Multi-token queries are ANDed across tokens.',
+          },
+          entities: {
+            type: 'array',
+            items: {
+              type: 'string',
+              enum: ['tasks', 'projects', 'messages', 'events', 'memories', 'conversations'],
+            },
+            description: 'Restrict search to specific entity types. Omit to search all.',
+          },
+          limit: {
+            type: 'integer',
+            minimum: 1,
+            maximum: 50,
+            description: 'Per-entity result cap. Defaults to 10.',
+          },
+        },
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'memory_search',
+      description:
+        'Search the assistant\'s long-term memory store (persistent across conversations). Use to recall facts the user has previously shared.',
+      parameters: {
+        type: 'object',
+        required: ['query'],
+        properties: {
+          query: { type: 'string', description: 'FTS5-style search query.' },
+          tags: {
+            type: 'array',
+            items: { type: 'string' },
+            description: 'Optional tag filter — only memories with at least one of these tags.',
+          },
+          limit: { type: 'integer', minimum: 1, maximum: 50, description: 'Max results.' },
+        },
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'memory_store',
+      description:
+        'Save a fact or preference to long-term memory so future conversations can recall it. Tag aggressively — tags are how memories are later retrieved.',
+      parameters: {
+        type: 'object',
+        required: ['content'],
+        properties: {
+          content: { type: 'string', description: 'The fact/preference to remember.' },
+          tags: {
+            type: 'array',
+            items: { type: 'string' },
+            description: 'Tags for later retrieval (e.g. ["preference", "calendar"]).',
+          },
+          source: {
+            type: 'string',
+            description: 'Optional source identifier (e.g. "slack-dm-2026-05-22").',
+          },
+        },
+      },
+    },
+  },
   {
     type: 'function',
     function: {
@@ -150,6 +263,14 @@ export async function executeToolCall(call: OpenAIToolCall): Promise<ToolResult>
         return successResult(call, await handleGetTask(args))
       case 'update_task':
         return successResult(call, await handleUpdateTask(args))
+      case 'create_task':
+        return successResult(call, await handleCreateTask(args))
+      case 'search':
+        return successResult(call, await handleSearch(args))
+      case 'memory_search':
+        return successResult(call, await handleMemorySearch(args))
+      case 'memory_store':
+        return successResult(call, await handleMemoryStore(args))
       default:
         return errorResult(call, `Unknown tool: ${name}`)
     }
@@ -250,6 +371,80 @@ async function handleUpdateTask(args: Record<string, unknown>): Promise<unknown>
   return updated
 }
 
+async function handleCreateTask(args: Record<string, unknown>): Promise<unknown> {
+  const title = args.title as string | undefined
+  if (!title || !title.trim()) throw new Error('Missing required argument: title')
+
+  const status = (args.status as TaskStatus | undefined) ?? 'TO_DO'
+  if (!(TASK_STATUSES as readonly string[]).includes(status)) {
+    throw new Error(`Invalid status: ${status}`)
+  }
+  const priority =
+    typeof args.priority === 'string' && ['high', 'medium', 'low'].includes(args.priority)
+      ? (args.priority as 'high' | 'medium' | 'low')
+      : 'medium'
+
+  // Compute next position within the chosen status column
+  const existing = db.select({ position: tasks.position }).from(tasks).where(eq(tasks.status, status)).all()
+  const maxPosition = existing.reduce((m, t) => Math.max(m, t.position), -1)
+
+  const now = new Date().toISOString()
+  const id = crypto.randomUUID()
+  const newTask = {
+    id,
+    title: title.trim(),
+    description: typeof args.description === 'string' ? args.description : null,
+    status,
+    position: maxPosition + 1,
+    agent: 'claude' as const,
+    visibility: 'tenant' as const,
+    priority,
+    dueDate: typeof args.dueDate === 'string' ? args.dueDate : null,
+    projectId: typeof args.projectId === 'string' ? args.projectId : null,
+    startedAt: status === 'TO_DO' ? null : now,
+    createdAt: now,
+    updatedAt: now,
+  }
+  db.insert(tasks).values(newTask).run()
+  const row = db.select().from(tasks).where(eq(tasks.id, id)).get()
+  if (!row) throw new Error('Task creation succeeded but row not found — schema mismatch?')
+  return row
+}
+
+async function handleSearch(args: Record<string, unknown>): Promise<unknown> {
+  const query = args.query as string | undefined
+  if (!query || !query.trim()) throw new Error('Missing required argument: query')
+
+  type EntityKind = Parameters<typeof search>[0]['entities'] extends (infer U)[] | undefined ? U : never
+  const entities = Array.isArray(args.entities) ? (args.entities as EntityKind[]) : undefined
+  const limit = typeof args.limit === 'number' ? Math.min(50, Math.max(1, args.limit)) : 10
+
+  const results = await search({ query, entities, limit })
+  return { count: results.length, results }
+}
+
+async function handleMemorySearch(args: Record<string, unknown>): Promise<unknown> {
+  const query = args.query as string | undefined
+  if (!query || !query.trim()) throw new Error('Missing required argument: query')
+
+  const tags = Array.isArray(args.tags) ? (args.tags as string[]) : undefined
+  const limit = typeof args.limit === 'number' ? Math.min(50, Math.max(1, args.limit)) : 20
+
+  const results = await searchMemories({ query, tags, limit })
+  return { count: results.length, memories: results }
+}
+
+async function handleMemoryStore(args: Record<string, unknown>): Promise<unknown> {
+  const content = args.content as string | undefined
+  if (!content || !content.trim()) throw new Error('Missing required argument: content')
+
+  const tags = Array.isArray(args.tags) ? (args.tags as string[]) : undefined
+  const source = typeof args.source === 'string' ? args.source : undefined
+
+  const result = await storeMemory({ content: content.trim(), tags, source })
+  return result
+}
+
 // Suppress unused-import warning — `inArray` is reserved for future tool handlers
-// that need IN clauses (e.g. list_tasks with multiple statuses in B2c).
+// that need IN clauses (e.g. list_tasks with multiple statuses).
 void inArray

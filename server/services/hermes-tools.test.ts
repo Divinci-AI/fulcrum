@@ -39,9 +39,17 @@ describe('hermes-tools', () => {
   })
 
   describe('HERMES_TOOLS schema', () => {
-    test('exposes the three starter tools with correct function names', () => {
+    test('exposes the full B2a + B2c tool surface', () => {
       const names = HERMES_TOOLS.map((t) => t.function.name).sort()
-      expect(names).toEqual(['get_task', 'list_tasks', 'update_task'])
+      expect(names).toEqual([
+        'create_task',
+        'get_task',
+        'list_tasks',
+        'memory_search',
+        'memory_store',
+        'search',
+        'update_task',
+      ])
     })
 
     test('every tool has type: function and a parameters schema', () => {
@@ -142,6 +150,53 @@ describe('hermes-tools', () => {
       const parsed = JSON.parse(result.content) as { error?: string; status?: string }
       // status was invalid, so no fields were applied → returns the "no updatable fields" error
       expect(parsed.error).toContain('No updatable fields')
+    })
+  })
+
+  describe('executeToolCall — create_task (D-16 B2c)', () => {
+    test('inserts a new task with sensible defaults', async () => {
+      const result = await executeToolCall(makeCall('create_task', { title: 'New thing' }))
+      const parsed = JSON.parse(result.content) as {
+        id: string
+        title: string
+        status: string
+        priority: string
+      }
+      expect(parsed.title).toBe('New thing')
+      expect(parsed.status).toBe('TO_DO')
+      expect(parsed.priority).toBe('medium')
+      // Verify it actually landed in the DB
+      const row = db.select().from(tasks).where(eq(tasks.id, parsed.id)).get()
+      expect(row).not.toBeUndefined()
+    })
+
+    test('honors caller-supplied status, priority, dueDate', async () => {
+      const result = await executeToolCall(
+        makeCall('create_task', {
+          title: 'High pri',
+          status: 'IN_PROGRESS',
+          priority: 'high',
+          dueDate: '2026-06-01',
+        }),
+      )
+      const parsed = JSON.parse(result.content) as { status: string; priority: string; dueDate: string }
+      expect(parsed.status).toBe('IN_PROGRESS')
+      expect(parsed.priority).toBe('high')
+      expect(parsed.dueDate).toBe('2026-06-01')
+    })
+
+    test('returns error when title is missing', async () => {
+      const result = await executeToolCall(makeCall('create_task', {}))
+      const parsed = JSON.parse(result.content) as { error: string }
+      expect(parsed.error).toContain('Missing required argument: title')
+    })
+
+    test('falls back to medium priority when an invalid value is passed', async () => {
+      const result = await executeToolCall(
+        makeCall('create_task', { title: 'X', priority: 'urgent' }),
+      )
+      const parsed = JSON.parse(result.content) as { priority: string }
+      expect(parsed.priority).toBe('medium')
     })
   })
 
