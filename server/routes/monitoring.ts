@@ -1,4 +1,3 @@
-// @ts-nocheck — pre-existing type errors that surfaced when tsconfig.server.json was added in D-15 OG wrap-up. Remove this directive + fix the errors in a focused follow-up PR.
 import { Hono } from 'hono'
 import { readdirSync, readFileSync, readlinkSync, existsSync } from 'fs'
 import { execSync } from 'child_process'
@@ -573,7 +572,6 @@ async function fetchDockerApiStats(): Promise<ContainerStats[] | null> {
     // First, list all running containers
     const listUrl = 'http://localhost/containers/json'
     const listResponse = await fetch(listUrl, {
-      // @ts-expect-error - Bun supports unix sockets via this option
       unix: socketPath,
     })
 
@@ -593,7 +591,6 @@ async function fetchDockerApiStats(): Promise<ContainerStats[] | null> {
       try {
         const statsUrl = `http://localhost/containers/${container.Id}/stats?stream=false`
         const statsResponse = await fetch(statsUrl, {
-          // @ts-expect-error - Bun supports unix sockets via this option
           unix: socketPath,
         })
 

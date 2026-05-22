@@ -1,4 +1,3 @@
-// @ts-nocheck — pre-existing type errors that surfaced when tsconfig.server.json was added in D-15 OG wrap-up. Remove this directive + fix the errors in a focused follow-up PR.
 /**
  * Email channel implementation using imapflow (IMAP) for receiving.
  * Sending is disabled — use Gmail drafts for human-in-the-loop email.
@@ -189,8 +188,14 @@ export class EmailChannel implements MessagingChannel {
 
           this.lastSeenUid = Math.max(this.lastSeenUid, message.uid)
 
+          // ImapFlow types message.source as Buffer | undefined when the
+          // BODYSTRUCTURE fetch didn't include the message body. We
+          // explicitly asked for source: true above, so this is
+          // defensive — skip if missing.
+          if (!message.source) continue
+
           // Parse full headers from source
-          const headers = parseEmailHeaders(message.source, message.envelope)
+          const headers = parseEmailHeaders(message.source, message.envelope ?? {})
 
           if (!headers.from) continue
 
@@ -446,7 +451,10 @@ export class EmailChannel implements MessagingChannel {
           source: true,
           envelope: true,
         })) {
-          const headers = parseEmailHeaders(message.source, message.envelope)
+          // ImapFlow types message.source as Buffer | undefined; we
+          // asked for source: true above, so this is defensive.
+          if (!message.source) continue
+          const headers = parseEmailHeaders(message.source, message.envelope ?? {})
 
           if (!headers.messageId) continue
 

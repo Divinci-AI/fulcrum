@@ -1,4 +1,3 @@
-// @ts-nocheck — pre-existing type errors that surfaced when tsconfig.server.json was added in D-15 OG wrap-up. Remove this directive + fix the errors in a focused follow-up PR.
 import { Hono } from 'hono'
 import { streamSSE } from 'hono/streaming'
 import * as fs from 'fs'
@@ -7,7 +6,7 @@ import { db, tasks } from '../db'
 import { eq } from 'drizzle-orm'
 import { getScratchBasePath } from '../lib/settings'
 import { getPTYManager, destroyTerminalAndBroadcast } from '../terminal/pty-instance'
-import type { ScratchDirBasic, ScratchDirDetails, ScratchDirsSummary } from '../../shared/types'
+import type { ScratchDirBasic, ScratchDirDetails, ScratchDirsSummary, TaskStatus } from '../../shared/types'
 
 // Format bytes to human-readable string
 function formatBytes(bytes: number): string {
@@ -105,7 +104,7 @@ app.get('/', (c) => {
         isOrphaned: !linkedTask,
         taskId: linkedTask?.id,
         taskTitle: linkedTask?.title,
-        taskStatus: linkedTask?.status,
+        taskStatus: linkedTask?.status as TaskStatus | undefined,
         pinned: linkedTask?.pinned ?? false,
       })
       pathsToProcess.push(fullPath)
@@ -214,7 +213,7 @@ app.get('/json', async (c) => {
       isOrphaned: !linkedTask,
       taskId: linkedTask?.id,
       taskTitle: linkedTask?.title,
-      taskStatus: linkedTask?.status,
+      taskStatus: linkedTask?.status as TaskStatus | undefined,
       pinned: linkedTask?.pinned ?? false,
       size,
       sizeFormatted: formatBytes(size),

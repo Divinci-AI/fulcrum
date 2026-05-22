@@ -1,4 +1,3 @@
-// @ts-nocheck — pre-existing type errors that surfaced when tsconfig.server.json was added in D-15 OG wrap-up. Remove this directive + fix the errors in a focused follow-up PR.
 /**
  * CalDAV Service
  *
@@ -10,7 +9,7 @@
  * - Data migration from single-account settings.json
  */
 
-import { eq, and, gte, lte, desc, isNull } from 'drizzle-orm'
+import { eq, and, gte, lte, desc, isNull, type SQL } from 'drizzle-orm'
 import { db, caldavAccounts, caldavCalendars, caldavEvents, caldavCopyRules, caldavCopiedEvents, googleAccounts } from '../../db'
 import type { CaldavAccount, CaldavCalendar, CaldavEvent, CaldavCopyRule } from '../../db'
 import type { CalDavOAuthTokens } from '../../lib/settings/types'
@@ -518,7 +517,9 @@ export function listEvents(options?: {
   to?: string
   limit?: number
 }): CaldavEvent[] {
-  const conditions = []
+  // Explicit type — TS can't infer this from an empty array literal,
+  // ends up as never[] and rejects the SQL conditions below.
+  const conditions: SQL[] = []
 
   if (options?.calendarId) {
     conditions.push(eq(caldavEvents.calendarId, options.calendarId))
@@ -698,12 +699,15 @@ export async function updateEvent(
         status: updates.status ?? event.status ?? undefined,
       })
 
+  // tsdav update: iCalString moved into calendarObject.data (the top-
+   // level `iCalString` param was removed). Wire still gets the iCal
+   // payload — same field, just nested.
   await client.updateCalendarObject({
     calendarObject: {
       url: event.remoteUrl,
       etag: event.etag ?? undefined,
+      data: updatedIcal,
     },
-    iCalString: updatedIcal,
   })
 
   const now = new Date().toISOString()

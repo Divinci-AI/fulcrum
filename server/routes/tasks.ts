@@ -1,4 +1,3 @@
-// @ts-nocheck — pre-existing type errors that surfaced when tsconfig.server.json was added in D-15 OG wrap-up. Remove this directive + fix the errors in a focused follow-up PR.
 import { Hono } from 'hono'
 import { nanoid } from 'nanoid'
 import { db, tasks, repositories, taskLinks, taskRelationships, taskAttachments, tags, taskTags, type Task, type NewTask, type TaskLink } from '../db'
@@ -1570,7 +1569,7 @@ app.get('/:id/comments', (c) => {
 // to each newly mentioned user. Broadcasts task:comment-added so other
 // open sessions update live.
 app.post('/:id/comments', async (c) => {
-  const author = requireUser(c)
+  const author = requireUser(c as unknown as Parameters<typeof requireUser>[0])
   const taskId = c.req.param('id')
   const task = db.select().from(tasks).where(eq(tasks.id, taskId)).get()
   if (!task) return c.json({ error: 'Task not found' }, 404)
@@ -1601,7 +1600,7 @@ app.post('/:id/comments', async (c) => {
 // DELETE /api/tasks/:id/comments/:commentId — author-only.
 // Also removes any mention rows pointing at this comment.
 app.delete('/:id/comments/:commentId', (c) => {
-  const author = requireUser(c)
+  const author = requireUser(c as unknown as Parameters<typeof requireUser>[0])
   const taskId = c.req.param('id')
   const commentId = c.req.param('commentId')
 

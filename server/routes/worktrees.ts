@@ -1,4 +1,3 @@
-// @ts-nocheck — pre-existing type errors that surfaced when tsconfig.server.json was added in D-15 OG wrap-up. Remove this directive + fix the errors in a focused follow-up PR.
 import { Hono } from 'hono'
 import { streamSSE } from 'hono/streaming'
 import * as os from 'os'
@@ -8,7 +7,7 @@ import { db, tasks } from '../db'
 import { eq } from 'drizzle-orm'
 import { getWorktreeBasePath } from '../lib/settings'
 import { getPTYManager, destroyTerminalAndBroadcast } from '../terminal/pty-instance'
-import type { WorktreeBasic, WorktreeDetails, WorktreesSummary } from '../../shared/types'
+import type { WorktreeBasic, WorktreeDetails, WorktreesSummary, TaskStatus } from '../../shared/types'
 
 // --- Size cache with 5-minute TTL ---
 interface SizeCacheEntry {
@@ -186,8 +185,8 @@ app.get('/', (c) => {
         isOrphaned: !linkedTask,
         taskId: linkedTask?.id,
         taskTitle: linkedTask?.title,
-        taskStatus: linkedTask?.status,
-        repoPath: linkedTask?.repoPath,
+        taskStatus: linkedTask?.status as TaskStatus | undefined,
+        repoPath: linkedTask?.repoPath ?? undefined,
         pinned: linkedTask?.pinned ?? false,
       })
       pathsToProcess.push(fullPath)
@@ -322,8 +321,8 @@ app.get('/json', async (c) => {
         isOrphaned: !r.linkedTask,
         taskId: r.linkedTask?.id,
         taskTitle: r.linkedTask?.title,
-        taskStatus: r.linkedTask?.status,
-        repoPath: r.linkedTask?.repoPath,
+        taskStatus: r.linkedTask?.status as TaskStatus | undefined,
+        repoPath: r.linkedTask?.repoPath ?? undefined,
         pinned: r.linkedTask?.pinned ?? false,
         size: r.size,
         sizeFormatted: formatBytes(r.size),
@@ -393,7 +392,7 @@ app.delete('/', async (c) => {
     destroyTerminalsForWorktree(body.worktreePath)
 
     // Delete the worktree
-    await deleteWorktree(body.worktreePath, body.repoPath || linkedTask?.repoPath)
+    await deleteWorktree(body.worktreePath, body.repoPath || linkedTask?.repoPath || undefined)
     invalidateSizeCache(body.worktreePath)
 
     // Handle linked task based on deleteLinkedTask flag
