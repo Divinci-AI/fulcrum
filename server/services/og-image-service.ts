@@ -12,7 +12,8 @@ import { log } from '../lib/logger'
 // Crash-proof logger wrapper. The catch handler in renderCached must never
 // throw — if logger access misfires the way `log.error` did during D-15 deploy,
 // we fall back to console.error so the underlying error still surfaces.
-function safeLog(msg: string, ctx: Record<string, unknown>): void {
+// Exported for unit testing — internal API otherwise.
+export function safeLog(msg: string, ctx: Record<string, unknown>): void {
   try {
     log.og.error(msg, ctx)
   } catch {
@@ -70,7 +71,8 @@ type FontWeight = 400 | 700
 
 let cachedFonts: { name: string; data: ArrayBuffer; weight: FontWeight; style: 'normal' }[] | null = null
 
-function getFontDir(): string {
+// Exported for unit testing — internal API otherwise.
+export function getFontDir(): string {
   // Production (SaaS Docker container, CLI bundle, desktop bundle): vite
   // already copied public/og-fonts/* to dist/og-fonts/. The Dockerfile only
   // ships dist/, not public/, so we MUST read from dist in any production
