@@ -223,6 +223,7 @@ export function createApp() {
         mp3: 'audio/mpeg',
         wav: 'audio/wav',
         ogg: 'audio/ogg',
+        txt: 'text/plain',
       }
       const content = await readFile(filePath)
       // Assets with content hashes can be cached forever (immutable)
@@ -257,7 +258,7 @@ export function createApp() {
     })
 
     // Serve specific static files
-    const staticFiles = ['fulcrum-icon.png', 'fulcrum-logo.jpeg', 'vite.svg', 'logo.png', 'goat.jpeg']
+    const staticFiles = ['fulcrum-icon.png', 'fulcrum-logo.jpeg', 'vite.svg', 'logo.png', 'goat.jpeg', 'robots.txt']
     for (const file of staticFiles) {
       app.get(`/${file}`, async () => {
         const filePath = join(distPath, file)
