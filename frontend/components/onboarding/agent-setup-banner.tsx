@@ -40,6 +40,16 @@ export function AgentSetupBanner() {
     return null
   }
 
+  // D-16: skip the banner for agents we don't track CLI install status for
+  // (e.g. 'hermes' — worktree spawn is a stub until D-16 PR 10 wires real
+  // hermes-agent CLI dispatch). Otherwise we'd render "Hermes CLI not found"
+  // for an operator whose actual Hermes use is via the OpenAI-compat endpoint
+  // configured at Settings → AI Assistant → Hermes, which doesn't need any
+  // local CLI.
+  if (agentToCheck !== 'claude' && agentToCheck !== 'opencode') {
+    return null
+  }
+
   const isInstalled = agentToCheck === 'claude'
     ? dependencies?.claudeCode?.installed
     : dependencies?.openCode?.installed
