@@ -1,4 +1,3 @@
-// @ts-nocheck — pre-existing type errors that surfaced when tsconfig.server.json was added in D-15 OG wrap-up. Remove this directive + fix the errors in a focused follow-up PR.
 /**
  * CalDAV Account Manager
  *
@@ -373,7 +372,7 @@ class CaldavAccountManager {
         db.update(caldavCalendars)
           .set({
             accountId,
-            displayName: remoteCal.displayName ?? existing.displayName,
+            displayName: (typeof remoteCal.displayName === 'string' ? remoteCal.displayName : null) ?? existing.displayName,
             ctag,
             syncToken: remoteCal.syncToken ?? existing.syncToken,
             updatedAt: now,
@@ -392,7 +391,7 @@ class CaldavAccountManager {
             id,
             accountId,
             remoteUrl: url,
-            displayName: remoteCal.displayName ?? 'Unnamed Calendar',
+            displayName: typeof remoteCal.displayName === 'string' ? remoteCal.displayName : 'Unnamed Calendar',
             ctag,
             syncToken: remoteCal.syncToken ?? null,
             color: null,

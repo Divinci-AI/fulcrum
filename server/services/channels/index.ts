@@ -1,4 +1,3 @@
-// @ts-nocheck — pre-existing type errors that surfaced when tsconfig.server.json was added in D-15 OG wrap-up. Remove this directive + fix the errors in a focused follow-up PR.
 /**
  * Channel Manager - Orchestrates messaging channels and routes messages to AI assistant.
  * Entry point for the messaging service layer.
@@ -39,6 +38,7 @@ migrateSessionTitles()
 
 // Re-export types
 export * from './types'
+import type { ChannelType } from './types'
 
 // Re-export session mapper
 export * from './session-mapper'
@@ -161,7 +161,7 @@ const ACTIVE_CHANNEL_CONFIG: Record<string, {
 
 // Shared send logic for discord, telegram, and slack (all use activeChannels pattern)
 async function sendViaActiveChannel(
-  channelType: string,
+  channelType: ChannelType,
   resolvedTo: string,
   body: string,
   metadata?: Record<string, unknown>,

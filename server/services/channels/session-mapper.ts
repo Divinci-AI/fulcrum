@@ -1,4 +1,3 @@
-// @ts-nocheck — pre-existing type errors that surfaced when tsconfig.server.json was added in D-15 OG wrap-up. Remove this directive + fix the errors in a focused follow-up PR.
 /**
  * Session Mapper - Maps messaging channel users to AI chat sessions.
  * Each phone number/user ID gets a persistent conversation with the AI.
@@ -6,6 +5,7 @@
 
 import { nanoid } from 'nanoid'
 import { eq, and, like, or } from 'drizzle-orm'
+import type { Changes } from 'bun:sqlite'
 import { db, messagingSessionMappings, messagingConnections, chatSessions } from '../../db'
 import type { MessagingSessionMapping, ChatSession } from '../../db/schema'
 import { log } from '../../lib/logger'
@@ -52,7 +52,7 @@ export function getOrCreateSession(
     db.update(messagingSessionMappings)
       .set({ lastMessageAt: now })
       .where(eq(messagingSessionMappings.id, existingMapping.id))
-      .run()
+      .run() as unknown as Changes
 
     // Get the associated session
     const session = db
@@ -103,7 +103,7 @@ export function getOrCreateSession(
     updatedAt: now,
   }
 
-  db.insert(chatSessions).values(newSession).run()
+  db.insert(chatSessions).values(newSession).run() as unknown as Changes
 
   // Create or update the mapping
   // Store lookupKey as channelUserId (may be threadId for email)
@@ -126,9 +126,9 @@ export function getOrCreateSession(
         lastMessageAt: now,
       })
       .where(eq(messagingSessionMappings.id, existingMapping.id))
-      .run()
+      .run() as unknown as Changes
   } else {
-    db.insert(messagingSessionMappings).values(newMapping).run()
+    db.insert(messagingSessionMappings).values(newMapping).run() as unknown as Changes
   }
 
   const session = db
@@ -204,7 +204,7 @@ export function resetSession(
     updatedAt: now,
   }
 
-  db.insert(chatSessions).values(newSession).run()
+  db.insert(chatSessions).values(newSession).run() as unknown as Changes
 
   // Update or create mapping (using lookupKey as channelUserId)
   const mappingId = existingMapping?.id ?? nanoid()
@@ -217,7 +217,7 @@ export function resetSession(
         lastMessageAt: now,
       })
       .where(eq(messagingSessionMappings.id, existingMapping.id))
-      .run()
+      .run() as unknown as Changes
   } else {
     db.insert(messagingSessionMappings)
       .values({
@@ -229,7 +229,7 @@ export function resetSession(
         createdAt: now,
         lastMessageAt: now,
       })
-      .run()
+      .run() as unknown as Changes
   }
 
   const session = db
@@ -292,7 +292,7 @@ export function deleteSessionMapping(mappingId: string): boolean {
   const result = db
     .delete(messagingSessionMappings)
     .where(eq(messagingSessionMappings.id, mappingId))
-    .run()
+    .run() as unknown as Changes
   return result.changes > 0
 }
 
@@ -348,7 +348,7 @@ export function migrateSessionTitles(): void {
       db.update(chatSessions)
         .set({ title: newTitle })
         .where(eq(chatSessions.id, row.sessionId))
-        .run()
+        .run() as unknown as Changes
       updated++
     }
   }

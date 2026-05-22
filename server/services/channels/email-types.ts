@@ -20,6 +20,8 @@ export interface EmailHeaders {
   precedence: string | null // "bulk", "junk", "list"
   listUnsubscribe: string | null // Presence indicates mailing list/newsletter
   xAutoResponseSuppress: string | null // Microsoft header for auto-responder awareness
+  xMailer: string | null // Often identifies mass-mailer software
+  contentType: string | null // multipart/* etc. — informative for automation detection
   returnPath: string | null // Empty "<>" indicates bounce/delivery notification
 }
 

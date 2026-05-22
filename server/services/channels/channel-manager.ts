@@ -1,4 +1,3 @@
-// @ts-nocheck — pre-existing type errors that surfaced when tsconfig.server.json was added in D-15 OG wrap-up. Remove this directive + fix the errors in a focused follow-up PR.
 /**
  * Channel Manager - Core lifecycle management for messaging channels.
  * Handles starting/stopping channels, broadcast handlers, and shared state.
@@ -442,7 +441,7 @@ export async function startEmailChannel(): Promise<void> {
   const channelEvents = {
     onMessage: (msg: IncomingMessage) => messageHandler!(msg),
     onConnectionChange: (status: ConnectionStatus) => handleConnectionChange(EMAIL_CONNECTION_ID, status),
-    onAuthRequired: (data: unknown) => handleAuthRequired(EMAIL_CONNECTION_ID, data),
+    onAuthRequired: (data: unknown) => handleAuthRequired(EMAIL_CONNECTION_ID, data as { qrDataUrl: string }),
     onDisplayNameChange: (name: string) => handleDisplayNameChange(EMAIL_CONNECTION_ID, name),
   }
 

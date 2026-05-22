@@ -1,4 +1,3 @@
-// @ts-nocheck — pre-existing type errors that surfaced when tsconfig.server.json was added in D-15 OG wrap-up. Remove this directive + fix the errors in a focused follow-up PR.
 /**
  * Google Account & API Routes
  *
@@ -6,7 +5,7 @@
  * and Gmail draft management.
  */
 
-import { Hono } from 'hono'
+import { Hono, type Context } from 'hono'
 import {
   listGoogleAccountsForUser,
   getGoogleAccountForUser,
@@ -34,7 +33,7 @@ const app = new Hono<CurrentUserContext>()
 // this helper so a user can't address an account they don't own. Returns
 // 404 (not 403) on a mismatch so existence isn't leaked to a probing
 // caller.
-function ownedAccountOr404(c: Parameters<Parameters<typeof app.get>[1]>[0], id: string) {
+function ownedAccountOr404(c: Context, id: string) {
   const user = requireUser(c)
   const account = getGoogleAccountForUser(id, user.id)
   return account ?? null
