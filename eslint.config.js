@@ -21,6 +21,22 @@ export default defineConfig([
     rules: {
       // Allow _-prefixed variables for intentional destructuring omission (e.g. const { x: _, ...rest } = obj)
       '@typescript-eslint/no-unused-vars': ['error', { varsIgnorePattern: '^_', argsIgnorePattern: '^_' }],
+      // Allow `// @ts-nocheck` / `// @ts-expect-error` etc. when justified
+      // with a description (>= 10 chars after the directive). The default
+      // setting bans @ts-nocheck outright, which conflicts with the
+      // tsconfig.server.json rollout that uses it as a known-debt marker.
+      // The description requirement keeps the rule useful — drive-by
+      // suppression is still flagged.
+      '@typescript-eslint/ban-ts-comment': [
+        'error',
+        {
+          'ts-nocheck': 'allow-with-description',
+          'ts-expect-error': 'allow-with-description',
+          'ts-ignore': true,
+          'ts-check': false,
+          minimumDescriptionLength: 10,
+        },
+      ],
     },
   },
   // React Compiler / hooks rules only for frontend code

@@ -7,7 +7,7 @@
  * to the parent task happens via the `parentTaskId` plumbed into
  * notifyMentions.
  */
-import { and, desc, eq } from 'drizzle-orm'
+import { and, eq } from 'drizzle-orm'
 import { db, taskComments, type TaskComment } from '../db'
 import { createLogger } from '../lib/logger'
 
