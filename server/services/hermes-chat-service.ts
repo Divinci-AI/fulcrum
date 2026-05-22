@@ -18,13 +18,20 @@ import { getInstanceContext } from '../lib/settings/paths'
 import { addMessage } from './assistant-service'
 import { getObserverKnowledge } from './assistant-knowledge'
 import { readMemoryFile } from './memory-file-service'
+import {
+  HERMES_TOOLS,
+  executeToolCall,
+  type OpenAIToolCall,
+} from './hermes-tools'
 import type { ChannelHistoryMessage } from './channels/message-storage'
 import type { AttachmentData } from '../../shared/types'
 
-/** OpenAI-compatible chat message shape, including vision content blocks. */
+/** OpenAI-compatible chat message shape, including vision content blocks and tool turns. */
 type ChatMessage =
-  | { role: 'system' | 'assistant'; content: string }
+  | { role: 'system'; content: string }
+  | { role: 'assistant'; content: string | null; tool_calls?: OpenAIToolCall[] }
   | { role: 'user'; content: string | Array<ContentBlock> }
+  | { role: 'tool'; tool_call_id: string; name: string; content: string }
 
 type ContentBlock =
   | { type: 'text'; text: string }
@@ -159,69 +166,149 @@ export async function* streamHermesMessage(
   }
 
   const url = buildChatCompletionsUrl(cfg.baseUrl)
-  let response: Response
-  try {
-    response = await fetch(url, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${cfg.apiKey}`,
-      },
-      body: JSON.stringify({ model, messages, stream: true }),
-    })
-  } catch (err) {
-    log.chat.error('Hermes fetch failed', { url, error: String(err) })
-    yield { type: 'error', data: { message: `Hermes request failed: ${err instanceof Error ? err.message : String(err)}` } }
-    return
-  }
 
-  if (!response.ok || !response.body) {
-    const detail = await response.text().catch(() => '')
-    log.chat.error('Hermes responded non-ok', { status: response.status, detail: detail.slice(0, 500) })
-    yield {
-      type: 'error',
-      data: { message: `Hermes returned ${response.status}: ${detail.slice(0, 200) || response.statusText}` },
+  // D-16 B2a: tool-call loop. We run up to MAX_TOOL_ITERATIONS rounds:
+  //   1. Send the current message stack with `tools: HERMES_TOOLS`
+  //   2. If the model returns `tool_calls`, execute each, append the
+  //      assistant tool-call turn + tool result messages, loop again
+  //   3. When the model returns a content-only response, that's the final
+  //      answer — chunk it into content:delta events for streaming-consumer
+  //      compatibility (true streaming-with-tools is B2b)
+  const MAX_TOOL_ITERATIONS = 5
+  let finalContent = ''
+  let lastError: string | null = null
+
+  for (let iter = 0; iter < MAX_TOOL_ITERATIONS; iter++) {
+    let response: Response
+    try {
+      response = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${cfg.apiKey}`,
+        },
+        // stream:false during the tool loop so we get a single JSON response
+        // with tool_calls cleanly. B2b will lift this to streaming.
+        body: JSON.stringify({ model, messages, tools: HERMES_TOOLS, stream: false }),
+      })
+    } catch (err) {
+      log.chat.error('Hermes fetch failed', { url, iter, error: String(err) })
+      lastError = `Hermes request failed: ${err instanceof Error ? err.message : String(err)}`
+      break
     }
-    return
-  }
 
-  let assembled = ''
-  try {
-    for await (const delta of parseOpenAISseStream(response.body)) {
-      if (delta) {
-        assembled += delta
-        yield { type: 'content:delta', data: { text: delta } }
+    if (!response.ok) {
+      const detail = await response.text().catch(() => '')
+      log.chat.error('Hermes responded non-ok', { status: response.status, iter, detail: detail.slice(0, 500) })
+      lastError = `Hermes returned ${response.status}: ${detail.slice(0, 200) || response.statusText}`
+      break
+    }
+
+    let body: HermesNonStreamResponse
+    try {
+      body = (await response.json()) as HermesNonStreamResponse
+    } catch (err) {
+      lastError = `Hermes response not JSON: ${err instanceof Error ? err.message : String(err)}`
+      break
+    }
+
+    const choice = body.choices?.[0]
+    if (!choice) {
+      lastError = 'Hermes returned no choices'
+      break
+    }
+
+    const toolCalls = choice.message?.tool_calls
+    if (toolCalls && toolCalls.length > 0) {
+      // Push the assistant's tool-call turn into the conversation
+      messages.push({
+        role: 'assistant',
+        content: choice.message?.content ?? null,
+        tool_calls: toolCalls,
+      })
+      // Execute each tool call and append the result message
+      for (const call of toolCalls) {
+        const result = await executeToolCall(call)
+        messages.push({
+          role: 'tool',
+          tool_call_id: result.tool_call_id,
+          name: result.name,
+          content: result.content,
+        })
+        log.chat.info('Hermes tool executed', {
+          tool: call.function.name,
+          callId: call.id,
+          iter,
+        })
       }
+      continue
     }
-  } catch (err) {
-    log.chat.error('Hermes stream parse failed', { error: String(err) })
-    // Yield message:complete *before* error so Slack's streamResponse finalizes the
-    // partial bubble (removing the :writing_hand: emoji) instead of leaving it hanging.
-    yield {
-      type: 'message:complete',
-      data: { content: assembled ? `${assembled}\n\n_(stream interrupted)_` : '' },
-    }
-    yield {
-      type: 'error',
-      data: { message: `Hermes stream parse failed: ${err instanceof Error ? err.message : String(err)}` },
-    }
+
+    // No tool_calls: this is the final assistant message
+    finalContent = choice.message?.content ?? ''
+    break
+  }
+
+  if (lastError) {
+    yield { type: 'error', data: { message: lastError } }
     return
   }
 
-  yield { type: 'message:complete', data: { content: assembled } }
+  // Chunk the final content into content:delta events for downstream
+  // streaming consumers (Slack chat.update path). Each chunk is ~80 chars
+  // which gives a "watch it appear" feel without spamming Slack's rate limit.
+  for (const chunk of chunkText(finalContent, 80)) {
+    yield { type: 'content:delta', data: { text: chunk } }
+  }
 
-  if (!options.ephemeral && assembled.trim()) {
-    addMessage(sessionId, { sessionId, role: 'assistant', content: assembled })
+  yield { type: 'message:complete', data: { content: finalContent } }
+
+  if (!options.ephemeral && finalContent.trim()) {
+    addMessage(sessionId, { sessionId, role: 'assistant', content: finalContent })
   }
 
   log.chat.info('Hermes chat complete', {
     sessionId,
     model,
-    length: assembled.length,
+    length: finalContent.length,
     messageCount: messages.length,
   })
 
-  yield { type: 'done', data: { content: assembled } }
+  yield { type: 'done', data: { content: finalContent } }
+}
+
+/** Shape of the non-streaming chat-completions response (the subset we care about). */
+interface HermesNonStreamResponse {
+  choices?: Array<{
+    message?: {
+      role?: string
+      content?: string | null
+      tool_calls?: OpenAIToolCall[]
+    }
+    finish_reason?: string
+  }>
+}
+
+/**
+ * Split a string into chunks of up to `size` characters, prefer breaking at
+ * whitespace where possible. Used to fake streaming for downstream Slack
+ * consumers when the underlying call was non-streaming (B2a tool loop).
+ */
+function chunkText(text: string, size: number): string[] {
+  if (!text) return []
+  const out: string[] = []
+  let i = 0
+  while (i < text.length) {
+    let end = Math.min(i + size, text.length)
+    if (end < text.length) {
+      // Walk back to the nearest whitespace within the chunk
+      const ws = text.lastIndexOf(' ', end)
+      if (ws > i + size / 2) end = ws + 1
+    }
+    out.push(text.slice(i, end))
+    i = end
+  }
+  return out
 }
 
 /**
