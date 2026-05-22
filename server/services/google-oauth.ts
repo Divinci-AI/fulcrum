@@ -1,4 +1,3 @@
-// @ts-nocheck — pre-existing type errors that surfaced when tsconfig.server.json was added in D-15 OG wrap-up. Remove this directive + fix the errors in a focused follow-up PR.
 /**
  * Central Google OAuth2 Service
  *
@@ -101,7 +100,7 @@ export async function exchangeCodeForTokens(
       redirectUri,
       clientId: client._clientId,
       // Log the full error response if available
-      response: (err as Record<string, unknown>)?.response?.data,
+      response: (err as { response?: { data?: unknown } })?.response?.data,
     })
     throw err
   }

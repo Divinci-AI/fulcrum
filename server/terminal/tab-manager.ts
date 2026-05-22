@@ -1,6 +1,6 @@
-// @ts-nocheck — pre-existing type errors that surfaced when tsconfig.server.json was added in D-15 OG wrap-up. Remove this directive + fix the errors in a focused follow-up PR.
 import { db, terminalTabs, terminalViewState } from '../db'
 import { eq, sql, max } from 'drizzle-orm'
+import type { Changes } from 'bun:sqlite'
 import type { TabInfo } from '../types'
 
 const VIEW_STATE_ID = 'singleton'
@@ -57,7 +57,7 @@ export class TabManager {
       .update(terminalTabs)
       .set(updateData)
       .where(eq(terminalTabs.id, tabId))
-      .run()
+      .run() as unknown as Changes
 
     return result.changes > 0
   }
@@ -66,7 +66,7 @@ export class TabManager {
    * Delete a tab
    */
   delete(tabId: string): boolean {
-    const result = db.delete(terminalTabs).where(eq(terminalTabs.id, tabId)).run()
+    const result = db.delete(terminalTabs).where(eq(terminalTabs.id, tabId)).run() as unknown as Changes
 
     if (result.changes > 0) {
       // Clean up view state references

@@ -1,4 +1,3 @@
-// @ts-nocheck — pre-existing type errors that surfaced when tsconfig.server.json was added in D-15 OG wrap-up. Remove this directive + fix the errors in a focused follow-up PR.
 import { Hono } from 'hono'
 import os from 'node:os'
 import {
@@ -368,8 +367,10 @@ function nonEmptyStringValidator(label: string) {
   }
 }
 
-// Fields where empty string should be coerced to null in the catch-all
-const NULLABLE_ON_EMPTY = new Set([
+// Fields where empty string should be coerced to null in the catch-all.
+// Set<string> rather than the inferred literal union so `path: string`
+// is accepted by `.has(path)` below.
+const NULLABLE_ON_EMPTY = new Set<string>([
   CONFIG_KEYS.REMOTE_HOST,
   CONFIG_KEYS.EDITOR_HOST,
 ])

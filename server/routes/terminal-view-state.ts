@@ -1,4 +1,3 @@
-// @ts-nocheck — pre-existing type errors that surfaced when tsconfig.server.json was added in D-15 OG wrap-up. Remove this directive + fix the errors in a focused follow-up PR.
 import { Hono } from 'hono'
 import { db, terminalViewState, terminalTabs, terminals } from '../db'
 import { eq } from 'drizzle-orm'
@@ -88,9 +87,11 @@ app.patch('/', async (c) => {
     const currentFocused = existing?.focusedTerminals ? JSON.parse(existing.focusedTerminals) : {}
     const merged = { ...currentFocused, ...body.focusedTerminals }
 
-    // Validate terminal IDs exist and remove invalid references
-    for (const [tabId, terminalId] of Object.entries(merged)) {
-      if (terminalId) {
+    // Validate terminal IDs exist and remove invalid references.
+    // `merged` is parsed JSON, so Object.entries yields `unknown` values;
+    // the typeof check narrows for drizzle's eq().
+    for (const [tabId, terminalId] of Object.entries(merged as Record<string, unknown>)) {
+      if (typeof terminalId === 'string' && terminalId) {
         const terminal = db.select().from(terminals).where(eq(terminals.id, terminalId)).get()
         if (!terminal) {
           delete merged[tabId]

@@ -1,4 +1,3 @@
-// @ts-nocheck — pre-existing type errors that surfaced when tsconfig.server.json was added in D-15 OG wrap-up. Remove this directive + fix the errors in a focused follow-up PR.
 import Cloudflare from 'cloudflare'
 import { generateKeyPairSync, createSign } from 'crypto'
 import { mkdir, writeFile, readFile, access } from 'fs/promises'
@@ -73,7 +72,7 @@ export async function createDnsRecord(
     const existing = await client.dns.records.list({
       zone_id: zoneId,
       type: 'A',
-      name: fullName,
+      name: { exact: fullName },
     })
 
     if (existing.result?.length) {
@@ -129,11 +128,12 @@ export async function deleteDnsRecord(
 
     const fullName = subdomain ? `${subdomain}.${domain}` : domain
 
-    // Find the record
+    // Find the record. CF SDK changed `name` from string to a Name-filter
+    // object; pass it as { exact } for an exact-match lookup.
     const records = await client.dns.records.list({
       zone_id: zoneId,
       type: 'A',
-      name: fullName,
+      name: { exact: fullName },
     })
 
     if (!records.result?.length) {

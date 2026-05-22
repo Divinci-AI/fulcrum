@@ -1,4 +1,4 @@
-// @ts-nocheck — pre-existing type errors that surfaced when tsconfig.server.json was added in D-15 OG wrap-up. Remove this directive + fix the errors in a focused follow-up PR.
+// @ts-nocheck — opencode SDK session.create + parts schema contract changed (see opencode-channel-service.ts for the same). Track new shape before removing.
 import { createOpencode, createOpencodeClient, type OpencodeClient } from '@opencode-ai/sdk'
 import { log } from '../lib/logger'
 import { db, tasks, projects, repositories, apps, projectRepositories } from '../db'

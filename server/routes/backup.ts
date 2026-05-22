@@ -1,4 +1,3 @@
-// @ts-nocheck — pre-existing type errors that surfaced when tsconfig.server.json was added in D-15 OG wrap-up. Remove this directive + fix the errors in a focused follow-up PR.
 import { Hono } from 'hono'
 import * as fs from 'fs'
 import * as path from 'path'
@@ -106,7 +105,7 @@ app.get('/', (c) => {
 // POST /api/backup - Create a new backup
 app.post('/', async (c) => {
   try {
-    const body = await c.req.json<{ description?: string }>().catch(() => ({}))
+    const body = await c.req.json<{ description?: string }>().catch((): { description?: string } => ({}))
 
     ensureBackupsDir()
     const backupName = generateBackupName()
@@ -212,7 +211,7 @@ app.post('/:name/restore', async (c) => {
   }
 
   try {
-    const body = await c.req.json<{ database?: boolean; config?: boolean }>().catch(() => ({}))
+    const body = await c.req.json<{ database?: boolean; config?: boolean }>().catch((): { database?: boolean; config?: boolean } => ({}))
     const restoreDatabase = body.database !== false
     const restoreConfig = body.config !== false
 
