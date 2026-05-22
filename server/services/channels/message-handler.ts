@@ -209,6 +209,7 @@ export async function handleIncomingMessage(msg: IncomingMessage): Promise<void>
         ? streamHermesMessage(session.id, content || '(file attached)', {
             systemPromptAdditions: systemPrompt,
             ...(msg.attachments?.length && { attachments: msg.attachments }),
+            ...(channelHistory.length > 0 && { channelHistory }),
           })
         : _deps.streamMessage(session.id, content || '(file attached)', {
             systemPromptAdditions: systemPrompt,

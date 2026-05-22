@@ -1,5 +1,9 @@
 import { describe, expect, test } from 'bun:test'
-import { buildChatCompletionsUrl, parseOpenAISseStream } from './hermes-chat-service'
+import {
+  buildChatCompletionsUrl,
+  formatUserTurnWithHistory,
+  parseOpenAISseStream,
+} from './hermes-chat-service'
 
 function makeStreamFromChunks(chunks: string[]): ReadableStream<Uint8Array> {
   const enc = new TextEncoder()
@@ -46,6 +50,33 @@ describe('hermes-chat-service.buildChatCompletionsUrl', () => {
   test('malformed baseUrl falls back to bare-host convention without throwing', () => {
     // The fetch() in streamHermesMessage will surface the real error; the helper just doesn't crash
     expect(() => buildChatCompletionsUrl('not a url')).not.toThrow()
+  })
+})
+
+describe('hermes-chat-service.formatUserTurnWithHistory', () => {
+  test('returns the message unchanged when history is missing or empty', () => {
+    expect(formatUserTurnWithHistory('hi', undefined)).toBe('hi')
+    expect(formatUserTurnWithHistory('hi', [])).toBe('hi')
+  })
+
+  test('prepends a [Recent messages…] block when history rows are provided', () => {
+    const ts = new Date('2026-05-22T14:35:00Z').toISOString()
+    const out = formatUserTurnWithHistory('what was that?', [
+      // The actual shape used downstream — only the fields the formatter reads
+      { content: 'Task X completed', messageTimestamp: ts } as unknown as Parameters<typeof formatUserTurnWithHistory>[1] extends (infer U)[] | undefined ? U : never,
+    ])
+    expect(out).toContain('[Recent messages sent on this channel')
+    expect(out).toContain('Task X completed')
+    expect(out.endsWith('what was that?')).toBe(true)
+  })
+
+  test('truncates entries longer than 500 chars with an ellipsis', () => {
+    const long = 'x'.repeat(800)
+    const out = formatUserTurnWithHistory('?', [
+      { content: long, messageTimestamp: new Date().toISOString() } as unknown as Parameters<typeof formatUserTurnWithHistory>[1] extends (infer U)[] | undefined ? U : never,
+    ])
+    expect(out).toContain('xxx...')
+    expect(out).not.toContain('x'.repeat(800))
   })
 })
 
