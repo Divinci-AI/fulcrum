@@ -371,6 +371,9 @@ export interface NotificationMessage {
     notificationType: 'success' | 'info' | 'warning' | 'error'
     taskId?: string
     playSound?: boolean // Tell desktop app to play local sound
+    showToast?: boolean // Whether to show in-app toast
+    showDesktop?: boolean // Whether to show browser/desktop notification
+    isCustomSound?: boolean // Whether user has a custom sound file
   }
 }
 
@@ -406,7 +409,11 @@ export interface MessagingStatusMessage {
   type: 'messaging:status'
   payload: {
     connectionId: string
-    status: 'disconnected' | 'connecting' | 'connected' | 'qr_pending'
+    // Keep this aligned with ConnectionStatus in
+    // server/services/channels/types.ts (don't import — server/types.ts
+    // is also consumed by the frontend and we don't want the channel
+    // internals leaking across that boundary).
+    status: 'disconnected' | 'connecting' | 'connected' | 'qr_pending' | 'credentials_required'
   }
 }
 
@@ -452,7 +459,10 @@ export interface SubscriptionAckMessage {
 // the event.
 export interface TaskMentionedMessage {
   type: 'task:mentioned'
-  payload: { taskId: string; mentionedUserId: string; authorEmail: string | null }
+  // commentId is populated when the mention came from a task comment;
+  // omitted for mentions in the task description/title (where the
+  // mention belongs to the task itself).
+  payload: { taskId: string; mentionedUserId: string; authorEmail: string | null; commentId?: string }
 }
 export interface TaskAssignedMessage {
   type: 'task:assigned'

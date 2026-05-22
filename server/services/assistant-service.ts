@@ -1,6 +1,5 @@
-// @ts-nocheck — pre-existing type errors that surfaced when tsconfig.server.json was added in D-15 OG wrap-up. Remove this directive + fix the errors in a focused follow-up PR.
 import { nanoid } from 'nanoid'
-import { eq, desc, and, sql, like, notInArray, isNotNull } from 'drizzle-orm'
+import { eq, desc, and, sql, like, notInArray, isNotNull, type SQL } from 'drizzle-orm'
 import { query } from '@anthropic-ai/claude-agent-sdk'
 import { writeFile, unlink, mkdtemp } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -132,7 +131,7 @@ export function listSessions(options: {
 }): { sessions: ChatSession[]; total: number } {
   const { limit = 50, offset = 0, projectId, search, favorites } = options
 
-  const conditions = []
+  const conditions: SQL[] = []
 
   // Exclude internal assistant sessions (sweeps, rituals)
   // These sessions are linked via messagingSessionMappings with connectionId starting with 'assistant-'
@@ -1090,7 +1089,7 @@ export function listArtifacts(options: {
 }): { artifacts: Artifact[]; total: number } {
   const { sessionId, type, favorites, limit = 50, offset = 0 } = options
 
-  const conditions = []
+  const conditions: SQL[] = []
 
   if (sessionId) {
     conditions.push(eq(artifacts.sessionId, sessionId))

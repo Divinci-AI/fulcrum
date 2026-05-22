@@ -1,4 +1,3 @@
-// @ts-nocheck — pre-existing type errors that surfaced when tsconfig.server.json was added in D-15 OG wrap-up. Remove this directive + fix the errors in a focused follow-up PR.
 /**
  * Gmail Backend for Email Channel
  *
@@ -117,10 +116,19 @@ export class GmailBackend {
         // Skip self-sent
         if (fromEmail === selfEmail) continue
 
-        // Skip automated emails
+        // Skip automated emails. isAutomatedEmail only consults the
+        // automation-detection fields, but the parameter is typed as the
+        // full EmailHeaders — fill unused fields with empty defaults.
         const automatedCheck = isAutomatedEmail({
+          messageId: null,
+          inReplyTo: null,
+          references: [],
           from: fromEmail,
+          fromName: null,
+          to: [],
+          cc: [],
           subject: msg.subject,
+          date: null,
           listUnsubscribe: null,
           precedence: null,
           autoSubmitted: null,

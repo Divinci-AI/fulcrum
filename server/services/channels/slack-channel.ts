@@ -1,4 +1,3 @@
-// @ts-nocheck — pre-existing type errors that surfaced when tsconfig.server.json was added in D-15 OG wrap-up. Remove this directive + fix the errors in a focused follow-up PR.
 /**
  * Slack channel implementation using @slack/bolt library.
  * Uses Socket Mode for real-time messaging without needing a public URL.
@@ -131,7 +130,7 @@ export class SlackChannel implements MessagingChannel {
       // this branch keeps a conversation alive when the user replies in the same thread
       // *without* re-pinging the bot (which would otherwise drop on the floor pre D-15 PR 5).
       this.app.message(async ({ message }) => {
-        const m = message as Record<string, unknown>
+        const m = message as unknown as Record<string, unknown>
         const channelType = m.channel_type as string | undefined
         if (channelType === 'im') {
           await this.handleMessage(m)
@@ -224,7 +223,10 @@ export class SlackChannel implements MessagingChannel {
    */
   private setupSocketModeListeners(): void {
     // Access the SocketModeClient from the Bolt receiver
-    const receiver = (this.app as unknown as { receiver: { client: import('eventemitter3').EventEmitter } })?.receiver
+    // Minimal structural type for the receiver's socket client — avoids
+    // importing eventemitter3's EventEmitter (which is the default export
+    // in current versions, not a named one on the namespace).
+    const receiver = (this.app as unknown as { receiver: { client: { on(event: string, listener: (...args: unknown[]) => void): void } } })?.receiver
     const socketClient = receiver?.client
     if (!socketClient) {
       log.messaging.warn('Could not access Socket Mode client for health monitoring', {
@@ -900,7 +902,7 @@ export class SlackChannel implements MessagingChannel {
         try {
           const fileData = readFileSync(filePath)
           const filename = basename(filePath)
-          await this.app.client.files.uploadV2({
+          await (this.app.client.files.uploadV2 as (args: unknown) => Promise<unknown>)({
             channel_id: channelId,
             file: fileData,
             filename,
@@ -924,7 +926,9 @@ export class SlackChannel implements MessagingChannel {
       const parts = content.length <= 4000 ? [content] : this.splitMessage(content, 4000)
       for (let i = 0; i < parts.length; i++) {
         const part = parts[i]
-        const options: ChatPostMessageArguments = {
+        // ChatPostMessageArguments is a discriminated union (blocks-OR-text);
+        // a mutable union of both branches works for conditional assignment.
+        const options: ChatPostMessageArguments & { blocks?: KnownBlock[]; mrkdwn?: boolean } = {
           channel: channelId,
           text: part,
         }
@@ -934,7 +938,7 @@ export class SlackChannel implements MessagingChannel {
         } else {
           options.mrkdwn = true
         }
-        await this.app.client.chat.postMessage(options)
+        await this.app.client.chat.postMessage(options as ChatPostMessageArguments)
         if (parts.length > 1) {
           await new Promise((resolve) => setTimeout(resolve, 100))
         }
@@ -1098,7 +1102,7 @@ export class SlackChannel implements MessagingChannel {
           const now = Date.now()
           if (now - lastUpdateAt >= UPDATE_INTERVAL_MS) {
             try {
-              await this.app!.client.chat.update({
+              await (this.app!.client.chat.update as (args: unknown) => Promise<unknown>)({
                 channel: channelId,
                 ts: messageTs,
                 text: accumulatedText + ' :writing_hand:',
@@ -1139,7 +1143,7 @@ export class SlackChannel implements MessagingChannel {
       // No content — clean up partial message if any
       if (messageTs) {
         try {
-          await this.app!.client.chat.update({
+          await (this.app!.client.chat.update as (args: unknown) => Promise<unknown>)({
             channel: channelId,
             ts: messageTs,
             text: "Sorry, I ran into an issue processing that. Could you try again?",
@@ -1158,7 +1162,7 @@ export class SlackChannel implements MessagingChannel {
       try {
         if (parsed) {
           filePath = parsed.filePath
-          await this.app!.client.chat.update({
+          await (this.app!.client.chat.update as (args: unknown) => Promise<unknown>)({
             channel: channelId,
             ts: messageTs,
             text: parsed.body,
@@ -1166,7 +1170,7 @@ export class SlackChannel implements MessagingChannel {
           })
         } else {
           // No XML tags — wrap in a section block
-          await this.app!.client.chat.update({
+          await (this.app!.client.chat.update as (args: unknown) => Promise<unknown>)({
             channel: channelId,
             ts: messageTs,
             text: accumulatedText,
@@ -1190,7 +1194,7 @@ export class SlackChannel implements MessagingChannel {
       try {
         const fileData = readFileSync(filePath)
         const filename = basename(filePath)
-        await this.app!.client.files.uploadV2({
+        await (this.app!.client.files.uploadV2 as (args: unknown) => Promise<unknown>)({
           channel_id: channelId,
           file: fileData,
           filename,
@@ -1295,7 +1299,7 @@ export class SlackChannel implements MessagingChannel {
         try {
           const fileData = readFileSync(filePath)
           const filename = basename(filePath)
-          await this.app.client.files.uploadV2({
+          await (this.app.client.files.uploadV2 as (args: unknown) => Promise<unknown>)({
             channel_id: channelId,
             file: fileData,
             filename,
@@ -1320,7 +1324,8 @@ export class SlackChannel implements MessagingChannel {
       // Slack has a ~40000 character limit but best practice is to keep it shorter
       // We'll use 4000 as a practical limit
       if (content.length <= 4000) {
-        const messageOptions: ChatPostMessageArguments = {
+        // Discriminated-union widening for blocks-or-mrkdwn assignment.
+        const messageOptions: ChatPostMessageArguments & { blocks?: KnownBlock[]; mrkdwn?: boolean } = {
           channel: channelId,
           text: content, // Fallback for notifications
         }
@@ -1332,7 +1337,7 @@ export class SlackChannel implements MessagingChannel {
           messageOptions.mrkdwn = true
         }
 
-        await this.app.client.chat.postMessage(messageOptions)
+        await this.app.client.chat.postMessage(messageOptions as ChatPostMessageArguments)
       } else {
         // Split message if too long (blocks not supported for split messages)
         const parts = this.splitMessage(content, 4000)

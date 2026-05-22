@@ -1,4 +1,3 @@
-// @ts-nocheck — pre-existing type errors that surfaced when tsconfig.server.json was added in D-15 OG wrap-up. Remove this directive + fix the errors in a focused follow-up PR.
 /**
  * Observer Tracking Service - Records observer invocations for UI visibility.
  *
@@ -9,6 +8,7 @@
 import { nanoid } from 'nanoid'
 import { db, observerInvocations, type ObserverActionRecord } from '../db'
 import { eq, desc, and, sql, type SQL } from 'drizzle-orm'
+import type { Changes } from 'bun:sqlite'
 
 export function createInvocation(params: {
   channelMessageId?: string
@@ -35,7 +35,7 @@ export function createInvocation(params: {
       startedAt: now,
       createdAt: now,
     })
-    .run()
+    .run() as unknown as Changes
   return id
 }
 
@@ -47,7 +47,7 @@ export function completeInvocation(id: string, actions: ObserverActionRecord[]):
       completedAt: new Date().toISOString(),
     })
     .where(eq(observerInvocations.id, id))
-    .run()
+    .run() as unknown as Changes
 }
 
 export function failInvocation(id: string, error: string): void {
@@ -58,7 +58,7 @@ export function failInvocation(id: string, error: string): void {
       completedAt: new Date().toISOString(),
     })
     .where(eq(observerInvocations.id, id))
-    .run()
+    .run() as unknown as Changes
 }
 
 export function timeoutInvocation(id: string): void {
@@ -68,7 +68,7 @@ export function timeoutInvocation(id: string): void {
       completedAt: new Date().toISOString(),
     })
     .where(eq(observerInvocations.id, id))
-    .run()
+    .run() as unknown as Changes
 }
 
 export function skipInvocation(params: {
@@ -97,7 +97,7 @@ export function skipInvocation(params: {
       completedAt: now,
       createdAt: now,
     })
-    .run()
+    .run() as unknown as Changes
 }
 
 export function getInvocations(options?: {
@@ -197,6 +197,6 @@ export function pruneOldInvocations(maxAgeDays = 7): number {
   const result = db
     .delete(observerInvocations)
     .where(sql`${observerInvocations.createdAt} < ${cutoff}`)
-    .run()
+    .run() as unknown as Changes
   return result.changes
 }

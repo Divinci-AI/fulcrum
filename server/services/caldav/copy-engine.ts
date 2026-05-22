@@ -1,4 +1,3 @@
-// @ts-nocheck — pre-existing type errors that surfaced when tsconfig.server.json was added in D-15 OG wrap-up. Remove this directive + fix the errors in a focused follow-up PR.
 /**
  * CalDAV Copy Engine
  *
@@ -254,12 +253,14 @@ export async function executeSingleRule(
                 status: sourceEvent.status ?? undefined,
               })
 
+          // tsdav 2.x moved iCalString into calendarObject.data — same
+          // fix as caldav-service.ts.
           await destClient!.updateCalendarObject({
             calendarObject: {
               url: destEvent.remoteUrl,
               etag: destEvent.etag ?? undefined,
+              data: updatedIcal,
             },
-            iCalString: updatedIcal,
           })
 
           // Update local dest event

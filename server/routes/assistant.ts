@@ -1,4 +1,3 @@
-// @ts-nocheck — pre-existing type errors that surfaced when tsconfig.server.json was added in D-15 OG wrap-up. Remove this directive + fix the errors in a focused follow-up PR.
 import { Hono } from 'hono'
 import { streamSSE } from 'hono/streaming'
 import { db } from '../db'
@@ -233,9 +232,11 @@ assistantRoutes.post('/artifacts', async (c) => {
   }
 
   try {
+    // Route accepts 'vega-lite' (user-facing name); the service uses
+    // 'chart' internally for the same spec. Translate at the boundary.
     const artifact = await assistantService.createArtifact({
       sessionId: body.sessionId,
-      type: body.type,
+      type: body.type === 'vega-lite' ? 'chart' : body.type,
       title: body.title,
       content: body.content,
       description: body.description,

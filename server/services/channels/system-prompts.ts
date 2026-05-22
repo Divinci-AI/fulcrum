@@ -21,6 +21,9 @@ export interface MessagingContext {
     subject?: string
     threadId?: string
     messageId?: string
+    // WhatsApp group chat flag — surfaces to the system prompt so the
+    // assistant can adjust its behavior (e.g. quieter in groups).
+    isGroup?: boolean
   }
 }
 

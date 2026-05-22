@@ -1,4 +1,3 @@
-// @ts-nocheck — pre-existing type errors that surfaced when tsconfig.server.json was added in D-15 OG wrap-up. Remove this directive + fix the errors in a focused follow-up PR.
 /**
  * WhatsApp channel implementation using Baileys library.
  * Handles connection, QR code auth, message sending/receiving.
@@ -191,7 +190,7 @@ export class WhatsAppChannel implements MessagingChannel {
       const content = msg.message.conversation || msg.message.extendedTextMessage?.text || ''
       // Keep full JID as senderId to preserve @lid vs @s.whatsapp.net for replies
       const senderId = remoteJid
-      const senderName = isSelfChat ? 'You' : msg.pushName
+      const senderName = isSelfChat ? 'You' : (msg.pushName ?? undefined)
 
       if (!senderId || !content) continue
 
