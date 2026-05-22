@@ -318,7 +318,7 @@ export function useScratchStartupScript() {
 }
 
 // Assistant settings
-export type AssistantProvider = 'claude' | 'opencode'
+export type AssistantProvider = 'claude' | 'opencode' | 'hermes'
 export type AssistantModel = 'opus' | 'sonnet' | 'haiku'
 export const ASSISTANT_MODELS: AssistantModel[] = ['opus', 'sonnet', 'haiku']
 
@@ -388,6 +388,34 @@ export function useAssistantDocumentsDir() {
   return {
     ...query,
     data: (query.data?.value as string) ?? '~/.fulcrum/documents',
+    isDefault: query.data?.isDefault ?? true,
+  }
+}
+
+// D-16 PR 1: Hermes Agent config hooks
+export function useAssistantHermesBaseUrl() {
+  const query = useConfig(CONFIG_KEYS.ASSISTANT_HERMES_BASE_URL)
+  return {
+    ...query,
+    data: (query.data?.value as string | null) ?? 'http://localhost:8642',
+    isDefault: query.data?.isDefault ?? true,
+  }
+}
+
+export function useAssistantHermesApiKey() {
+  const query = useConfig(CONFIG_KEYS.ASSISTANT_HERMES_API_KEY)
+  return {
+    ...query,
+    data: (query.data?.value as string | null) ?? '',
+    isDefault: query.data?.isDefault ?? true,
+  }
+}
+
+export function useAssistantHermesModel() {
+  const query = useConfig(CONFIG_KEYS.ASSISTANT_HERMES_MODEL)
+  return {
+    ...query,
+    data: (query.data?.value as string | null) ?? '',
     isDefault: query.data?.isDefault ?? true,
   }
 }

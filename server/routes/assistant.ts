@@ -6,6 +6,7 @@ import { sweepRuns } from '../db/schema'
 import { eq, desc } from 'drizzle-orm'
 import * as assistantService from '../services/assistant-service'
 import { streamOpencodeMessage } from '../services/opencode-chat-service'
+import { streamHermesMessage } from '../services/hermes-chat-service'
 import type { PageContext, ImageData, AttachmentData } from '../../shared/types'
 
 const assistantRoutes = new Hono()
@@ -163,6 +164,22 @@ assistantRoutes.post('/sessions/:id/messages', async (c) => {
       // Save assistant response to DB
       if (fullResponse) {
         assistantService.addMessage(sessionId, { role: 'assistant', content: fullResponse, sessionId })
+      }
+    })
+  }
+
+  if (session.provider === 'hermes') {
+    // D-16 PR 1: Hermes path. The service persists user+assistant messages
+    // itself, so we don't double-save here.
+    return streamSSE(c, async (stream) => {
+      for await (const event of streamHermesMessage(sessionId, message || '', {
+        modelId: model,
+        attachments: mergedAttachments.length > 0 ? mergedAttachments : undefined,
+      })) {
+        await stream.writeSSE({
+          event: event.type,
+          data: JSON.stringify(event.data),
+        })
       }
     })
   }

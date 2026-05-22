@@ -9,6 +9,7 @@ import { activeChannels, setMessageHandler } from './channel-manager'
 import { getOrCreateSession, resetSession } from './session-mapper'
 import { getMessagingSystemPrompt, getObserveOnlySystemPrompt, type MessagingContext } from './system-prompts'
 import * as assistantService from '../assistant-service'
+import { streamHermesMessage } from '../hermes-chat-service'
 import { getRecentOutgoingMessages, getRecentChannelMessages } from './message-storage'
 import { streamOpencodeObserverMessage } from '../opencode-channel-service'
 import { getSettings } from '../../lib/settings/core'
@@ -196,11 +197,24 @@ export async function handleIncomingMessage(msg: IncomingMessage): Promise<void>
     const channelHistory = getRecentOutgoingMessages(msg.connectionId, { since: lastSyncAt })
 
     const isSlack = msg.channelType === 'slack'
-    const stream = _deps.streamMessage(session.id, content || '(file attached)', {
-      systemPromptAdditions: systemPrompt,
-      ...(msg.attachments?.length && { attachments: msg.attachments }),
-      ...(channelHistory.length > 0 && { channelHistory }),
-    })
+
+    // D-16 PR 1: channel-chat provider dispatch. When the operator has set
+    // `assistant.provider === 'hermes'`, route to the Hermes OpenAI-compat
+    // endpoint instead of Claude Code SDK. Channel messages skip the
+    // session-provider check (sessions for channels are auto-created and
+    // don't track per-session provider yet) and use the global setting.
+    const assistantProvider = getSettings().assistant.provider
+    const stream =
+      assistantProvider === 'hermes'
+        ? streamHermesMessage(session.id, content || '(file attached)', {
+            systemPromptAdditions: systemPrompt,
+            ...(msg.attachments?.length && { attachments: msg.attachments }),
+          })
+        : _deps.streamMessage(session.id, content || '(file attached)', {
+            systemPromptAdditions: systemPrompt,
+            ...(msg.attachments?.length && { attachments: msg.attachments }),
+            ...(channelHistory.length > 0 && { channelHistory }),
+          })
 
     // For Slack: stream the response incrementally via chat.postMessage + chat.update.
     // DMs and channel @-mention/thread followups both stream now (D-15 PR 7).
