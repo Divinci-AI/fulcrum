@@ -1,4 +1,4 @@
-// @ts-nocheck — opencode SDK session.create API contract changed (no longer accepts {body:{model:...}}); proper fix needs to track the new shape. Keep nocheck until @opencode-ai/sdk usage is updated.
+// @ts-nocheck — @opencode-ai/sdk contract changed: (1) session.create body no longer takes 'model' (moves to message-level or createOpencode config), (2) FilePartInput is { type: 'file', mime, url } instead of { type: 'image', media_type, data } (base64 → URL), (3) BadRequestError has no .message. Proper fix needs an SDK-migration PR — keeping nocheck preserves runtime behavior.
 /**
  * OpenCode observer service for processing observe-only channel messages.
  *
