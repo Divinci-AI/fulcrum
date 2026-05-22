@@ -1,4 +1,4 @@
-// @ts-nocheck — opencode SDK session.create + parts schema contract changed (see opencode-channel-service.ts for the same). Track new shape before removing.
+// @ts-nocheck — @opencode-ai/sdk contract changed: (1) session.create body no longer takes 'model' (moves to message-level or createOpencode config), (2) FilePartInput is { type: 'file', mime, url } instead of { type: 'image', media_type, data } (base64 → URL), (3) BadRequestError has no .message. Proper fix needs an SDK-migration PR — keeping nocheck preserves runtime behavior.
 import { createOpencode, createOpencodeClient, type OpencodeClient } from '@opencode-ai/sdk'
 import { log } from '../lib/logger'
 import { db, tasks, projects, repositories, apps, projectRepositories } from '../db'

@@ -1,10 +1,9 @@
-// @ts-nocheck — pre-existing type errors that surfaced when tsconfig.server.json was added in D-15 OG wrap-up. Remove this directive + fix the errors in a focused follow-up PR.
 /**
  * Unified message storage for all messaging channels.
  * Stores ALL channel messages (WhatsApp, Discord, Telegram, Slack, Email) in a single table.
  */
 
-import { eq, desc, like, or, and, gt, lt, sql } from 'drizzle-orm'
+import { eq, desc, like, or, and, gt, lt, sql, type SQL } from 'drizzle-orm'
 import { nanoid } from 'nanoid'
 import { db, channelMessages } from '../../db'
 import type { ChannelMessageMetadata } from '../../db/schema'
@@ -98,7 +97,7 @@ export interface GetChannelMessagesOptions {
 export function getChannelMessages(
   options: GetChannelMessagesOptions = {}
 ): typeof channelMessages.$inferSelect[] {
-  const conditions = []
+  const conditions: SQL[] = []
 
   if (options.channelType && options.channelType !== 'all') {
     conditions.push(eq(channelMessages.channelType, options.channelType))
@@ -191,8 +190,10 @@ export function getRecentChannelMessages(
     .limit(limit)
     .all()
 
-  // Reverse to chronological order (query returns newest first)
-  return results.reverse()
+  // Reverse to chronological order (query returns newest first).
+  // drizzle's text column infers direction as string; assert the narrow
+  // ChannelHistoryMessage union at the boundary.
+  return results.reverse() as ChannelHistoryMessage[]
 }
 
 /**
@@ -228,8 +229,10 @@ export function getRecentOutgoingMessages(
     .limit(limit)
     .all()
 
-  // Reverse to chronological order (query returns newest first)
-  return results.reverse()
+  // Reverse to chronological order (query returns newest first).
+  // drizzle's text column infers direction as string; assert the narrow
+  // ChannelHistoryMessage union at the boundary.
+  return results.reverse() as ChannelHistoryMessage[]
 }
 
 /**

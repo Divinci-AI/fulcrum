@@ -1,4 +1,3 @@
-// @ts-nocheck — pre-existing type errors that surfaced when tsconfig.server.json was added in D-15 OG wrap-up. Remove this directive + fix the errors in a focused follow-up PR.
 import { query, type SDKUserMessage } from '@anthropic-ai/claude-agent-sdk'
 import { getSettings } from '../lib/settings'
 import { getClaudeCodePathForSdk, getCleanEnv } from '../lib/claude-code-path'
@@ -306,7 +305,10 @@ async function* createPromptIterable(
 ): AsyncIterable<SDKUserMessage> {
   yield {
     type: 'user',
-    message: buildMessageParam(message, attachments),
+    // SDKUserMessage.message wants the SDK's MessageParam union; the
+    // local UserMessageParam is structurally compatible but not the
+    // same nominal type. Cast at the boundary.
+    message: buildMessageParam(message, attachments) as unknown as SDKUserMessage['message'],
     parent_tool_use_id: null,
     session_id: sessionId,
   }

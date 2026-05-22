@@ -57,6 +57,8 @@ export function parseEmailHeaders(
     precedence: getHeader('Precedence'),
     listUnsubscribe: getHeader('List-Unsubscribe'),
     xAutoResponseSuppress: getHeader('X-Auto-Response-Suppress'),
+    xMailer: getHeader('X-Mailer'),
+    contentType: getHeader('Content-Type'),
     returnPath: getHeader('Return-Path'),
   }
 }
