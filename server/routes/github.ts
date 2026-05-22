@@ -1,5 +1,4 @@
-// @ts-nocheck — pre-existing type errors that surfaced when tsconfig.server.json was added in D-15 OG wrap-up. Remove this directive + fix the errors in a focused follow-up PR.
-import { Hono } from 'hono'
+import { Hono, type Context } from 'hono'
 import { db } from '../db'
 import { repositories } from '../db/schema'
 import {
@@ -124,7 +123,7 @@ app.delete('/accounts/:id', (c) => {
 // Optional `?accountId=` query for users with multiple PATs. Without it,
 // the user's earliest-created account is used. Returns 401 when the user
 // has no accounts at all.
-function accountIdFromQuery(c: Parameters<Parameters<typeof app.get>[1]>[0]): string | undefined {
+function accountIdFromQuery(c: Context): string | undefined {
   return c.req.query('accountId') || undefined
 }
 

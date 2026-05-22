@@ -8,6 +8,12 @@ export const ExitCodes = {
   NOT_FOUND: 4,
   VALIDATION_ERROR: 5,
   NETWORK_ERROR: 6,
+  // Precondition for the requested operation isn't met (e.g. developer
+  // mode required but not enabled). Referenced from cli/src/commands/dev.ts.
+  INVALID_STATE: 7,
+  // The operation reached the server but the server reported failure
+  // (e.g. restart attempted but build/migrate step failed).
+  OPERATION_FAILED: 8,
 } as const
 
 export type ExitCode = (typeof ExitCodes)[keyof typeof ExitCodes]

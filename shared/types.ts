@@ -319,6 +319,14 @@ export interface WorktreesSummary {
   totalSizeFormatted: string
 }
 
+// JSON fallback response from GET /api/worktrees/json (used by CLI client
+// where SSE isn't available). The SSE stream emits the same fields
+// progressively; the JSON endpoint returns them at once.
+export interface WorktreesResponse {
+  worktrees: WorktreeBasic[]
+  summary: WorktreesSummary
+}
+
 // Scratch directory types (parallel to Worktree types, but without git fields)
 export interface ScratchDir {
   path: string
@@ -480,12 +488,46 @@ export interface PushoverNotificationConfig {
   userKey?: string
 }
 
+export interface ToastNotificationConfig {
+  enabled: boolean
+}
+
+export interface DesktopNotificationConfig {
+  enabled: boolean
+}
+
+export interface WhatsAppNotificationConfig {
+  enabled: boolean
+}
+
+export interface TelegramNotificationConfig {
+  enabled: boolean
+}
+
+export interface GmailNotificationConfig {
+  enabled: boolean
+  googleAccountId?: string
+}
+
+// API shape returned from /api/notifications. Keep in sync with
+// server/lib/settings/types.ts → NotificationSettings (server-side
+// source of truth). Fields here are what the API publishes; server-
+// only fields stay there.
 export interface NotificationSettings {
   enabled: boolean
+  toast: ToastNotificationConfig
+  desktop: DesktopNotificationConfig
   sound: SoundNotificationConfig
   slack: SlackNotificationConfig
   discord: DiscordNotificationConfig
   pushover: PushoverNotificationConfig
+  whatsapp: WhatsAppNotificationConfig
+  telegram: TelegramNotificationConfig
+  gmail: GmailNotificationConfig
+  /** Optimistic locking timestamp — prevents stale tabs from
+   * overwriting newer settings. Server populates on read; client
+   * passes back on update. */
+  _updatedAt?: number
 }
 
 export interface NotificationTestResult {

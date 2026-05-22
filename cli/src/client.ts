@@ -1,4 +1,3 @@
-// @ts-nocheck — pre-existing type errors that surfaced when tsconfig.server.json was added in D-15 OG wrap-up. Remove this directive + fix the errors in a focused follow-up PR.
 import { discoverServerUrl } from './utils/server'
 import { loadCliConfig } from './utils/cli-config'
 import { ApiError } from './utils/errors'

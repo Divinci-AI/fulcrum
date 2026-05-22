@@ -1,4 +1,3 @@
-// @ts-nocheck — pre-existing type errors that surfaced when tsconfig.server.json was added in D-15 OG wrap-up. Remove this directive + fix the errors in a focused follow-up PR.
 import { Hono } from 'hono'
 import { existsSync, readdirSync, rmSync } from 'node:fs'
 import { join, resolve } from 'node:path'
@@ -8,16 +7,23 @@ import { db, repositories, projects, projectRepositories, apps, appServices, tas
 import { eq, desc, sql } from 'drizzle-orm'
 import { getSettings, expandPath } from '../lib/settings'
 import { broadcast } from '../websocket/terminal-ws'
-import type { Repository } from '../../../shared/types'
+import type { Repository, AgentType } from '../../shared/types'
 
 const app = new Hono()
 
-// Transform database row to API response (parse JSON fields)
+// Transform database row to API response (parse JSON fields + narrow
+// schema types that drizzle leaves looser than the Repository interface).
 function toApiResponse(row: typeof repositories.$inferSelect): Repository {
   return {
     ...row,
     claudeOptions: row.claudeOptions ? JSON.parse(row.claudeOptions) : null,
     opencodeOptions: row.opencodeOptions ? JSON.parse(row.opencodeOptions) : null,
+    // DB stores defaultAgent as text; the Repository interface narrows
+    // to the AgentType union. Cast here rather than at every call site.
+    defaultAgent: row.defaultAgent as AgentType | null,
+    // SQLite boolean default(false) gives drizzle a `boolean | null` for
+    // reads; Repository wants `boolean`. Normalize null → false.
+    isCopierTemplate: row.isCopierTemplate ?? false,
   }
 }
 
@@ -355,7 +361,7 @@ app.delete('/:id', (c) => {
 // POST /api/repositories/scan - Scan directory for git repositories
 app.post('/scan', async (c) => {
   try {
-    const body = await c.req.json<{ directory?: string }>().catch(() => ({}))
+    const body = await c.req.json<{ directory?: string }>().catch((): { directory?: string } => ({}))
 
     // Default to configured git repos directory, expand tilde if present
     const settings = getSettings()
