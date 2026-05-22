@@ -1,4 +1,3 @@
-// @ts-nocheck — pre-existing type errors that surfaced when tsconfig.server.json was added in D-15 OG wrap-up. Remove this directive + fix the errors in a focused follow-up PR.
 import { defineCommand } from 'citty'
 import { FulcrumClient } from '../client'
 import { output, isJsonOutput } from '../utils/output'
@@ -91,10 +90,9 @@ export async function handleNotificationsCommand(
         if (settings.telegram) {
           console.log(`  telegram: ${settings.telegram.enabled ? 'enabled' : 'disabled'} (messaging channel)`)
         }
-        if ((settings as Record<string, unknown>).gmail) {
-          const gmail = (settings as Record<string, unknown>).gmail as { enabled: boolean; googleAccountId?: string }
-          const accountInfo = gmail.googleAccountId ? ` (account: ${gmail.googleAccountId})` : ' (auto-resolve)'
-          console.log(`  gmail: ${gmail.enabled ? 'enabled' : 'disabled'}${gmail.enabled ? accountInfo : ''}`)
+        if (settings.gmail) {
+          const accountInfo = settings.gmail.googleAccountId ? ` (account: ${settings.gmail.googleAccountId})` : ' (auto-resolve)'
+          console.log(`  gmail: ${settings.gmail.enabled ? 'enabled' : 'disabled'}${settings.gmail.enabled ? accountInfo : ''}`)
         }
       }
       break
