@@ -405,7 +405,7 @@ const CONFIG_VALIDATORS: Record<string, (value: unknown) => ValidatorResult> = {
     return { value: value === '' ? null : value }
   },
   [CONFIG_KEYS.EDITOR_APP]: enumValidator(['vscode', 'cursor', 'windsurf', 'zed', 'antigravity'] as const, 'Editor app'),
-  [CONFIG_KEYS.DEFAULT_AGENT]: enumValidator(['claude', 'opencode'] as const, 'Default agent'),
+  [CONFIG_KEYS.DEFAULT_AGENT]: enumValidator(['claude', 'opencode', 'hermes'] as const, 'Default agent'),
   [CONFIG_KEYS.OPENCODE_MODEL]: nullableStringValidator('OpenCode model'),
   [CONFIG_KEYS.OPENCODE_DEFAULT_AGENT]: nonEmptyStringValidator('OpenCode agent name'),
   [CONFIG_KEYS.OPENCODE_PLAN_AGENT]: nonEmptyStringValidator('OpenCode agent name'),
@@ -413,12 +413,12 @@ const CONFIG_VALIDATORS: Record<string, (value: unknown) => ValidatorResult> = {
   [CONFIG_KEYS.CLAUDE_CODE_PATH]: nullableStringValidator('Claude Code path'),
   [CONFIG_KEYS.DEFAULT_TASK_TYPE]: enumValidator(['worktree', 'manual', 'scratch'] as const, 'Default task type'),
   [CONFIG_KEYS.START_WORKTREE_TASKS_IMMEDIATELY]: booleanValidator('Start worktree tasks immediately'),
-  [CONFIG_KEYS.ASSISTANT_PROVIDER]: enumValidator(['claude', 'opencode'] as const, 'Assistant provider'),
+  [CONFIG_KEYS.ASSISTANT_PROVIDER]: enumValidator(['claude', 'opencode', 'hermes'] as const, 'Assistant provider'),
   [CONFIG_KEYS.ASSISTANT_MODEL]: enumValidator(['opus', 'sonnet', 'haiku'] as const, 'Assistant model'),
   [CONFIG_KEYS.ASSISTANT_OBSERVER_MODEL]: enumValidator(['opus', 'sonnet', 'haiku'] as const, 'Assistant model'),
   [CONFIG_KEYS.ASSISTANT_OBSERVER_PROVIDER]: (value) => {
-    if (value !== null && value !== 'claude' && value !== 'opencode') {
-      return { error: 'Observer provider must be "claude", "opencode", or null' }
+    if (value !== null && value !== 'claude' && value !== 'opencode' && value !== 'hermes') {
+      return { error: 'Observer provider must be "claude", "opencode", "hermes", or null' }
     }
     return { value }
   },
