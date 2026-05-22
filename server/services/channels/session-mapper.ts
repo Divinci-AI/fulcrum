@@ -9,6 +9,7 @@ import { eq, and, like, or } from 'drizzle-orm'
 import { db, messagingSessionMappings, messagingConnections, chatSessions } from '../../db'
 import type { MessagingSessionMapping, ChatSession } from '../../db/schema'
 import { log } from '../../lib/logger'
+import { getSettings } from '../../lib/settings'
 
 export interface SessionMapperResult {
   mapping: MessagingSessionMapping
@@ -84,10 +85,17 @@ export function getOrCreateSession(
       ? `Chat with ${channelUserName}`
       : `Chat ${channelUserId}`
 
+  // D-16 B1: stamp the session's provider from the current global setting at
+  // creation time. Previously hard-coded to 'claude', which diverged the moment
+  // an operator switched assistant.provider — channel chat would route via
+  // (e.g.) Hermes while session.provider claimed Claude, breaking the UI
+  // Assistant widget on the same session.
+  const sessionProvider = getSettings().assistant.provider
+
   const newSession = {
     id: sessionId,
     title: sessionTitle,
-    provider: 'claude' as const,
+    provider: sessionProvider,
     model: 'sonnet',
     isFavorite: false,
     messageCount: 0,
@@ -178,10 +186,17 @@ export function resetSession(
       ? `Chat with ${channelUserName}`
       : `Chat ${channelUserId}`
 
+  // D-16 B1: stamp the session's provider from the current global setting at
+  // creation time. Previously hard-coded to 'claude', which diverged the moment
+  // an operator switched assistant.provider — channel chat would route via
+  // (e.g.) Hermes while session.provider claimed Claude, breaking the UI
+  // Assistant widget on the same session.
+  const sessionProvider = getSettings().assistant.provider
+
   const newSession = {
     id: sessionId,
     title: sessionTitle,
-    provider: 'claude' as const,
+    provider: sessionProvider,
     model: 'sonnet',
     isFavorite: false,
     messageCount: 0,

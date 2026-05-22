@@ -9,6 +9,7 @@ import {
   listSessionMappings,
   deleteSessionMapping,
 } from './session-mapper'
+import { setFnoxValue } from '../../lib/settings/fnox'
 
 describe('Session Mapper', () => {
   let testEnv: TestEnv
@@ -100,6 +101,22 @@ describe('Session Mapper', () => {
       const result = getOrCreateSession(connectionId, channelUserId)
 
       expect(result.session.title).toBe(`Chat ${channelUserId}`)
+    })
+
+    // D-16 B1: session.provider mirrors the current global setting at creation time
+    test('stamps session.provider from settings.assistant.provider', () => {
+      setFnoxValue('assistant.provider', 'hermes')
+      const result = getOrCreateSession(connectionId, '+15558675309@s.whatsapp.net', 'Hermes User')
+      expect(result.isNew).toBe(true)
+      expect(result.session.provider).toBe('hermes')
+    })
+
+    test('falls back to claude when no assistant.provider is set', () => {
+      setFnoxValue('assistant.provider', null)
+      const result = getOrCreateSession(connectionId, '+15550000000@s.whatsapp.net', 'Default User')
+      expect(result.isNew).toBe(true)
+      // DEFAULT_SETTINGS.assistant.provider is 'claude' — no surprise stamping
+      expect(result.session.provider).toBe('claude')
     })
 
     test('handles LID format user IDs', () => {
