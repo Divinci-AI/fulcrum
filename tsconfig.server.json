@@ -1,0 +1,50 @@
+{
+  // Typecheck for server-side TypeScript. The other two project tsconfigs
+  // (app.json = frontend, node.json = vite.config.ts only) miss server/
+  // entirely, so server type errors used to ship to production undetected.
+  // See `MEMORY.md` → "tsconfig skips server/" and the D-15 OG-unfurl
+  // incident where `log.error` slipped through.
+  //
+  // strict + noUnused* are intentionally NOT enabled — server/ has
+  // accumulated patterns that fail strict checks. The goal here is to
+  // catch obvious wrong-method/wrong-arg bugs (the log.error class),
+  // not to refactor server/ for full strict mode. Tighten later.
+  //
+  // Files with pre-existing type errors are suppressed via `// @ts-nocheck`
+  // at the top of each file (60 files as of this PR; see git blame on
+  // the @ts-nocheck directive for the audit context). Each suppressed
+  // file is a follow-up cleanup target — remove the directive and fix.
+  // New server code WITHOUT @ts-nocheck IS typechecked here.
+  "compilerOptions": {
+    "tsBuildInfoFile": "./node_modules/.tmp/tsconfig.server.tsbuildinfo",
+    "target": "ES2023",
+    "lib": ["ES2023", "DOM"],
+    "module": "ESNext",
+    "types": ["node", "bun"],
+    "skipLibCheck": true,
+
+    "moduleResolution": "bundler",
+    "allowImportingTsExtensions": true,
+    "verbatimModuleSyntax": true,
+    "moduleDetection": "force",
+    "noEmit": true,
+    "esModuleInterop": true,
+    "resolveJsonModule": true,
+
+    "strict": false,
+    "noImplicitAny": false,
+    "strictNullChecks": true,
+    "noFallthroughCasesInSwitch": true,
+
+    "baseUrl": ".",
+    "paths": {
+      "@shared/*": ["./shared/*"]
+    }
+  },
+  "include": ["server", "shared", "cli/src"],
+  "exclude": [
+    "**/*.test.ts",
+    "**/__tests__/**",
+    "**/node_modules/**"
+  ]
+}
