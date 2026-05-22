@@ -4,6 +4,7 @@ import {
   buildHermesBaseline,
   formatUserTurnWithHistory,
   parseOpenAISseStream,
+  type StreamEvent,
 } from './hermes-chat-service'
 
 function makeStreamFromChunks(chunks: string[]): ReadableStream<Uint8Array> {
@@ -20,10 +21,18 @@ function makeStreamFromChunks(chunks: string[]): ReadableStream<Uint8Array> {
   })
 }
 
-async function collect(gen: AsyncGenerator<string>): Promise<string[]> {
-  const out: string[] = []
+async function collect<T>(gen: AsyncGenerator<T>): Promise<T[]> {
+  const out: T[] = []
   for await (const x of gen) out.push(x)
   return out
+}
+
+/** Helper: filter to content events and return their text concatenated. */
+function contentText(events: StreamEvent[]): string {
+  return events
+    .filter((e): e is Extract<StreamEvent, { type: 'content' }> => e.type === 'content')
+    .map((e) => e.text)
+    .join('')
 }
 
 describe('hermes-chat-service.buildChatCompletionsUrl', () => {
@@ -110,7 +119,8 @@ describe('hermes-chat-service.parseOpenAISseStream', () => {
       'data: {"choices":[{"delta":{"content":"!"}}]}\n\n',
       'data: [DONE]\n\n',
     ])
-    expect(await collect(parseOpenAISseStream(stream))).toEqual(['Hello', ', world', '!'])
+    const events = await collect(parseOpenAISseStream(stream))
+    expect(contentText(events)).toBe('Hello, world!')
   })
 
   test('handles \\r\\n line endings', async () => {
@@ -118,16 +128,15 @@ describe('hermes-chat-service.parseOpenAISseStream', () => {
       'data: {"choices":[{"delta":{"content":"A"}}]}\r\n\r\n',
       'data: {"choices":[{"delta":{"content":"B"}}]}\r\n\r\n',
     ])
-    expect(await collect(parseOpenAISseStream(stream))).toEqual(['A', 'B'])
+    expect(contentText(await collect(parseOpenAISseStream(stream)))).toBe('AB')
   })
 
   test('handles deltas split across chunk boundaries', async () => {
-    // The `data: ...` line gets cut in half between two TCP reads
     const stream = makeStreamFromChunks([
       'data: {"choices":[{"delta":{"con',
       'tent":"split"}}]}\n\n',
     ])
-    expect(await collect(parseOpenAISseStream(stream))).toEqual(['split'])
+    expect(contentText(await collect(parseOpenAISseStream(stream)))).toBe('split')
   })
 
   test('ignores [DONE] sentinel and empty data lines', async () => {
@@ -136,14 +145,14 @@ describe('hermes-chat-service.parseOpenAISseStream', () => {
       'data:  \n\n',
       'data: [DONE]\n\n',
     ])
-    expect(await collect(parseOpenAISseStream(stream))).toEqual(['ok'])
+    expect(contentText(await collect(parseOpenAISseStream(stream)))).toBe('ok')
   })
 
   test('falls back to message.content for non-streaming-shaped responses', async () => {
     const stream = makeStreamFromChunks([
       'data: {"choices":[{"message":{"content":"full"}}]}\n\n',
     ])
-    expect(await collect(parseOpenAISseStream(stream))).toEqual(['full'])
+    expect(contentText(await collect(parseOpenAISseStream(stream)))).toBe('full')
   })
 
   test('skips malformed JSON without throwing', async () => {
@@ -151,7 +160,7 @@ describe('hermes-chat-service.parseOpenAISseStream', () => {
       'data: {not valid json\n\n',
       'data: {"choices":[{"delta":{"content":"recovered"}}]}\n\n',
     ])
-    expect(await collect(parseOpenAISseStream(stream))).toEqual(['recovered'])
+    expect(contentText(await collect(parseOpenAISseStream(stream)))).toBe('recovered')
   })
 
   test('drops deltas without a content field (e.g. role-only first chunk)', async () => {
@@ -159,6 +168,54 @@ describe('hermes-chat-service.parseOpenAISseStream', () => {
       'data: {"choices":[{"delta":{"role":"assistant"}}]}\n\n',
       'data: {"choices":[{"delta":{"content":"hi"}}]}\n\n',
     ])
-    expect(await collect(parseOpenAISseStream(stream))).toEqual(['hi'])
+    expect(contentText(await collect(parseOpenAISseStream(stream)))).toBe('hi')
+  })
+
+  // D-16 B2b: tool_call streaming
+  test('emits tool_call deltas with index/id/name/argsDelta', async () => {
+    const stream = makeStreamFromChunks([
+      'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_abc","type":"function","function":{"name":"list_tasks","arguments":""}}]}}]}\n\n',
+      'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":"{\\"status\\":"}}]}}]}\n\n',
+      'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":"\\"TO_DO\\"}"}}]}}]}\n\n',
+      'data: {"choices":[{"delta":{},"finish_reason":"tool_calls"}]}\n\n',
+      'data: [DONE]\n\n',
+    ])
+    const events = await collect(parseOpenAISseStream(stream))
+    const toolCallEvents = events.filter((e): e is Extract<StreamEvent, { type: 'tool_call' }> => e.type === 'tool_call')
+    expect(toolCallEvents).toHaveLength(3)
+    expect(toolCallEvents[0].id).toBe('call_abc')
+    expect(toolCallEvents[0].name).toBe('list_tasks')
+    // Accumulated arguments across deltas
+    const accumulatedArgs = toolCallEvents.map((e) => e.argsDelta ?? '').join('')
+    expect(accumulatedArgs).toBe('{"status":"TO_DO"}')
+
+    const finishEvents = events.filter((e): e is Extract<StreamEvent, { type: 'finish' }> => e.type === 'finish')
+    expect(finishEvents).toHaveLength(1)
+    expect(finishEvents[0].reason).toBe('tool_calls')
+  })
+
+  test('emits finish_reason=stop on normal completion', async () => {
+    const stream = makeStreamFromChunks([
+      'data: {"choices":[{"delta":{"content":"done"}}]}\n\n',
+      'data: {"choices":[{"delta":{},"finish_reason":"stop"}]}\n\n',
+      'data: [DONE]\n\n',
+    ])
+    const events = await collect(parseOpenAISseStream(stream))
+    const finishEvents = events.filter((e): e is Extract<StreamEvent, { type: 'finish' }> => e.type === 'finish')
+    expect(finishEvents).toHaveLength(1)
+    expect(finishEvents[0].reason).toBe('stop')
+  })
+
+  test('handles parallel tool_calls (two indices in one stream)', async () => {
+    const stream = makeStreamFromChunks([
+      'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"a","function":{"name":"list_tasks","arguments":"{}"}}]}}]}\n\n',
+      'data: {"choices":[{"delta":{"tool_calls":[{"index":1,"id":"b","function":{"name":"get_task","arguments":"{\\"id\\":\\"x\\"}"}}]}}]}\n\n',
+      'data: {"choices":[{"delta":{},"finish_reason":"tool_calls"}]}\n\n',
+    ])
+    const events = await collect(parseOpenAISseStream(stream))
+    const toolCallEvents = events.filter((e): e is Extract<StreamEvent, { type: 'tool_call' }> => e.type === 'tool_call')
+    const indices = new Set(toolCallEvents.map((e) => e.index))
+    expect(indices.has(0)).toBe(true)
+    expect(indices.has(1)).toBe(true)
   })
 })
