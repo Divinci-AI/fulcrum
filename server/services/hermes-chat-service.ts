@@ -15,6 +15,7 @@ import { eq, sql } from 'drizzle-orm'
 import { log } from '../lib/logger'
 import { getSettings } from '../lib/settings'
 import { addMessage } from './assistant-service'
+import type { ChannelHistoryMessage } from './channels/message-storage'
 import type { AttachmentData } from '../../shared/types'
 
 /** OpenAI-compatible chat message shape, including vision content blocks. */
@@ -41,6 +42,13 @@ export interface StreamHermesOptions {
   attachments?: AttachmentData[]
   /** Skip persisting messages — used for observer / one-shot calls. */
   ephemeral?: boolean
+  /**
+   * Recent outgoing channel messages (notifications, rituals, MCP sends) the
+   * assistant hasn't seen yet. Inlined into the user-turn prefix so Hermes can
+   * answer follow-ups like "what was that notification about?" — same shape as
+   * the Claude path's channelHistory option.
+   */
+  channelHistory?: ChannelHistoryMessage[]
 }
 
 /**
@@ -113,7 +121,10 @@ export async function* streamHermesMessage(
       }
     }
   }
-  userBlocks.push({ type: 'text', text: userMessage || '(no text)' })
+  // D-16 B3: thread channelHistory in front of the user turn so Hermes has
+  // context for follow-ups about recent notifications / rituals / MCP sends.
+  const userText = formatUserTurnWithHistory(userMessage, options.channelHistory)
+  userBlocks.push({ type: 'text', text: userText || '(no text)' })
 
   const messages: ChatMessage[] = []
   if (options.systemPromptAdditions) {
@@ -202,6 +213,30 @@ export async function* streamHermesMessage(
   })
 
   yield { type: 'done', data: { content: assembled } }
+}
+
+/**
+ * Compose the user-turn text with a recent-channel-activity prefix, matching
+ * the format the Claude path uses in `assistant-service.ts`. Empty when no
+ * history rows are provided.
+ *
+ * Exported for unit testing.
+ */
+export function formatUserTurnWithHistory(
+  userMessage: string,
+  channelHistory: ChannelHistoryMessage[] | undefined,
+): string {
+  if (!channelHistory || channelHistory.length === 0) return userMessage
+  const lines = channelHistory.map((msg) => {
+    const time = new Date(msg.messageTimestamp).toLocaleTimeString('en-US', {
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: false,
+    })
+    const truncated = msg.content.length > 500 ? msg.content.slice(0, 500) + '...' : msg.content
+    return `[${time}] ${truncated}`
+  })
+  return `[Recent messages sent on this channel since our last conversation:\n${lines.join('\n')}]\n\n${userMessage}`
 }
 
 /**
