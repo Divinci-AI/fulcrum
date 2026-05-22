@@ -23,6 +23,11 @@ import {
   executeToolCall,
   type OpenAIToolCall,
 } from './hermes-tools'
+import {
+  executeMcpTool,
+  getMcpToolsAsOpenAI,
+  isMcpToolKnown,
+} from './hermes-mcp-bridge'
 import type { ChannelHistoryMessage } from './channels/message-storage'
 import type { AttachmentData } from '../../shared/types'
 
@@ -188,7 +193,18 @@ export async function* streamHermesMessage(
   // emit it as content:delta chunks for streaming consumers.
   const MAX_TOOL_ITERATIONS = 5
   // Observer tier gets no tools — pure-chat observation with no mutation surface.
-  const toolsForCall = options.securityTier === 'observer' ? [] : HERMES_TOOLS
+  // Trusted tier: MCP-derived tools (~127 from cli/src/mcp/tools/*) union with the
+  // hand-rolled HERMES_TOOLS, MCP winning on name collisions (MCP schemas are
+  // richer). Dispatch order in executeAnyTool mirrors this precedence.
+  const toolsForCall =
+    options.securityTier === 'observer'
+      ? []
+      : (() => {
+          const mcp = getMcpToolsAsOpenAI()
+          const mcpNames = new Set(mcp.map((t) => t.function.name))
+          const handRolled = HERMES_TOOLS.filter((t) => !mcpNames.has(t.function.name))
+          return [...mcp, ...handRolled]
+        })()
   let finalContent = ''
   let lastError: string | null = null
 
@@ -257,15 +273,37 @@ export async function* streamHermesMessage(
         tool_calls: toolCalls,
       })
       for (const call of toolCalls) {
-        const result = await executeToolCall(call)
+        // D-16 B2d: MCP-registered tools win over hand-rolled ones. Try the
+        // MCP bridge first; only fall back to executeToolCall when the name
+        // isn't in the MCP registry.
+        let resultContent: string
+        let resultName = call.function.name
+        if (isMcpToolKnown(call.function.name)) {
+          let args: Record<string, unknown>
+          try {
+            args = JSON.parse(call.function.arguments || '{}') as Record<string, unknown>
+          } catch (err) {
+            args = {}
+            log.chat.warn('Hermes MCP tool args not JSON; passing empty object', {
+              tool: call.function.name,
+              error: String(err),
+            })
+          }
+          resultContent = await executeMcpTool(call.function.name, args)
+        } else {
+          const result = await executeToolCall(call)
+          resultContent = result.content
+          resultName = result.name
+        }
         messages.push({
           role: 'tool',
-          tool_call_id: result.tool_call_id,
-          name: result.name,
-          content: result.content,
+          tool_call_id: call.id,
+          name: resultName,
+          content: resultContent,
         })
         log.chat.info('Hermes tool executed', {
           tool: call.function.name,
+          source: isMcpToolKnown(call.function.name) ? 'mcp' : 'hand-rolled',
           callId: call.id,
           iter,
         })
