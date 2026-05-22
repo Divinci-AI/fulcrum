@@ -79,6 +79,10 @@ import {
 import { useQueryClient } from '@tanstack/react-query'
 import { AGENT_DISPLAY_NAMES, type AgentType } from '@/types'
 import { ModelPicker } from '@/components/opencode/model-picker'
+import {
+  HERMES_PROVIDER_PRESETS,
+  detectPresetFromBaseUrl,
+} from '@/lib/hermes-provider-presets'
 import { WhatsAppSetup } from '@/components/messaging/whatsapp-setup'
 import { DiscordSetup } from '@/components/messaging/discord-setup'
 import { TelegramSetup } from '@/components/messaging/telegram-setup'
@@ -279,6 +283,9 @@ function SettingsPage() {
   const [localHermesBaseUrl, setLocalHermesBaseUrl] = useState<string>('http://localhost:8642')
   const [localHermesApiKey, setLocalHermesApiKey] = useState<string>('')
   const [localHermesModel, setLocalHermesModel] = useState<string>('')
+  // D-16: preset selector for the Hermes panel — auto-detects from baseUrl on load
+  // so an operator pasting `…/v1beta/openai` shows "Google Gemini" pre-selected.
+  const [localHermesPreset, setLocalHermesPreset] = useState<string>('custom')
 
   // Ritual settings local state (under assistant)
   const [localRitualsEnabled, setLocalRitualsEnabled] = useState(false)
@@ -397,7 +404,11 @@ function SettingsPage() {
     if (assistantObserverProvider !== undefined) setLocalAssistantObserverProvider(assistantObserverProvider)
     if (assistantObserverOpencodeModel !== undefined) setLocalAssistantObserverOpencodeModel(assistantObserverOpencodeModel)
     if (assistantDocumentsDir !== undefined) setLocalAssistantDocumentsDir(assistantDocumentsDir)
-    if (hermesBaseUrl !== undefined) setLocalHermesBaseUrl(hermesBaseUrl || 'http://localhost:8642')
+    if (hermesBaseUrl !== undefined) {
+      const url = hermesBaseUrl || 'http://localhost:8642'
+      setLocalHermesBaseUrl(url)
+      setLocalHermesPreset(detectPresetFromBaseUrl(url))
+    }
     if (hermesApiKey !== undefined) setLocalHermesApiKey(hermesApiKey || '')
     if (hermesModel !== undefined) setLocalHermesModel(hermesModel || '')
   }, [assistantProvider, assistantModel, assistantObserverModel, assistantObserverProvider, assistantObserverOpencodeModel, assistantDocumentsDir, hermesBaseUrl, hermesApiKey, hermesModel])
@@ -2217,8 +2228,64 @@ function SettingsPage() {
                       {localAssistantProvider === 'hermes' && (
                         <div className="space-y-3 rounded-md border border-border bg-muted/30 p-3">
                           <p className="text-xs text-muted-foreground">
-                            Any OpenAI-compatible endpoint with bearer auth works here — Hermes Agent (<code className="rounded bg-muted px-1">hermes gateway</code>), Google Gemini's compat layer (<code className="rounded bg-muted px-1">https://generativelanguage.googleapis.com/v1beta/openai</code>), OpenRouter, vLLM/Ollama, etc. If the Base URL already includes a version path, just paste it as-is; if it's a bare host, Fulcrum appends <code className="rounded bg-muted px-1">/v1/chat/completions</code>.
+                            Any OpenAI-compatible endpoint with bearer auth works here. Pick a preset to pre-fill Base URL and see model suggestions, or choose Custom for anything else.
                           </p>
+
+                          {/* D-16: provider preset selector */}
+                          <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+                            <label className="text-sm text-muted-foreground sm:w-32 sm:shrink-0">
+                              Preset
+                            </label>
+                            <Select
+                              value={localHermesPreset}
+                              onValueChange={(v) => {
+                                if (!v) return
+                                setLocalHermesPreset(v)
+                                const preset = HERMES_PROVIDER_PRESETS.find((p) => p.id === v)
+                                if (!preset || preset.id === 'custom') return
+                                setLocalHermesBaseUrl(preset.baseUrl)
+                                // Only pre-fill the model field when it's empty so we don't
+                                // stomp a model the operator typed manually.
+                                if (!localHermesModel.trim() && preset.modelSuggestions[0]) {
+                                  setLocalHermesModel(preset.modelSuggestions[0])
+                                }
+                              }}
+                            >
+                              <SelectTrigger className="flex-1">
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {HERMES_PROVIDER_PRESETS.map((preset) => (
+                                  <SelectItem key={preset.id} value={preset.id}>
+                                    {preset.label}
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          </div>
+                          {(() => {
+                            const preset = HERMES_PROVIDER_PRESETS.find((p) => p.id === localHermesPreset)
+                            if (!preset) return null
+                            return (
+                              <p className="text-xs text-muted-foreground sm:ml-32 sm:pl-2">
+                                {preset.description}
+                                {preset.docsUrl && (
+                                  <>
+                                    {' '}
+                                    <a
+                                      href={preset.docsUrl}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      className="text-primary underline"
+                                    >
+                                      Get a key →
+                                    </a>
+                                  </>
+                                )}
+                              </p>
+                            )
+                          })()}
+
                           <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
                             <label className="text-sm text-muted-foreground sm:w-32 sm:shrink-0">
                               Base URL
@@ -2226,7 +2293,10 @@ function SettingsPage() {
                             <Input
                               type="text"
                               value={localHermesBaseUrl}
-                              onChange={(e) => setLocalHermesBaseUrl(e.target.value)}
+                              onChange={(e) => {
+                                setLocalHermesBaseUrl(e.target.value)
+                                setLocalHermesPreset(detectPresetFromBaseUrl(e.target.value))
+                              }}
                               placeholder="http://localhost:8642"
                               className="flex-1 font-mono text-xs"
                             />
@@ -2255,6 +2325,27 @@ function SettingsPage() {
                               className="flex-1 font-mono text-xs"
                             />
                           </div>
+                          {(() => {
+                            const preset = HERMES_PROVIDER_PRESETS.find((p) => p.id === localHermesPreset)
+                            if (!preset?.modelSuggestions.length) return null
+                            return (
+                              <p className="text-xs text-muted-foreground sm:ml-32 sm:pl-2">
+                                Suggested:{' '}
+                                {preset.modelSuggestions.map((m, i) => (
+                                  <span key={m}>
+                                    {i > 0 && ', '}
+                                    <button
+                                      type="button"
+                                      onClick={() => setLocalHermesModel(m)}
+                                      className="rounded bg-muted px-1 font-mono hover:bg-muted/70"
+                                    >
+                                      {m}
+                                    </button>
+                                  </span>
+                                ))}
+                              </p>
+                            )
+                          })()}
                         </div>
                       )}
                     </div>
