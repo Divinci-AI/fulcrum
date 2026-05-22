@@ -141,7 +141,7 @@ export async function* streamHermesMessage(
     }).run()
   }
 
-  const url = `${cfg.baseUrl.replace(/\/+$/, '')}/v1/chat/completions`
+  const url = buildChatCompletionsUrl(cfg.baseUrl)
   let response: Response
   try {
     response = await fetch(url, {
@@ -202,6 +202,32 @@ export async function* streamHermesMessage(
   })
 
   yield { type: 'done', data: { content: assembled } }
+}
+
+/**
+ * Resolve the chat-completions URL from an operator-supplied baseUrl.
+ *
+ * Two conventions seen in the wild:
+ *   - "host-only" baseUrl (e.g. `http://localhost:8642`, no path). The service
+ *     hosts the API under `/v1/chat/completions` — append `/v1/chat/completions`.
+ *   - "path-included" baseUrl (e.g.
+ *     `https://generativelanguage.googleapis.com/v1beta/openai`, or
+ *     `https://api.openai.com/v1`). The version segment is already part of the
+ *     URL — append only `/chat/completions`.
+ *
+ * The discriminator is whether the parsed URL has a non-trivial pathname.
+ * Exported for unit testing.
+ */
+export function buildChatCompletionsUrl(baseUrl: string): string {
+  const base = baseUrl.replace(/\/+$/, '')
+  let pathname = '/'
+  try {
+    pathname = new URL(base).pathname
+  } catch {
+    // Malformed URL — fall back to bare-host convention; fetch() will surface the real error
+  }
+  const hasPath = pathname && pathname !== '/'
+  return hasPath ? `${base}/chat/completions` : `${base}/v1/chat/completions`
 }
 
 /**

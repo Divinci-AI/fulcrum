@@ -2207,11 +2207,11 @@ function SettingsPage() {
                         </div>
                       )}
 
-                      {/* Hermes config (shown when provider is Hermes) */}
+                      {/* Hermes / OpenAI-compatible provider config (shown when provider is Hermes) */}
                       {localAssistantProvider === 'hermes' && (
                         <div className="space-y-3 rounded-md border border-border bg-muted/30 p-3">
                           <p className="text-xs text-muted-foreground">
-                            Run <code className="rounded bg-muted px-1">hermes gateway</code> on the same host as Fulcrum. Set <code className="rounded bg-muted px-1">API_SERVER_ENABLED=true</code> and <code className="rounded bg-muted px-1">API_SERVER_KEY</code> in <code className="rounded bg-muted px-1">~/.hermes/.env</code>, then paste them here.
+                            Any OpenAI-compatible endpoint with bearer auth works here — Hermes Agent (<code className="rounded bg-muted px-1">hermes gateway</code>), Google Gemini's compat layer (<code className="rounded bg-muted px-1">https://generativelanguage.googleapis.com/v1beta/openai</code>), OpenRouter, vLLM/Ollama, etc. If the Base URL already includes a version path, just paste it as-is; if it's a bare host, Fulcrum appends <code className="rounded bg-muted px-1">/v1/chat/completions</code>.
                           </p>
                           <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
                             <label className="text-sm text-muted-foreground sm:w-32 sm:shrink-0">

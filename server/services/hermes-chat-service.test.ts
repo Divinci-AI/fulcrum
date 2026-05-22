@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { parseOpenAISseStream } from './hermes-chat-service'
+import { buildChatCompletionsUrl, parseOpenAISseStream } from './hermes-chat-service'
 
 function makeStreamFromChunks(chunks: string[]): ReadableStream<Uint8Array> {
   const enc = new TextEncoder()
@@ -20,6 +20,34 @@ async function collect(gen: AsyncGenerator<string>): Promise<string[]> {
   for await (const x of gen) out.push(x)
   return out
 }
+
+describe('hermes-chat-service.buildChatCompletionsUrl', () => {
+  test('host-only baseUrl gets /v1/chat/completions appended (Hermes convention)', () => {
+    expect(buildChatCompletionsUrl('http://localhost:8642')).toBe(
+      'http://localhost:8642/v1/chat/completions',
+    )
+    expect(buildChatCompletionsUrl('http://localhost:8642/')).toBe(
+      'http://localhost:8642/v1/chat/completions',
+    )
+  })
+
+  test('baseUrl with explicit path gets only /chat/completions appended (Gemini, OpenRouter, OpenAI)', () => {
+    expect(buildChatCompletionsUrl('https://generativelanguage.googleapis.com/v1beta/openai')).toBe(
+      'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions',
+    )
+    expect(buildChatCompletionsUrl('https://api.openai.com/v1')).toBe(
+      'https://api.openai.com/v1/chat/completions',
+    )
+    expect(buildChatCompletionsUrl('https://openrouter.ai/api/v1/')).toBe(
+      'https://openrouter.ai/api/v1/chat/completions',
+    )
+  })
+
+  test('malformed baseUrl falls back to bare-host convention without throwing', () => {
+    // The fetch() in streamHermesMessage will surface the real error; the helper just doesn't crash
+    expect(() => buildChatCompletionsUrl('not a url')).not.toThrow()
+  })
+})
 
 describe('hermes-chat-service.parseOpenAISseStream', () => {
   test('extracts content deltas from a well-formed OpenAI SSE stream', async () => {
