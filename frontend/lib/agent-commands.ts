@@ -115,11 +115,29 @@ const opencodeBuilder: AgentCommandBuilder = {
 }
 
 /**
+ * Hermes Agent worktree-spawn placeholder. PR 9 added Hermes as an
+ * assistant chat provider (Slack DM, UI chat). Worktree task spawning
+ * lands in PR 10 — for now, selecting Hermes as a per-task agent emits
+ * a clear "not supported yet" message rather than crashing.
+ */
+const hermesBuilder: AgentCommandBuilder = {
+  buildCommand: () => {
+    return `echo "Hermes is not yet supported as a worktree agent — see D-16 PR 10. Use Claude or OpenCode for now."`
+  },
+  notFoundPatterns: [
+    /hermes: command not found/,
+    /'hermes' is not recognized/,
+  ],
+  processPattern: /\bhermes\b/i,
+}
+
+/**
  * Map of agent types to their command builders
  */
 export const AGENT_BUILDERS: Record<AgentType, AgentCommandBuilder> = {
   claude: claudeBuilder,
   opencode: opencodeBuilder,
+  hermes: hermesBuilder,
 }
 
 /**

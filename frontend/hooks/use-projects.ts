@@ -1,6 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { fetchJSON } from '@/lib/api'
 import type { ProjectWithDetails, ProjectLink } from '@/types'
+import type { AgentType } from '@shared/types'
 
 const API_BASE = ''
 
@@ -153,7 +154,7 @@ export function useUpdateProject() {
         notes?: string | null
         status?: 'active' | 'archived'
         // Agent configuration
-        defaultAgent?: 'claude' | 'opencode' | null
+        defaultAgent?: AgentType | null
         claudeOptions?: Record<string, string> | null
         opencodeOptions?: Record<string, string> | null
         opencodeModel?: string | null

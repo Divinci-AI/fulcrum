@@ -12,8 +12,11 @@ export type EditorApp = 'vscode' | 'cursor' | 'windsurf' | 'zed' | 'antigravity'
 // Task type for defaults
 export type TaskType = 'worktree' | 'manual' | 'scratch'
 
-// Assistant provider and model types
-export type AssistantProvider = 'claude' | 'opencode'
+// Assistant provider and model types.
+// D-16 PR 1: 'hermes' added alongside claude (Claude Code SDK, optionally
+// z.ai-proxied) and opencode (@opencode-ai/sdk). Hermes is reached via Nous
+// Research's hermes-agent CLI exposing an OpenAI-compatible local endpoint.
+export type AssistantProvider = 'claude' | 'opencode' | 'hermes'
 export type AssistantModel = 'opus' | 'sonnet' | 'haiku'
 
 // Ritual configuration (for assistant daily rituals)
@@ -185,6 +188,19 @@ export interface Settings {
     ritualsEnabled: boolean
     morningRitual: RitualConfig
     eveningRitual: RitualConfig
+    /**
+     * D-16 PR 1: Hermes Agent integration. Operator runs `hermes gateway`
+     * locally (or any OpenAI-compatible relay) and points Fulcrum at the
+     * endpoint. Used when assistant.provider === 'hermes'.
+     *  - baseUrl: e.g. "http://localhost:8642" (without trailing /v1)
+     *  - apiKey: bearer matching API_SERVER_KEY in ~/.hermes/.env
+     *  - model: e.g. "Hermes-4-70B" or whatever the configured chain resolves to
+     */
+    hermes: {
+      baseUrl: string | null
+      apiKey: string | null
+      model: string | null
+    }
   }
   channels: ChannelsSettings
   caldav: CalDavSettings
@@ -242,6 +258,11 @@ export const DEFAULT_SETTINGS: Settings = {
     observerProvider: null,
     observerOpencodeModel: null,
     customInstructions: null,
+    hermes: {
+      baseUrl: 'http://localhost:8642',
+      apiKey: null,
+      model: null,
+    },
     documentsDir: '~/.fulcrum/documents',
     ritualsEnabled: false,
     morningRitual: {

@@ -86,7 +86,7 @@ export function updateLastChannelSyncAt(sessionId: string): void {
  */
 export async function createSession(options: {
   title?: string
-  provider?: 'claude' | 'opencode'
+  provider?: 'claude' | 'opencode' | 'hermes'
   model?: string
   projectId?: string
   context?: PageContext

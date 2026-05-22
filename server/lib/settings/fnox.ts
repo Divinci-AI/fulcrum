@@ -70,6 +70,10 @@ export const FNOX_CONFIG_MAP: Record<string, ConfigEntry> = {
   'assistant.morningRitual.prompt': { fnoxKey: 'FULCRUM_ASSISTANT_MORNING_PROMPT', provider: 'plain', type: 'string' },
   'assistant.eveningRitual.time': { fnoxKey: 'FULCRUM_ASSISTANT_EVENING_TIME', provider: 'plain', type: 'string' },
   'assistant.eveningRitual.prompt': { fnoxKey: 'FULCRUM_ASSISTANT_EVENING_PROMPT', provider: 'plain', type: 'string' },
+  // D-16 PR 1: Hermes Agent provider config
+  'assistant.hermes.baseUrl': { fnoxKey: 'FULCRUM_ASSISTANT_HERMES_BASE_URL', provider: 'plain', type: 'string' },
+  'assistant.hermes.apiKey': { fnoxKey: 'FULCRUM_ASSISTANT_HERMES_API_KEY', provider: 'age', type: 'string' },
+  'assistant.hermes.model': { fnoxKey: 'FULCRUM_ASSISTANT_HERMES_MODEL', provider: 'plain', type: 'string' },
 
   // Channels - Email
   'channels.email.enabled': { fnoxKey: 'FULCRUM_EMAIL_ENABLED', provider: 'plain', type: 'boolean' },

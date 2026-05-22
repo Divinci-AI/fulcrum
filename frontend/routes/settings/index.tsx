@@ -60,6 +60,9 @@ import {
   useAssistantObserverProvider,
   useAssistantObserverOpencodeModel,
   useAssistantDocumentsDir,
+  useAssistantHermesBaseUrl,
+  useAssistantHermesApiKey,
+  useAssistantHermesModel,
   useAssistantRitualsEnabled,
   useAssistantMorningRitualTime,
   useAssistantMorningRitualPrompt,
@@ -173,6 +176,9 @@ function SettingsPage() {
   const { data: assistantObserverProvider } = useAssistantObserverProvider()
   const { data: assistantObserverOpencodeModel } = useAssistantObserverOpencodeModel()
   const { data: assistantDocumentsDir, isLoading: assistantDocumentsDirLoading } = useAssistantDocumentsDir()
+  const { data: hermesBaseUrl } = useAssistantHermesBaseUrl()
+  const { data: hermesApiKey } = useAssistantHermesApiKey()
+  const { data: hermesModel } = useAssistantHermesModel()
   const { data: ritualsEnabled, isLoading: ritualsEnabledLoading } = useAssistantRitualsEnabled()
   const { data: morningRitualTime, isLoading: morningTimeLoading } = useAssistantMorningRitualTime()
   const { data: morningRitualPrompt, isLoading: morningPromptLoading } = useAssistantMorningRitualPrompt()
@@ -270,6 +276,9 @@ function SettingsPage() {
   const [localAssistantObserverProvider, setLocalAssistantObserverProvider] = useState<AssistantProvider | null>(null)
   const [localAssistantObserverOpencodeModel, setLocalAssistantObserverOpencodeModel] = useState<string | null>(null)
   const [localAssistantDocumentsDir, setLocalAssistantDocumentsDir] = useState<string>('~/.fulcrum/documents')
+  const [localHermesBaseUrl, setLocalHermesBaseUrl] = useState<string>('http://localhost:8642')
+  const [localHermesApiKey, setLocalHermesApiKey] = useState<string>('')
+  const [localHermesModel, setLocalHermesModel] = useState<string>('')
 
   // Ritual settings local state (under assistant)
   const [localRitualsEnabled, setLocalRitualsEnabled] = useState(false)
@@ -388,7 +397,10 @@ function SettingsPage() {
     if (assistantObserverProvider !== undefined) setLocalAssistantObserverProvider(assistantObserverProvider)
     if (assistantObserverOpencodeModel !== undefined) setLocalAssistantObserverOpencodeModel(assistantObserverOpencodeModel)
     if (assistantDocumentsDir !== undefined) setLocalAssistantDocumentsDir(assistantDocumentsDir)
-  }, [assistantProvider, assistantModel, assistantObserverModel, assistantObserverProvider, assistantObserverOpencodeModel, assistantDocumentsDir])
+    if (hermesBaseUrl !== undefined) setLocalHermesBaseUrl(hermesBaseUrl || 'http://localhost:8642')
+    if (hermesApiKey !== undefined) setLocalHermesApiKey(hermesApiKey || '')
+    if (hermesModel !== undefined) setLocalHermesModel(hermesModel || '')
+  }, [assistantProvider, assistantModel, assistantObserverModel, assistantObserverProvider, assistantObserverOpencodeModel, assistantDocumentsDir, hermesBaseUrl, hermesApiKey, hermesModel])
 
   // Sync ritual settings
   useEffect(() => {
@@ -430,7 +442,10 @@ function SettingsPage() {
     localAssistantObserverModel !== assistantObserverModel ||
     localAssistantObserverProvider !== assistantObserverProvider ||
     localAssistantObserverOpencodeModel !== assistantObserverOpencodeModel ||
-    localAssistantDocumentsDir !== assistantDocumentsDir
+    localAssistantDocumentsDir !== assistantDocumentsDir ||
+    localHermesBaseUrl !== hermesBaseUrl ||
+    localHermesApiKey !== hermesApiKey ||
+    localHermesModel !== hermesModel
 
   const hasRitualsChanges =
     localRitualsEnabled !== ritualsEnabled ||
@@ -841,6 +856,36 @@ function SettingsPage() {
           new Promise((resolve) => {
             updateConfig.mutate(
               { key: CONFIG_KEYS.ASSISTANT_DOCUMENTS_DIR, value: localAssistantDocumentsDir },
+              { onSettled: resolve }
+            )
+          })
+        )
+      }
+      if (localHermesBaseUrl !== hermesBaseUrl) {
+        promises.push(
+          new Promise((resolve) => {
+            updateConfig.mutate(
+              { key: CONFIG_KEYS.ASSISTANT_HERMES_BASE_URL, value: localHermesBaseUrl || null },
+              { onSettled: resolve }
+            )
+          })
+        )
+      }
+      if (localHermesApiKey !== hermesApiKey) {
+        promises.push(
+          new Promise((resolve) => {
+            updateConfig.mutate(
+              { key: CONFIG_KEYS.ASSISTANT_HERMES_API_KEY, value: localHermesApiKey || null },
+              { onSettled: resolve }
+            )
+          })
+        )
+      }
+      if (localHermesModel !== hermesModel) {
+        promises.push(
+          new Promise((resolve) => {
+            updateConfig.mutate(
+              { key: CONFIG_KEYS.ASSISTANT_HERMES_MODEL, value: localHermesModel || null },
               { onSettled: resolve }
             )
           })
@@ -2102,6 +2147,7 @@ function SettingsPage() {
                               {opencodeInstalled && (
                                 <SelectItem value="opencode">OpenCode</SelectItem>
                               )}
+                              <SelectItem value="hermes">Hermes</SelectItem>
                             </SelectContent>
                           </Select>
                         </div>
@@ -2160,6 +2206,51 @@ function SettingsPage() {
                           </p>
                         </div>
                       )}
+
+                      {/* Hermes / OpenAI-compatible provider config (shown when provider is Hermes) */}
+                      {localAssistantProvider === 'hermes' && (
+                        <div className="space-y-3 rounded-md border border-border bg-muted/30 p-3">
+                          <p className="text-xs text-muted-foreground">
+                            Any OpenAI-compatible endpoint with bearer auth works here — Hermes Agent (<code className="rounded bg-muted px-1">hermes gateway</code>), Google Gemini's compat layer (<code className="rounded bg-muted px-1">https://generativelanguage.googleapis.com/v1beta/openai</code>), OpenRouter, vLLM/Ollama, etc. If the Base URL already includes a version path, just paste it as-is; if it's a bare host, Fulcrum appends <code className="rounded bg-muted px-1">/v1/chat/completions</code>.
+                          </p>
+                          <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+                            <label className="text-sm text-muted-foreground sm:w-32 sm:shrink-0">
+                              Base URL
+                            </label>
+                            <Input
+                              type="text"
+                              value={localHermesBaseUrl}
+                              onChange={(e) => setLocalHermesBaseUrl(e.target.value)}
+                              placeholder="http://localhost:8642"
+                              className="flex-1 font-mono text-xs"
+                            />
+                          </div>
+                          <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+                            <label className="text-sm text-muted-foreground sm:w-32 sm:shrink-0">
+                              API Key
+                            </label>
+                            <Input
+                              type="password"
+                              value={localHermesApiKey}
+                              onChange={(e) => setLocalHermesApiKey(e.target.value)}
+                              placeholder="API_SERVER_KEY from ~/.hermes/.env"
+                              className="flex-1 font-mono text-xs"
+                            />
+                          </div>
+                          <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+                            <label className="text-sm text-muted-foreground sm:w-32 sm:shrink-0">
+                              Model
+                            </label>
+                            <Input
+                              type="text"
+                              value={localHermesModel}
+                              onChange={(e) => setLocalHermesModel(e.target.value)}
+                              placeholder="Hermes-4-70B"
+                              className="flex-1 font-mono text-xs"
+                            />
+                          </div>
+                        </div>
+                      )}
                     </div>
 
                     {/* Right column: Observer */}
@@ -2185,6 +2276,7 @@ function SettingsPage() {
                               {opencodeInstalled && (
                                 <SelectItem value="opencode">OpenCode</SelectItem>
                               )}
+                              <SelectItem value="hermes">Hermes</SelectItem>
                             </SelectContent>
                           </Select>
                         </div>

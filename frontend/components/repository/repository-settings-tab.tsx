@@ -17,7 +17,7 @@ import {
 } from '@/components/ui/select'
 import { HugeiconsIcon } from '@hugeicons/react'
 import { Folder01Icon, GithubIcon, Link01Icon, Tick02Icon } from '@hugeicons/core-free-icons'
-import { AGENT_DISPLAY_NAMES, type AgentType, type Repository } from '@/types'
+import { AGENT_DISPLAY_NAMES, WORKTREE_AGENT_TYPES, type AgentType, type Repository } from '@/types'
 import { AgentOptionsEditor } from '@/components/repositories/agent-options-editor'
 import { ModelPicker } from '@/components/opencode/model-picker'
 import { toast } from 'sonner'
@@ -229,7 +229,7 @@ export function RepositorySettingsTab({ repository }: RepositorySettingsTabProps
                     <SelectItem value="inherit">
                       {t('detailView.settings.defaultAgentInherit')}
                     </SelectItem>
-                    {(Object.keys(AGENT_DISPLAY_NAMES) as AgentType[]).map((agentType) => (
+                    {WORKTREE_AGENT_TYPES.map((agentType) => (
                       <SelectItem key={agentType} value={agentType}>
                         {AGENT_DISPLAY_NAMES[agentType]}
                       </SelectItem>

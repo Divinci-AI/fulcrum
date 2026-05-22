@@ -99,6 +99,11 @@ export function getSettings(): Settings {
         time: (fv('assistant.eveningRitual.time') as string) ?? DEFAULT_SETTINGS.assistant.eveningRitual.time,
         prompt: (fv('assistant.eveningRitual.prompt') as string) ?? DEFAULT_SETTINGS.assistant.eveningRitual.prompt,
       } as RitualConfig,
+      hermes: {
+        baseUrl: (fv('assistant.hermes.baseUrl') as string | null) ?? DEFAULT_SETTINGS.assistant.hermes.baseUrl,
+        apiKey: (fv('assistant.hermes.apiKey') as string | null) ?? DEFAULT_SETTINGS.assistant.hermes.apiKey,
+        model: (fv('assistant.hermes.model') as string | null) ?? DEFAULT_SETTINGS.assistant.hermes.model,
+      },
     },
     channels: {
       email: {

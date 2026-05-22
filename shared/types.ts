@@ -12,23 +12,38 @@ export const MEMORY_SOURCES = [
 
 export type MemorySource = (typeof MEMORY_SOURCES)[number]
 
-// Supported AI coding agents
-export type AgentType = 'claude' | 'opencode'
+// Supported AI coding agents.
+// D-16 PR 1: 'hermes' added for the assistant session.provider path. Note that
+// worktree task spawning for Hermes is NOT yet implemented — that lands in
+// PR 10. Selecting Hermes as a per-task worktree agent today is a no-op.
+export type AgentType = 'claude' | 'opencode' | 'hermes'
 
 export const AGENT_DISPLAY_NAMES: Record<AgentType, string> = {
   claude: 'Claude Code',
   opencode: 'OpenCode',
+  hermes: 'Hermes',
 }
 
 export const AGENT_INSTALL_COMMANDS: Record<AgentType, string> = {
   claude: 'npm install -g @anthropic-ai/claude-code',
   opencode: 'npm install -g opencode-ai@latest',
+  hermes: 'See https://github.com/nousresearch/hermes-agent',
 }
 
 export const AGENT_DOC_URLS: Record<AgentType, string> = {
   claude: 'https://docs.anthropic.com/en/docs/claude-code/overview',
   opencode: 'https://opencode.ai/docs/',
+  hermes: 'https://hermes-agent.nousresearch.com/docs/',
 }
+
+/**
+ * Agents that can run inside a worktree task. D-16 PR 1 added 'hermes' to the
+ * AgentType union for the assistant chat path, but worktree spawning for Hermes
+ * isn't implemented yet (the `hermesBuilder` in agent-commands.ts is a stub).
+ * UI worktree pickers iterate THIS list, not Object.keys(AGENT_DISPLAY_NAMES),
+ * so Hermes stays hidden until PR 10 wires `hermes` as a real worktree agent.
+ */
+export const WORKTREE_AGENT_TYPES: AgentType[] = ['claude', 'opencode']
 
 export type TaskStatus =
   | 'TO_DO'
