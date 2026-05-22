@@ -22,6 +22,10 @@ const isMacOS = process.platform === 'darwin'
 const AGENT_PATTERNS: Record<AgentType, RegExp> = {
   claude: /(^|\/)claude(\s|\0|$)/i,
   opencode: /(^|\/)opencode(\s|\0|$)/i,
+  // D-16: Hermes added to AgentType for the assistant chat path. Worktree
+  // spawning isn't wired yet (see hermesBuilder stub), so process detection
+  // here is best-effort — the binary name is `hermes`.
+  hermes: /(^|\/)hermes(\s|\0|$)/i,
 }
 
 interface AgentInstance {
