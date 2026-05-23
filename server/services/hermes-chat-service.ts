@@ -211,6 +211,13 @@ export async function* streamHermesMessage(
   // Instead we hold content until we know finish_reason !== 'tool_calls', then
   // emit it as content:delta chunks for streaming consumers.
   const MAX_TOOL_ITERATIONS = 5
+  // Hoisted so the empty-response diagnostic at the bottom can report what
+  // the last iteration actually saw (finish_reason='stop' vs 'tool_calls' but
+  // no slots parsed vs unset). Without this we can't tell whether Gemini gave
+  // up or whether our SSE parser silently dropped tool_calls.
+  let lastFinishReason: string | null = null
+  let lastToolCallSlotCount = 0
+  let lastIter = 0
   let finalContent = ''
   let lastError: string | null = null
 
@@ -267,6 +274,10 @@ export async function* streamHermesMessage(
       lastError = `Hermes stream parse failed: ${err instanceof Error ? err.message : String(err)}`
       break
     }
+
+    lastFinishReason = finishReason
+    lastToolCallSlotCount = toolCallSlots.size
+    lastIter = iter
 
     // If the model decided to call tools, execute and loop. Note: we check
     // BOTH finishReason === 'tool_calls' AND toolCallSlots.size — some
@@ -340,7 +351,11 @@ export async function* streamHermesMessage(
       sessionId,
       model,
       messageCount: messages.length,
-      hint: 'Common causes: safety filter, prompt-too-large, model confused by tool defs, or provider tool_call format mismatch',
+      lastIter,
+      lastFinishReason,
+      lastToolCallSlotCount,
+      toolCount: toolsForCall.length,
+      hint: 'finish_reason="stop" + 0 slots = model gave up; finish_reason="tool_calls" + 0 slots = SSE parser missed them; finish_reason="length" = output truncated by max_tokens; finish_reason="content_filter" = safety',
     })
     outboundContent =
       "I couldn't generate a response just now. The model returned no content — try rephrasing, asking something more specific, or splitting the request into smaller asks."
