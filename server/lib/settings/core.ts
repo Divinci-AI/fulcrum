@@ -110,6 +110,9 @@ export function getSettings(): Settings {
         apiKey: (fv('assistant.divinci.apiKey') as string | null) ?? DEFAULT_SETTINGS.assistant.divinci.apiKey,
         groupId: (fv('assistant.divinci.groupId') as string | null) ?? DEFAULT_SETTINGS.assistant.divinci.groupId,
         topK: (fv('assistant.divinci.topK') as number | null) ?? DEFAULT_SETTINGS.assistant.divinci.topK,
+        collections: {
+          fulcrum: (fv('assistant.divinci.collections.fulcrum') as string | null) ?? DEFAULT_SETTINGS.assistant.divinci.collections.fulcrum,
+        },
       },
     },
     channels: {

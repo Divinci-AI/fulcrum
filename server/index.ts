@@ -10,6 +10,7 @@ import {
 import { ensureFnoxBootstrap, ensureLatestConfig, getSettingByKey, initFnoxConfig } from './lib/settings'
 import { pruneLegacyGithubPatFnoxKey } from './services/github-account-service'
 import { startPRMonitor, stopPRMonitor } from './services/pr-monitor'
+import { startDivinciSync, stopDivinciSync } from './services/divinci-sync-service'
 import { startMetricsCollector, stopMetricsCollector } from './services/metrics-collector'
 import { startGitWatcher, stopGitWatcher } from './services/git-watcher'
 import { startMessagingChannels, stopMessagingChannels } from './services/channels'
@@ -178,6 +179,9 @@ injectWebSocket(server)
 // Start PR monitor service
 startPRMonitor()
 
+// D-17 PR 2: Divinci RAG sync timer (gated internally on settings)
+startDivinciSync()
+
 // Start metrics collector for monitoring
 startMetricsCollector()
 
@@ -200,6 +204,7 @@ startGoogleCalendarSync()
 process.on('SIGINT', async () => {
   log.server.info('Shutting down (terminals will persist)')
   stopPRMonitor()
+  stopDivinciSync()
   stopMetricsCollector()
   stopGitWatcher()
   stopAssistantScheduler()
@@ -214,6 +219,7 @@ process.on('SIGINT', async () => {
 process.on('SIGTERM', async () => {
   log.server.info('Shutting down (terminals will persist)')
   stopPRMonitor()
+  stopDivinciSync()
   stopMetricsCollector()
   stopGitWatcher()
   stopAssistantScheduler()
