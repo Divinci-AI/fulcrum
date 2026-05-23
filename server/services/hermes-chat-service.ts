@@ -254,16 +254,32 @@ export async function* streamHermesMessage(
     let finishReason: string | null = null
 
     try {
+      let rawToolDeltaLogged = false
       for await (const ev of parseOpenAISseStream(response.body)) {
         if (ev.type === 'content') {
           contentBuffer += ev.text
         } else if (ev.type === 'tool_call') {
+          // One-shot diagnostic per request: shape of the first tool_call delta
+          // we receive. If Gemini's thought_signature is under a name we
+          // didn't anticipate (not thought_signature or thoughtSignature),
+          // this log surfaces the actual field so the next fix is one-line.
+          if (!rawToolDeltaLogged) {
+            rawToolDeltaLogged = true
+            log.chat.info('Hermes raw tool_call delta', {
+              iter,
+              fields: Object.keys(ev),
+              parsedThoughtSignature: !!ev.thoughtSignature,
+            })
+          }
           const slot =
             toolCallSlots.get(ev.index) ??
             ({ id: '', type: 'function' as const, function: { name: '', arguments: '' } } as OpenAIToolCall)
           if (ev.id) slot.id = ev.id
           if (ev.name) slot.function.name = ev.name
           if (ev.argsDelta) slot.function.arguments += ev.argsDelta
+          // Gemini-only: preserve the per-call thought_signature so the
+          // follow-up assistant message can echo it back (HTTP 400 otherwise).
+          if (ev.thoughtSignature) slot.thought_signature = ev.thoughtSignature
           toolCallSlots.set(ev.index, slot)
         } else if (ev.type === 'finish') {
           finishReason = ev.reason
@@ -334,6 +350,11 @@ export async function* streamHermesMessage(
           source: isMcpToolKnown(call.function.name) ? 'mcp' : 'hand-rolled',
           callId: call.id,
           iter,
+          // Diagnostic: confirms whether we captured Gemini's thought_signature.
+          // If false here and Gemini still 400s on missing thought_signature,
+          // the field is under a different name in the SSE delta — check the
+          // 'Hermes raw tool_call delta' log to find it.
+          hasThoughtSignature: !!call.thought_signature,
         })
       }
       continue
@@ -539,6 +560,9 @@ export type StreamEvent =
       id?: string
       name?: string
       argsDelta?: string
+      /** Gemini-specific: opaque signature on each functionCall that MUST be
+       * echoed back on the follow-up turn or Gemini rejects with HTTP 400. */
+      thoughtSignature?: string
     }
   | { type: 'finish'; reason: string | null }
 
@@ -615,6 +639,9 @@ function* extractEventsFromSse(eventText: string): Generator<StreamEvent> {
         if (tc.id) out.id = tc.id
         if (tc.function?.name) out.name = tc.function.name
         if (typeof tc.function?.arguments === 'string') out.argsDelta = tc.function.arguments
+        // Gemini-only field — see SseDataPayload comment.
+        const sig = tc.thought_signature ?? tc.thoughtSignature
+        if (typeof sig === 'string' && sig.length > 0) out.thoughtSignature = sig
         yield out
       }
     }
@@ -635,6 +662,10 @@ interface SseDataPayload {
         id?: string
         type?: string
         function?: { name?: string; arguments?: string }
+        // Gemini OpenAI-compat: thought_signature may appear under either
+        // casing depending on layer version. Capture both.
+        thought_signature?: string
+        thoughtSignature?: string
       }>
     }
     message?: {
@@ -644,6 +675,8 @@ interface SseDataPayload {
         id?: string
         type?: string
         function?: { name?: string; arguments?: string }
+        thought_signature?: string
+        thoughtSignature?: string
       }>
     }
     finish_reason?: string | null
