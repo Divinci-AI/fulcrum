@@ -467,6 +467,16 @@ export function useAssistantDivinciTopK() {
   }
 }
 
+// D-17 PR 2: per-source collection IDs inside the Divinci Group
+export function useAssistantDivinciCollectionFulcrum() {
+  const query = useConfig(CONFIG_KEYS.ASSISTANT_DIVINCI_COLLECTION_FULCRUM)
+  return {
+    ...query,
+    data: (query.data?.value as string | null) ?? '',
+    isDefault: query.data?.isDefault ?? true,
+  }
+}
+
 // Ritual settings (under assistant)
 export function useAssistantRitualsEnabled() {
   const query = useConfig(CONFIG_KEYS.ASSISTANT_RITUALS_ENABLED)

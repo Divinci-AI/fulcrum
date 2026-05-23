@@ -19,6 +19,7 @@ import {
   broadcastToTerminal,
 } from './websocket/terminal-ws'
 import { startPRMonitor, stopPRMonitor } from './services/pr-monitor'
+import { startDivinciSync, stopDivinciSync } from './services/divinci-sync-service'
 import { startMetricsCollector, stopMetricsCollector } from './services/metrics-collector'
 import { WebSocket } from 'ws'
 import { log } from './lib/logger'
@@ -178,6 +179,7 @@ function gracefulShutdown() {
   log.desktop.info('Shutting down (terminals will persist)')
 
   stopPRMonitor()
+  stopDivinciSync()
   stopMetricsCollector()
 
   if (ptyManager) {
@@ -287,6 +289,7 @@ async function main() {
 
   // Start background services
   startPRMonitor()
+  startDivinciSync()
   startMetricsCollector()
 
   // Handle shutdown signals

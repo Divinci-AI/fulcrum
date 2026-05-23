@@ -220,6 +220,15 @@ export interface Settings {
       groupId: string | null
       /** topK chunks per retrieval; Divinci server caps at 50. */
       topK: number
+      /**
+       * D-17 PR 2: per-source collection IDs inside the Group. The sync
+       * service uploads to a specific collection (RagVectorModel _id); the
+       * Group merges them for retrieval. Added incrementally per source PR.
+       */
+      collections: {
+        /** Fulcrum tasks + projects (D-17 PR 2). */
+        fulcrum: string | null
+      }
     }
   }
   channels: ChannelsSettings
@@ -289,6 +298,9 @@ export const DEFAULT_SETTINGS: Settings = {
       apiKey: null,
       groupId: null,
       topK: 8,
+      collections: {
+        fulcrum: null,
+      },
     },
     documentsDir: '~/.fulcrum/documents',
     ritualsEnabled: false,
@@ -415,6 +427,7 @@ export const VALID_SETTING_PATHS = new Set([
   'assistant.divinci.apiKey',
   'assistant.divinci.groupId',
   'assistant.divinci.topK',
+  'assistant.divinci.collections.fulcrum',
   'channels.email.enabled',
   'channels.email.backend',
   'channels.email.googleAccountId',
