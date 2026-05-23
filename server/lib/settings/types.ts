@@ -228,6 +228,8 @@ export interface Settings {
       collections: {
         /** Fulcrum tasks + projects (D-17 PR 2). */
         fulcrum: string | null
+        /** Slack messages (D-17 PR 3). One Divinci file per channel/day. */
+        slack: string | null
       }
     }
   }
@@ -300,6 +302,7 @@ export const DEFAULT_SETTINGS: Settings = {
       topK: 8,
       collections: {
         fulcrum: null,
+        slack: null,
       },
     },
     documentsDir: '~/.fulcrum/documents',
@@ -428,6 +431,7 @@ export const VALID_SETTING_PATHS = new Set([
   'assistant.divinci.groupId',
   'assistant.divinci.topK',
   'assistant.divinci.collections.fulcrum',
+  'assistant.divinci.collections.slack',
   'channels.email.enabled',
   'channels.email.backend',
   'channels.email.googleAccountId',

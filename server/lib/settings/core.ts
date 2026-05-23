@@ -112,6 +112,7 @@ export function getSettings(): Settings {
         topK: (fv('assistant.divinci.topK') as number | null) ?? DEFAULT_SETTINGS.assistant.divinci.topK,
         collections: {
           fulcrum: (fv('assistant.divinci.collections.fulcrum') as string | null) ?? DEFAULT_SETTINGS.assistant.divinci.collections.fulcrum,
+          slack: (fv('assistant.divinci.collections.slack') as string | null) ?? DEFAULT_SETTINGS.assistant.divinci.collections.slack,
         },
       },
     },
