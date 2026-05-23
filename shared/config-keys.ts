@@ -43,6 +43,14 @@ export const CONFIG_KEYS = {
   ASSISTANT_HERMES_BASE_URL: 'assistant.hermes.baseUrl',
   ASSISTANT_HERMES_API_KEY: 'assistant.hermes.apiKey',
   ASSISTANT_HERMES_MODEL: 'assistant.hermes.model',
+  // D-17 PR 1: Divinci RAG pre-flight retrieval for Hermes. Used only when
+  // assistant.provider === 'hermes' AND assistant.divinci.enabled. See
+  // server/services/divinci-rag-client.ts.
+  ASSISTANT_DIVINCI_ENABLED: 'assistant.divinci.enabled',
+  ASSISTANT_DIVINCI_BASE_URL: 'assistant.divinci.baseUrl',
+  ASSISTANT_DIVINCI_API_KEY: 'assistant.divinci.apiKey',
+  ASSISTANT_DIVINCI_GROUP_ID: 'assistant.divinci.groupId',
+  ASSISTANT_DIVINCI_TOP_K: 'assistant.divinci.topK',
   EMAIL_POLL_INTERVAL: 'channels.email.pollIntervalSeconds',
   CALDAV_ENABLED: 'caldav.enabled',
   CALDAV_SERVER_URL: 'caldav.serverUrl',

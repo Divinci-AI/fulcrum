@@ -104,6 +104,13 @@ export function getSettings(): Settings {
         apiKey: (fv('assistant.hermes.apiKey') as string | null) ?? DEFAULT_SETTINGS.assistant.hermes.apiKey,
         model: (fv('assistant.hermes.model') as string | null) ?? DEFAULT_SETTINGS.assistant.hermes.model,
       },
+      divinci: {
+        enabled: (fv('assistant.divinci.enabled') as boolean | null) ?? DEFAULT_SETTINGS.assistant.divinci.enabled,
+        baseUrl: (fv('assistant.divinci.baseUrl') as string | null) ?? DEFAULT_SETTINGS.assistant.divinci.baseUrl,
+        apiKey: (fv('assistant.divinci.apiKey') as string | null) ?? DEFAULT_SETTINGS.assistant.divinci.apiKey,
+        groupId: (fv('assistant.divinci.groupId') as string | null) ?? DEFAULT_SETTINGS.assistant.divinci.groupId,
+        topK: (fv('assistant.divinci.topK') as number | null) ?? DEFAULT_SETTINGS.assistant.divinci.topK,
+      },
     },
     channels: {
       email: {
