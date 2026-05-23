@@ -36,11 +36,19 @@ export interface OpenAITool {
   }
 }
 
-/** OpenAI's tool_call shape (subset of what we need). */
+/** OpenAI's tool_call shape (subset of what we need).
+ *
+ * `thought_signature` is a Gemini-specific extension: thinking-capable models
+ * (gemini-2.5-flash, gemini-3.5-flash, …) attach an opaque per-call signature
+ * to every functionCall part, and reject the next turn with HTTP 400 if the
+ * follow-up assistant message doesn't echo it back. Non-Gemini providers
+ * simply ignore the field, so it's safe to forward unconditionally.
+ */
 export interface OpenAIToolCall {
   id: string
   type: 'function'
   function: { name: string; arguments: string } // arguments is JSON-stringified
+  thought_signature?: string
 }
 
 /** Tool result fed back to the model. */
