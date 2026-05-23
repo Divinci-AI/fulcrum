@@ -297,7 +297,12 @@ export async function* streamHermesMessage(
           if (ev.argsDelta) slot.function.arguments += ev.argsDelta
           // Gemini-only: preserve the per-call thought_signature so the
           // follow-up assistant message can echo it back (HTTP 400 otherwise).
-          if (ev.thoughtSignature) slot.thought_signature = ev.thoughtSignature
+          // Nested under extra_content.google.thought_signature per Gemini's
+          // OpenAI-compat spec; we rebuild that exact shape on the outbound
+          // assistant message.
+          if (ev.thoughtSignature) {
+            slot.extra_content = { google: { thought_signature: ev.thoughtSignature } }
+          }
           toolCallSlots.set(ev.index, slot)
         } else if (ev.type === 'finish') {
           finishReason = ev.reason
@@ -372,7 +377,7 @@ export async function* streamHermesMessage(
           // If false here and Gemini still 400s on missing thought_signature,
           // the field is under a different name in the SSE delta — check the
           // 'Hermes raw tool_call delta' log to find it.
-          hasThoughtSignature: !!call.thought_signature,
+          hasThoughtSignature: !!call.extra_content?.google?.thought_signature,
         })
       }
       continue
@@ -657,8 +662,8 @@ function* extractEventsFromSse(eventText: string): Generator<StreamEvent> {
         if (tc.id) out.id = tc.id
         if (tc.function?.name) out.name = tc.function.name
         if (typeof tc.function?.arguments === 'string') out.argsDelta = tc.function.arguments
-        // Gemini-only field — see SseDataPayload comment.
-        const sig = tc.thought_signature ?? tc.thoughtSignature
+        // Gemini-only: signature nested at extra_content.google.thought_signature.
+        const sig = tc.extra_content?.google?.thought_signature
         if (typeof sig === 'string' && sig.length > 0) out.thoughtSignature = sig
         yield out
       }
@@ -680,10 +685,11 @@ interface SseDataPayload {
         id?: string
         type?: string
         function?: { name?: string; arguments?: string }
-        // Gemini OpenAI-compat: thought_signature may appear under either
-        // casing depending on layer version. Capture both.
-        thought_signature?: string
-        thoughtSignature?: string
+        // Gemini OpenAI-compat: thought_signature is nested at
+        // tool_calls[N].extra_content.google.thought_signature per Gemini's
+        // OpenAI-compat docs. Confirmed via web research after PR #121's
+        // top-level guesses (`thought_signature` / `thoughtSignature`) missed.
+        extra_content?: { google?: { thought_signature?: string } }
       }>
     }
     message?: {
@@ -693,8 +699,7 @@ interface SseDataPayload {
         id?: string
         type?: string
         function?: { name?: string; arguments?: string }
-        thought_signature?: string
-        thoughtSignature?: string
+        extra_content?: { google?: { thought_signature?: string } }
       }>
     }
     finish_reason?: string | null
