@@ -149,12 +149,31 @@ export async function* streamHermesMessage(
   const userText = formatUserTurnWithHistory(userMessage, options.channelHistory)
   userBlocks.push({ type: 'text', text: userText || '(no text)' })
 
+  // Observer tier gets no tools — pure-chat observation with no mutation surface.
+  // Trusted tier: MCP-derived tools (~127 from cli/src/mcp/tools/*) union with the
+  // hand-rolled HERMES_TOOLS, MCP winning on name collisions (MCP schemas are
+  // richer). Dispatch order in executeAnyTool mirrors this precedence.
+  // Computed BEFORE the system prompt so the baseline disclaimer matches reality:
+  // when we send tool defs, the prompt tells the model to call them; when we
+  // don't, the prompt tells it to describe what the user should do instead.
+  const toolsForCall =
+    options.securityTier === 'observer'
+      ? []
+      : (() => {
+          const mcp = getMcpToolsAsOpenAI()
+          const mcpNames = new Set(mcp.map((t) => t.function.name))
+          const handRolled = HERMES_TOOLS.filter((t) => !mcpNames.has(t.function.name))
+          return [...mcp, ...handRolled]
+        })()
+
   // D-16 B8: prepend a Hermes-appropriate baseline system prompt so the
-  // assistant knows what Fulcrum is and what it can/can't do. Uses the
-  // observer-knowledge bundle (CoreIdentity + DataModel, no tool descriptions)
-  // so the model doesn't pretend it can call tools it doesn't have access to.
+  // assistant knows what Fulcrum is and what it can/can't do. The capability
+  // note inside is conditional on toolsForCall.length — without that flag the
+  // baseline used to claim "no tool access" even when we had 127 tools wired
+  // up via the MCP bridge, and Gemini obeyed the system prompt over the tools
+  // parameter and refused to call them.
   const messages: ChatMessage[] = []
-  const baseline = buildHermesBaseline()
+  const baseline = buildHermesBaseline(toolsForCall.length > 0)
   const fullSystem = options.systemPromptAdditions
     ? `${baseline}\n\n${options.systemPromptAdditions}`
     : baseline
@@ -192,19 +211,6 @@ export async function* streamHermesMessage(
   // Instead we hold content until we know finish_reason !== 'tool_calls', then
   // emit it as content:delta chunks for streaming consumers.
   const MAX_TOOL_ITERATIONS = 5
-  // Observer tier gets no tools — pure-chat observation with no mutation surface.
-  // Trusted tier: MCP-derived tools (~127 from cli/src/mcp/tools/*) union with the
-  // hand-rolled HERMES_TOOLS, MCP winning on name collisions (MCP schemas are
-  // richer). Dispatch order in executeAnyTool mirrors this precedence.
-  const toolsForCall =
-    options.securityTier === 'observer'
-      ? []
-      : (() => {
-          const mcp = getMcpToolsAsOpenAI()
-          const mcpNames = new Set(mcp.map((t) => t.function.name))
-          const handRolled = HERMES_TOOLS.filter((t) => !mcpNames.has(t.function.name))
-          return [...mcp, ...handRolled]
-        })()
   let finalContent = ''
   let lastError: string | null = null
 
@@ -404,7 +410,7 @@ function chunkText(text: string, size: number): string[] {
  *
  * Exported for unit testing.
  */
-export function buildHermesBaseline(): string {
+export function buildHermesBaseline(hasTools: boolean = false): string {
   const settings = getSettings()
   const instanceContext = getInstanceContext(settings.assistant.documentsDir)
   const knowledge = getObserverKnowledge()
@@ -418,9 +424,13 @@ This is your persistent memory (MEMORY.md), injected into every conversation.
 ${memoryFileContent}`
     : ''
 
-  const toolDisclaimer = `\n\n## Capability Note
+  const toolDisclaimer = hasTools
+    ? `\n\n## Capability Note
 
-You're running on the Hermes provider, which routes to an OpenAI-compatible chat endpoint. You can read context (recent channel activity, the memory file, the user's message) and answer in natural language — but you do NOT have tool access today. If the user asks you to create a task, send a notification, or modify state, describe what they should do (which UI panel, which command) rather than claiming you can act. Tool support is planned for a follow-up release.`
+You're running on the Hermes provider via an OpenAI-compatible endpoint, and you DO have tool access this turn — Fulcrum's full MCP tool surface is wired in as OpenAI function calls. When the user asks about tasks, projects, notifications, calendars, the file tree, etc., CALL the appropriate tool (e.g. \`list_tasks\`, \`get_task\`, \`search\`, \`memory_search\`) instead of describing what they should do manually. Tools include task/project/repository CRUD, calendar, Gmail, memory, search, and filesystem read. Only fall back to "open the Fulcrum UI" guidance when no tool fits.`
+    : `\n\n## Capability Note
+
+You're running on the Hermes provider, which routes to an OpenAI-compatible chat endpoint. You can read context (recent channel activity, the memory file, the user's message) and answer in natural language — but you do NOT have tool access on this turn. If the user asks you to create a task, send a notification, or modify state, describe what they should do (which UI panel, which command) rather than claiming you can act.`
 
   return `${instanceContext}\n\n${knowledge}${memorySection}${toolDisclaimer}`
 }

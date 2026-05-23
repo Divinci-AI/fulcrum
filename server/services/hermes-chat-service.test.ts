@@ -64,8 +64,8 @@ describe('hermes-chat-service.buildChatCompletionsUrl', () => {
 })
 
 describe('hermes-chat-service.buildHermesBaseline', () => {
-  test('includes Fulcrum core identity + data model + no-tool disclaimer', () => {
-    const baseline = buildHermesBaseline()
+  test('hasTools=false → identity + data model + no-tool disclaimer', () => {
+    const baseline = buildHermesBaseline(false)
     // From getCoreIdentity()
     expect(baseline).toContain("Fulcrum")
     // From getDataModel()
@@ -75,12 +75,28 @@ describe('hermes-chat-service.buildHermesBaseline', () => {
     expect(baseline).toContain('do NOT have tool access')
   })
 
-  test('does NOT mention tools the Claude path advertises (no false promises)', () => {
-    const baseline = buildHermesBaseline()
+  test('hasTools=false → no false promises about Claude-path tools', () => {
+    const baseline = buildHermesBaseline(false)
     // These are tool names from getCondensedKnowledge() that Hermes can't call
     expect(baseline).not.toContain('create-task')
     expect(baseline).not.toContain('execute-command')
     expect(baseline).not.toContain('Key tools available')
+  })
+
+  test('default arg (no param) treats hasTools as false', () => {
+    // Backwards compat: existing callers that didn't pass a flag still get the
+    // safe no-tools disclaimer rather than claiming tool access.
+    expect(buildHermesBaseline()).toContain('do NOT have tool access')
+  })
+
+  test('hasTools=true → tells the model to CALL tools, drops the "no access" line', () => {
+    const baseline = buildHermesBaseline(true)
+    expect(baseline).toContain('Capability Note')
+    // The trusted-tier prompt MUST NOT contradict the OpenAI tools param.
+    expect(baseline).not.toContain('do NOT have tool access')
+    // Should explicitly steer the model toward tool calls.
+    expect(baseline).toContain('CALL the appropriate tool')
+    expect(baseline).toContain('list_tasks')
   })
 })
 
