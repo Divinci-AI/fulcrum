@@ -279,10 +279,21 @@ export async function* streamHermesMessage(
     lastToolCallSlotCount = toolCallSlots.size
     lastIter = iter
 
-    // If the model decided to call tools, execute and loop. Note: we check
-    // BOTH finishReason === 'tool_calls' AND toolCallSlots.size — some
-    // providers don't always set finish_reason cleanly when streaming.
-    if (toolCallSlots.size > 0 && (finishReason === 'tool_calls' || finishReason === null)) {
+    // If the model decided to call tools, execute and loop.
+    //
+    // Provider quirk: Gemini's OpenAI-compat layer (`generativelanguage.
+    // googleapis.com/v1beta/openai`) ships tool_call deltas in the SSE stream
+    // but stamps `finish_reason: "stop"` on the final chunk — not "tool_calls"
+    // as the OpenAI spec prescribes. Gating on finish_reason therefore drops
+    // the tool calls and the assistant returns empty content (seen in
+    // production: "Hermes returned empty response" with lastFinishReason="stop"
+    // and lastToolCallSlotCount=1 after PR #119's diagnostic landed).
+    //
+    // Trust toolCallSlots.size as the single source of truth: if the model
+    // emitted any slots, execute them regardless of the stop reason. The OpenAI
+    // spec doesn't promise content + tool_calls coexist, and in practice
+    // contentBuffer is empty when slots are populated.
+    if (toolCallSlots.size > 0) {
       const toolCalls = [...toolCallSlots.values()]
       messages.push({
         role: 'assistant',
