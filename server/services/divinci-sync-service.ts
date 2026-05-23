@@ -27,7 +27,7 @@
  */
 import { createHash } from 'node:crypto'
 import { eq } from 'drizzle-orm'
-import { db, tasks, projects, divinciSyncMappings } from '../db'
+import { db, tasks, projects, divinciSyncMappings, channelMessages } from '../db'
 import type { DivinciSyncMapping } from '../db/schema'
 import { getSettings } from '../lib/settings'
 import { log } from '../lib/logger'
@@ -41,15 +41,26 @@ const BOOT_DELAY_MS = 15 * 1000
 /** Inter-upload delay to rate-limit ourselves (2 req/sec). */
 const UPLOAD_THROTTLE_MS = 500
 
-interface SyncConfig {
+/** Shared HTTP-client config: same Divinci URL + API key for all sources. */
+interface DivinciClientCfg {
   baseUrl: string
   apiKey: string
-  collectionId: string
   publicDomain: string | null
 }
 
-interface SyncableEntity {
-  entityType: 'task' | 'project'
+/** Per-source sync target — the Divinci collection that holds one source's docs. */
+interface SyncConfig extends DivinciClientCfg {
+  collectionId: string
+}
+
+/**
+ * One uploadable Fulcrum-side entity.
+ * - `entityType` strings are namespaced per source ('task', 'project',
+ *   'slack-day', 'gmail', 'calendar-event', 'drive-file', …) so mappings
+ *   don't collide between sources sharing the same numeric id.
+ */
+export interface SyncableEntity {
+  entityType: string
   entityId: string
   /** Canonical text body uploaded to Divinci (used for content-hash diffing). */
   body: string
@@ -59,6 +70,19 @@ interface SyncableEntity {
   description: string
   /** sourceUrl param attached to the Divinci upload — appears on every chunk. */
   sourceUrl: string | null
+}
+
+/**
+ * A registered source contributing entities to the sync. Each source owns
+ * its own Divinci collection (rolled up under the Group at retrieval time)
+ * and its own enumeration logic.
+ */
+interface SyncSource {
+  /** Source name for logs (e.g. 'fulcrum', 'slack'). */
+  name: string
+  /** Divinci collectionId (RagVectorModel _id) configured for this source, or null when unconfigured. */
+  collectionId: string | null
+  collect: (cfg: DivinciClientCfg) => Promise<SyncableEntity[]>
 }
 
 let intervalId: ReturnType<typeof setInterval> | null = null
@@ -88,8 +112,10 @@ export function stopDivinciSync(): void {
 }
 
 /**
- * One sync pass over all syncable Fulcrum entities. Idempotent + safe to
- * trigger out-of-band (e.g. from a future "sync now" admin button).
+ * One sync pass across every configured source (Fulcrum, Slack, …). Each
+ * source runs against its own Divinci collection, and stats are aggregated
+ * for the tick log. Idempotent + safe to trigger out-of-band (e.g. from a
+ * future "sync now" admin button).
  */
 export async function runDivinciSync(): Promise<{
   uploaded: number
@@ -105,112 +131,160 @@ export async function runDivinciSync(): Promise<{
   }
   running = true
   try {
-    const cfg = readSyncConfig()
-    if (!cfg) return { uploaded: 0, skipped: 0, deleted: 0, errors: 0 }
+    const baseCfg = readClientConfig()
+    if (!baseCfg) return { uploaded: 0, skipped: 0, deleted: 0, errors: 0 }
 
-    const startMs = Date.now()
-    const entities = await collectSyncableEntities(cfg)
-    const existingMappings = await db
-      .select()
-      .from(divinciSyncMappings)
-      .where(eq(divinciSyncMappings.collectionId, cfg.collectionId))
-    const mappingByEntityKey = new Map(existingMappings.map((m) => [entityKey(m.entityType, m.entityId), m]))
-
-    const stats = { uploaded: 0, skipped: 0, deleted: 0, errors: 0 }
-
-    // (1) Upload new/changed entities.
-    for (const entity of entities) {
-      const hash = contentHash(entity.body)
-      const existing = mappingByEntityKey.get(entityKey(entity.entityType, entity.entityId))
-      if (existing && existing.contentHash === hash) {
-        stats.skipped++
-        continue
-      }
-      try {
-        // Re-upload path: delete the old Divinci file first so the collection
-        // doesn't accumulate stale copies. (Divinci doesn't expose a simple
-        // "update file body" — migrate-target is overkill for one row.)
-        if (existing) {
-          await deleteDivinciFile(cfg, existing.divinciFileId).catch((err) => {
-            log.chat.warn('Divinci sync: stale file delete failed (continuing)', {
-              fileId: existing.divinciFileId,
-              error: String(err),
-            })
-          })
-        }
-        const newFileId = await uploadEntityToDivinci(cfg, entity)
-        if (!newFileId) {
-          stats.errors++
-          continue
-        }
-        await upsertMapping({
-          entityType: entity.entityType,
-          entityId: entity.entityId,
-          collectionId: cfg.collectionId,
-          divinciFileId: newFileId,
-          contentHash: hash,
-        })
-        stats.uploaded++
-        // Throttle ourselves so a 200-task backfill doesn't hammer Divinci.
-        if (UPLOAD_THROTTLE_MS > 0) await sleep(UPLOAD_THROTTLE_MS)
-      } catch (err) {
-        log.chat.warn('Divinci sync: entity upload failed', {
-          entityType: entity.entityType,
-          entityId: entity.entityId,
-          error: err instanceof Error ? err.message : String(err),
-        })
-        stats.errors++
-      }
+    const tickStart = Date.now()
+    const total = { uploaded: 0, skipped: 0, deleted: 0, errors: 0 }
+    for (const source of registeredSources()) {
+      if (!source.collectionId) continue
+      const sourceStats = await syncCollection(baseCfg, source)
+      total.uploaded += sourceStats.uploaded
+      total.skipped += sourceStats.skipped
+      total.deleted += sourceStats.deleted
+      total.errors += sourceStats.errors
     }
-
-    // (2) Detect deletes: any mapping whose entity no longer exists.
-    const liveEntityKeys = new Set(entities.map((e) => entityKey(e.entityType, e.entityId)))
-    const orphaned = existingMappings.filter((m) => !liveEntityKeys.has(entityKey(m.entityType, m.entityId)))
-    for (const orphan of orphaned) {
-      try {
-        await deleteDivinciFile(cfg, orphan.divinciFileId)
-        await db
-          .delete(divinciSyncMappings)
-          .where(eq(divinciSyncMappings.id, orphan.id))
-        stats.deleted++
-      } catch (err) {
-        log.chat.warn('Divinci sync: orphan delete failed', {
-          mappingId: orphan.id,
-          divinciFileId: orphan.divinciFileId,
-          error: String(err),
-        })
-        stats.errors++
-      }
-    }
-
     log.chat.info('Divinci sync tick done', {
-      collectionId: cfg.collectionId,
-      ...stats,
-      durationMs: Date.now() - startMs,
+      ...total,
+      durationMs: Date.now() - tickStart,
     })
-    return stats
+    return total
   } finally {
     running = false
   }
 }
 
 /**
- * Resolve runtime config from settings. Returns null when sync should not run
- * (Divinci disabled, missing credentials, no Fulcrum collection ID).
+ * Sync one source's entities to its Divinci collection. Pulled out of
+ * `runDivinciSync` so PRs 3-6 can plug in new sources without forking the
+ * upload/delete/diff logic.
  */
-function readSyncConfig(): SyncConfig | null {
+async function syncCollection(
+  baseCfg: DivinciClientCfg,
+  source: SyncSource,
+): Promise<{ uploaded: number; skipped: number; deleted: number; errors: number }> {
+  const stats = { uploaded: 0, skipped: 0, deleted: 0, errors: 0 }
+  if (!source.collectionId) return stats
+  const cfg: SyncConfig = { ...baseCfg, collectionId: source.collectionId }
+
+  const startMs = Date.now()
+  const entities = await source.collect(baseCfg)
+  const existingMappings = await db
+    .select()
+    .from(divinciSyncMappings)
+    .where(eq(divinciSyncMappings.collectionId, cfg.collectionId))
+  const mappingByEntityKey = new Map(existingMappings.map((m) => [entityKey(m.entityType, m.entityId), m]))
+
+  // (1) Upload new/changed entities.
+  for (const entity of entities) {
+    const hash = contentHash(entity.body)
+    const existing = mappingByEntityKey.get(entityKey(entity.entityType, entity.entityId))
+    if (existing && existing.contentHash === hash) {
+      stats.skipped++
+      continue
+    }
+    try {
+      // Re-upload path: delete the old Divinci file first so the collection
+      // doesn't accumulate stale copies. (Divinci doesn't expose a simple
+      // "update file body" — migrate-target is overkill for one row.)
+      if (existing) {
+        await deleteDivinciFile(cfg, existing.divinciFileId).catch((err) => {
+          log.chat.warn('Divinci sync: stale file delete failed (continuing)', {
+            source: source.name,
+            fileId: existing.divinciFileId,
+            error: String(err),
+          })
+        })
+      }
+      const newFileId = await uploadEntityToDivinci(cfg, entity)
+      if (!newFileId) {
+        stats.errors++
+        continue
+      }
+      await upsertMapping({
+        entityType: entity.entityType,
+        entityId: entity.entityId,
+        collectionId: cfg.collectionId,
+        divinciFileId: newFileId,
+        contentHash: hash,
+      })
+      stats.uploaded++
+      if (UPLOAD_THROTTLE_MS > 0) await sleep(UPLOAD_THROTTLE_MS)
+    } catch (err) {
+      log.chat.warn('Divinci sync: entity upload failed', {
+        source: source.name,
+        entityType: entity.entityType,
+        entityId: entity.entityId,
+        error: err instanceof Error ? err.message : String(err),
+      })
+      stats.errors++
+    }
+  }
+
+  // (2) Detect deletes: any mapping whose entity no longer exists.
+  const liveEntityKeys = new Set(entities.map((e) => entityKey(e.entityType, e.entityId)))
+  const orphaned = existingMappings.filter((m) => !liveEntityKeys.has(entityKey(m.entityType, m.entityId)))
+  for (const orphan of orphaned) {
+    try {
+      await deleteDivinciFile(cfg, orphan.divinciFileId)
+      await db.delete(divinciSyncMappings).where(eq(divinciSyncMappings.id, orphan.id))
+      stats.deleted++
+    } catch (err) {
+      log.chat.warn('Divinci sync: orphan delete failed', {
+        source: source.name,
+        mappingId: orphan.id,
+        divinciFileId: orphan.divinciFileId,
+        error: String(err),
+      })
+      stats.errors++
+    }
+  }
+
+  log.chat.info('Divinci sync source done', {
+    source: source.name,
+    collectionId: cfg.collectionId,
+    ...stats,
+    durationMs: Date.now() - startMs,
+  })
+  return stats
+}
+
+/**
+ * Read the shared Divinci-client config. Returns null when Divinci is
+ * disabled or credentials are incomplete — no source should run in that
+ * case.
+ */
+function readClientConfig(): DivinciClientCfg | null {
   const s = getSettings()
   const d = s.assistant.divinci
   if (!d.enabled) return null
   if (!d.baseUrl || !d.apiKey) return null
-  const collectionId = d.collections.fulcrum
-  if (!collectionId) return null
   return {
     baseUrl: d.baseUrl,
     apiKey: d.apiKey,
-    collectionId,
     publicDomain: s.server.publicDomain,
   }
+}
+
+/**
+ * Registered sources contributing to sync. PR2 registers Fulcrum tasks +
+ * projects; PRs 3-6 will add slack/gmail/calendar/drive here.
+ */
+function registeredSources(): SyncSource[] {
+  const s = getSettings()
+  const c = s.assistant.divinci.collections
+  return [
+    {
+      name: 'fulcrum',
+      collectionId: c.fulcrum,
+      collect: collectSyncableEntities,
+    },
+    {
+      name: 'slack',
+      collectionId: c.slack,
+      collect: collectSlackEntities,
+    },
+  ]
 }
 
 /**
@@ -218,7 +292,7 @@ function readSyncConfig(): SyncConfig | null {
  * text body, and stamp a sourceUrl back to its Fulcrum web view. Exported
  * for unit testing.
  */
-export async function collectSyncableEntities(cfg: SyncConfig): Promise<SyncableEntity[]> {
+export async function collectSyncableEntities(cfg: DivinciClientCfg): Promise<SyncableEntity[]> {
   const allTasks = await db.select().from(tasks)
   const allProjects = await db.select().from(projects)
   const projectNameById = new Map(allProjects.map((p) => [p.id, p.name]))
@@ -283,6 +357,103 @@ export async function collectSyncableEntities(cfg: SyncConfig): Promise<Syncable
   }
 
   return out
+}
+
+/**
+ * Slack sync — pulls Slack messages from `channelMessages` and rolls them up
+ * into per-day documents (one Divinci file per `${connectionId}:${YYYY-MM-DD}`).
+ *
+ * Why day-rolled instead of one-file-per-message:
+ *  - Volume: a chatty workspace produces 1,000+ messages/week. One file
+ *    per row would blow Divinci's file count and our rate limit.
+ *  - Conversational unit: a day's chatter is the natural retrieval unit
+ *    for "what was discussed in #engineering yesterday?".
+ *  - Stability: once a day rolls over, that day's file content stops
+ *    changing — content-hash diff means only "today" re-uploads each tick.
+ *
+ * Window: last DEFAULT_SLACK_DAYS_BACK days (configurable later). Older
+ * messages stay in Divinci once uploaded, but only days inside the window
+ * get refreshed.
+ */
+export async function collectSlackEntities(cfg: DivinciClientCfg): Promise<SyncableEntity[]> {
+  const daysBack = DEFAULT_SLACK_DAYS_BACK
+  const cutoffMs = Date.now() - daysBack * 24 * 60 * 60 * 1000
+  // Pull all Slack messages within the window. The schema doesn't index by
+  // (channelType, messageTimestamp) — at typical Fulcrum scales (~5k messages
+  // tops) a single scan + in-memory filter is fine. Switch to a partial
+  // index if a tenant ever stores 100k+ Slack messages.
+  const all = await db.select().from(channelMessages).where(eq(channelMessages.channelType, 'slack'))
+  const recent = all.filter((m) => {
+    const ts = Date.parse(m.messageTimestamp)
+    return Number.isFinite(ts) && ts >= cutoffMs
+  })
+
+  // Group by (connectionId, day-in-UTC). UTC keeps the entityId stable across
+  // server-timezone changes; the rendered body shows local times via toISOString.
+  const buckets = new Map<string, typeof recent>()
+  for (const m of recent) {
+    const day = m.messageTimestamp.slice(0, 10) // YYYY-MM-DD from ISO ts
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) continue
+    const key = `${m.connectionId}:${day}`
+    const arr = buckets.get(key) ?? []
+    arr.push(m)
+    buckets.set(key, arr)
+  }
+
+  const out: SyncableEntity[] = []
+  for (const [key, messages] of buckets) {
+    // Sort within the day so the rendered file reads as a transcript.
+    messages.sort((a, b) => a.messageTimestamp.localeCompare(b.messageTimestamp))
+    const [connectionId, day] = key.split(':')
+    out.push(renderSlackDayEntity(cfg, connectionId, day, messages))
+  }
+  return out
+}
+
+/** Days of Slack history to keep refreshing each sync tick. */
+const DEFAULT_SLACK_DAYS_BACK = 30
+
+/** Format a single day's Slack messages as a markdown transcript. Exported for unit testing. */
+export function renderSlackDayEntity(
+  cfg: DivinciClientCfg,
+  connectionId: string,
+  day: string,
+  messages: Array<{
+    senderName: string | null
+    senderId: string
+    content: string
+    messageTimestamp: string
+    direction: string
+  }>,
+): SyncableEntity {
+  const lines: string[] = []
+  lines.push(`# Slack — ${day}`)
+  lines.push('')
+  lines.push(`Connection: ${connectionId}`)
+  lines.push(`Messages: ${messages.length}`)
+  lines.push('')
+  for (const m of messages) {
+    const time = m.messageTimestamp.slice(11, 16) // HH:MM from ISO
+    const who = m.senderName || m.senderId
+    const dir = m.direction === 'outgoing' ? ' (bot)' : ''
+    const body = m.content.trim()
+    if (!body) continue
+    lines.push(`**${time}** ${who}${dir}:`)
+    lines.push(body)
+    lines.push('')
+  }
+  const body = lines.join('\n').trimEnd()
+  return {
+    entityType: 'slack-day',
+    entityId: `${connectionId}:${day}`,
+    body,
+    title: `Slack ${day}`,
+    description: `Slack messages on ${day}: ${messages.length} entries`,
+    // Slack message permalinks need the team_id which the channelMessages
+    // table doesn't store today. Leaving null — chunks will still self-cite
+    // via the [Slack <day>] source attribution.
+    sourceUrl: null,
+  }
 }
 
 /**

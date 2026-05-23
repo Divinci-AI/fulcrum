@@ -4,9 +4,11 @@ import {
   contentHash,
   fulcrumUrlForEntity,
   collectSyncableEntities,
+  collectSlackEntities,
+  renderSlackDayEntity,
   _resetDivinciSyncForTesting,
 } from './divinci-sync-service'
-import { db, tasks, projects, divinciSyncMappings } from '../db'
+import { db, tasks, projects, divinciSyncMappings, channelMessages } from '../db'
 
 const baseCfg = {
   baseUrl: 'https://api.divinci.ai',
@@ -20,6 +22,7 @@ async function clearTables(): Promise<void> {
   await db.delete(divinciSyncMappings)
   await db.delete(tasks)
   await db.delete(projects)
+  await db.delete(channelMessages)
 }
 
 beforeEach(async () => {
@@ -215,5 +218,138 @@ describe('divinci-sync-service.collectSyncableEntities content-hash diffing', ()
     await db.update(tasks).set({ title: 'B' }).where(eq(tasks.id, 't'))
     const e3 = await collectSyncableEntities(baseCfg)
     expect(contentHash(e3[0].body)).not.toBe(h1)
+  })
+})
+
+describe('divinci-sync-service.renderSlackDayEntity', () => {
+  test('renders a markdown transcript with title, count, and per-message lines', () => {
+    const entity = renderSlackDayEntity(
+      { baseUrl: '', apiKey: '', publicDomain: null },
+      'slack-channel',
+      '2026-05-23',
+      [
+        {
+          senderName: 'Mike',
+          senderId: 'U05',
+          content: 'Shipping D-17 PR 3',
+          messageTimestamp: '2026-05-23T14:35:00.000Z',
+          direction: 'incoming',
+        },
+        {
+          senderName: 'Fulcrum bot',
+          senderId: 'B0A',
+          content: 'Acknowledged',
+          messageTimestamp: '2026-05-23T14:36:12.000Z',
+          direction: 'outgoing',
+        },
+      ],
+    )
+    expect(entity.entityType).toBe('slack-day')
+    expect(entity.entityId).toBe('slack-channel:2026-05-23')
+    expect(entity.title).toBe('Slack 2026-05-23')
+    expect(entity.body).toContain('# Slack — 2026-05-23')
+    expect(entity.body).toContain('Messages: 2')
+    expect(entity.body).toContain('**14:35** Mike')
+    expect(entity.body).toContain('Shipping D-17 PR 3')
+    expect(entity.body).toContain('**14:36** Fulcrum bot (bot)')
+    expect(entity.body).toContain('Acknowledged')
+    // PR 3 leaves Slack permalink construction for a future PR (needs team_id).
+    expect(entity.sourceUrl).toBeNull()
+  })
+
+  test('skips empty-content messages (e.g. bot system events)', () => {
+    const entity = renderSlackDayEntity(
+      { baseUrl: '', apiKey: '', publicDomain: null },
+      'c',
+      '2026-05-23',
+      [
+        { senderName: 'A', senderId: 'a', content: '', messageTimestamp: '2026-05-23T10:00:00Z', direction: 'incoming' },
+        { senderName: 'B', senderId: 'b', content: 'hi', messageTimestamp: '2026-05-23T10:01:00Z', direction: 'incoming' },
+      ],
+    )
+    expect(entity.body).not.toContain('**10:00**')
+    expect(entity.body).toContain('**10:01** B')
+  })
+
+  test('falls back to senderId when senderName is missing', () => {
+    const entity = renderSlackDayEntity(
+      { baseUrl: '', apiKey: '', publicDomain: null },
+      'c',
+      '2026-05-23',
+      [{ senderName: null, senderId: 'U07ABCDEF', content: 'hi', messageTimestamp: '2026-05-23T10:00:00Z', direction: 'incoming' }],
+    )
+    expect(entity.body).toContain('U07ABCDEF')
+  })
+})
+
+describe('divinci-sync-service.collectSlackEntities', () => {
+  test('returns empty when no Slack rows exist', async () => {
+    const entities = await collectSlackEntities(baseCfg)
+    expect(entities).toEqual([])
+  })
+
+  test('ignores non-slack channel rows', async () => {
+    await db.insert(channelMessages).values({
+      id: 'm1',
+      channelType: 'discord',
+      connectionId: 'c1',
+      direction: 'incoming',
+      senderId: 'u1',
+      content: 'hi',
+      messageTimestamp: new Date().toISOString(),
+      createdAt: new Date().toISOString(),
+    })
+    const entities = await collectSlackEntities(baseCfg)
+    expect(entities).toEqual([])
+  })
+
+  test('groups messages into one entity per (connectionId, day)', async () => {
+    const todayIso = new Date().toISOString()
+    const today = todayIso.slice(0, 10)
+    await db.insert(channelMessages).values([
+      {
+        id: 's1',
+        channelType: 'slack',
+        connectionId: 'slack-channel',
+        direction: 'incoming',
+        senderId: 'U1',
+        senderName: 'Mike',
+        content: 'hello',
+        messageTimestamp: todayIso,
+        createdAt: todayIso,
+      },
+      {
+        id: 's2',
+        channelType: 'slack',
+        connectionId: 'slack-channel',
+        direction: 'incoming',
+        senderId: 'U1',
+        senderName: 'Mike',
+        content: 'world',
+        messageTimestamp: todayIso,
+        createdAt: todayIso,
+      },
+    ])
+    const entities = await collectSlackEntities(baseCfg)
+    expect(entities.length).toBe(1)
+    expect(entities[0].entityId).toBe(`slack-channel:${today}`)
+    expect(entities[0].body).toContain('hello')
+    expect(entities[0].body).toContain('world')
+  })
+
+  test('drops messages older than the configured window', async () => {
+    const old = new Date(Date.now() - 60 * 24 * 60 * 60 * 1000).toISOString() // 60d ago
+    await db.insert(channelMessages).values({
+      id: 'old',
+      channelType: 'slack',
+      connectionId: 'c',
+      direction: 'incoming',
+      senderId: 'U',
+      content: 'ancient',
+      messageTimestamp: old,
+      createdAt: old,
+    })
+    const entities = await collectSlackEntities(baseCfg)
+    expect(entities).toEqual([])
   })
 })

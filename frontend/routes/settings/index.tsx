@@ -69,6 +69,7 @@ import {
   useAssistantDivinciGroupId,
   useAssistantDivinciTopK,
   useAssistantDivinciCollectionFulcrum,
+  useAssistantDivinciCollectionSlack,
   useAssistantRitualsEnabled,
   useAssistantMorningRitualTime,
   useAssistantMorningRitualPrompt,
@@ -196,6 +197,7 @@ function SettingsPage() {
   const { data: divinciGroupId } = useAssistantDivinciGroupId()
   const { data: divinciTopK } = useAssistantDivinciTopK()
   const { data: divinciCollectionFulcrum } = useAssistantDivinciCollectionFulcrum()
+  const { data: divinciCollectionSlack } = useAssistantDivinciCollectionSlack()
   const { data: ritualsEnabled, isLoading: ritualsEnabledLoading } = useAssistantRitualsEnabled()
   const { data: morningRitualTime, isLoading: morningTimeLoading } = useAssistantMorningRitualTime()
   const { data: morningRitualPrompt, isLoading: morningPromptLoading } = useAssistantMorningRitualPrompt()
@@ -307,6 +309,7 @@ function SettingsPage() {
   const [localDivinciGroupId, setLocalDivinciGroupId] = useState<string>('')
   const [localDivinciTopK, setLocalDivinciTopK] = useState<number>(8)
   const [localDivinciCollectionFulcrum, setLocalDivinciCollectionFulcrum] = useState<string>('')
+  const [localDivinciCollectionSlack, setLocalDivinciCollectionSlack] = useState<string>('')
 
   // Ritual settings local state (under assistant)
   const [localRitualsEnabled, setLocalRitualsEnabled] = useState(false)
@@ -438,7 +441,8 @@ function SettingsPage() {
     if (divinciGroupId !== undefined) setLocalDivinciGroupId(divinciGroupId || '')
     if (divinciTopK !== undefined) setLocalDivinciTopK(divinciTopK)
     if (divinciCollectionFulcrum !== undefined) setLocalDivinciCollectionFulcrum(divinciCollectionFulcrum || '')
-  }, [assistantProvider, assistantModel, assistantObserverModel, assistantObserverProvider, assistantObserverOpencodeModel, assistantDocumentsDir, hermesBaseUrl, hermesApiKey, hermesModel, divinciEnabled, divinciBaseUrl, divinciApiKey, divinciGroupId, divinciTopK, divinciCollectionFulcrum])
+    if (divinciCollectionSlack !== undefined) setLocalDivinciCollectionSlack(divinciCollectionSlack || '')
+  }, [assistantProvider, assistantModel, assistantObserverModel, assistantObserverProvider, assistantObserverOpencodeModel, assistantDocumentsDir, hermesBaseUrl, hermesApiKey, hermesModel, divinciEnabled, divinciBaseUrl, divinciApiKey, divinciGroupId, divinciTopK, divinciCollectionFulcrum, divinciCollectionSlack])
 
   // Sync ritual settings
   useEffect(() => {
@@ -489,7 +493,8 @@ function SettingsPage() {
     localDivinciApiKey !== (divinciApiKey ?? '') ||
     localDivinciGroupId !== (divinciGroupId ?? '') ||
     localDivinciTopK !== divinciTopK ||
-    localDivinciCollectionFulcrum !== (divinciCollectionFulcrum ?? '')
+    localDivinciCollectionFulcrum !== (divinciCollectionFulcrum ?? '') ||
+    localDivinciCollectionSlack !== (divinciCollectionSlack ?? '')
 
   const hasRitualsChanges =
     localRitualsEnabled !== ritualsEnabled ||
@@ -991,6 +996,16 @@ function SettingsPage() {
           new Promise((resolve) => {
             updateConfig.mutate(
               { key: CONFIG_KEYS.ASSISTANT_DIVINCI_COLLECTION_FULCRUM, value: localDivinciCollectionFulcrum || null },
+              { onSettled: resolve }
+            )
+          })
+        )
+      }
+      if (localDivinciCollectionSlack !== (divinciCollectionSlack ?? '')) {
+        promises.push(
+          new Promise((resolve) => {
+            updateConfig.mutate(
+              { key: CONFIG_KEYS.ASSISTANT_DIVINCI_COLLECTION_SLACK, value: localDivinciCollectionSlack || null },
               { onSettled: resolve }
             )
           })
@@ -2533,8 +2548,20 @@ function SettingsPage() {
                                     className="flex-1 font-mono text-xs"
                                   />
                                 </div>
+                                <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+                                  <label className="text-sm text-muted-foreground sm:w-32 sm:shrink-0">
+                                    Slack
+                                  </label>
+                                  <Input
+                                    type="text"
+                                    value={localDivinciCollectionSlack}
+                                    onChange={(e) => setLocalDivinciCollectionSlack(e.target.value)}
+                                    placeholder="Divinci RagVector _id for Slack messages"
+                                    className="flex-1 font-mono text-xs"
+                                  />
+                                </div>
                                 <p className="text-xs text-muted-foreground">
-                                  Tasks + projects sync into this collection every 5 minutes. Each entity becomes a Divinci file with its Fulcrum URL baked into `sourceUrl` so retrieved chunks self-cite. Slack/Gmail/Calendar/Drive collections land in PRs 3-6.
+                                  Each source syncs into its own collection (Group-merged at retrieval). Tasks+projects = one file per entity. Slack = one file per day (last 30 days), refreshed only when that day's content changes. Gmail/Calendar/Drive land in PRs 4-6.
                                 </p>
                               </div>
                               <p className="text-xs text-muted-foreground">
