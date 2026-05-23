@@ -221,11 +221,29 @@ export async function* streamHermesMessage(
   let finalContent = ''
   let lastError: string | null = null
 
+  // Gemini-specific workaround: thinking-capable models (gemini-2.5+/3.5+
+  // -flash) attach a per-call thought_signature to functionCalls and reject
+  // follow-up turns that don't echo it back. Their OpenAI-compat layer at
+  // generativelanguage.googleapis.com does NOT expose the signature in the
+  // streaming SSE deltas (confirmed via 'Hermes raw tool_call delta' log:
+  // fields=["type","index","id","name","argsDelta"]). We can't forward what
+  // we never received. Per Gemini's OpenAI-compat docs, setting
+  // reasoning_effort='none' disables thinking and removes the signature
+  // requirement entirely. Inject it only for Gemini hosts so other OpenAI-
+  // compatible providers don't 400 on an unknown field.
+  const isGeminiHost = (() => {
+    try {
+      return new URL(url).host.endsWith('generativelanguage.googleapis.com')
+    } catch {
+      return false
+    }
+  })()
   for (let iter = 0; iter < MAX_TOOL_ITERATIONS; iter++) {
     let response: Response
     try {
       const requestBody: Record<string, unknown> = { model, messages, stream: true }
       if (toolsForCall.length > 0) requestBody.tools = toolsForCall
+      if (isGeminiHost) requestBody.reasoning_effort = 'none'
       response = await fetch(url, {
         method: 'POST',
         headers: {
