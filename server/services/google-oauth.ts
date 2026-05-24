@@ -15,11 +15,17 @@ import { createLogger } from '../lib/logger'
 
 const logger = createLogger('GoogleOAuth')
 
-/** All Google scopes requested upfront */
+/** All Google scopes requested upfront.
+ *
+ * Adding a scope here means existing Google accounts will need to re-authorize
+ * to grant the new permission. D-17 PR 6 added `drive.readonly` so Hermes
+ * can index Drive contents into Divinci's RAG group.
+ */
 export const GOOGLE_SCOPES = [
   'https://www.googleapis.com/auth/calendar',
   'https://www.googleapis.com/auth/gmail.modify',
   'https://www.googleapis.com/auth/userinfo.email',
+  'https://www.googleapis.com/auth/drive.readonly',
 ]
 
 /**

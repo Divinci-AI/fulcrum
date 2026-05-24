@@ -27,7 +27,8 @@
  */
 import { createHash } from 'node:crypto'
 import { eq } from 'drizzle-orm'
-import { db, tasks, projects, divinciSyncMappings, channelMessages, caldavEvents, caldavCalendars } from '../db'
+import { db, tasks, projects, divinciSyncMappings, channelMessages, caldavEvents, caldavCalendars, googleAccounts } from '../db'
+import { listRecentDriveFiles } from './google/drive-service'
 import type { DivinciSyncMapping } from '../db/schema'
 import { getSettings } from '../lib/settings'
 import { log } from '../lib/logger'
@@ -293,6 +294,11 @@ function registeredSources(): SyncSource[] {
       name: 'calendar',
       collectionId: c.calendar,
       collect: collectCalendarEntities,
+    },
+    {
+      name: 'drive',
+      collectionId: c.drive,
+      collect: collectDriveEntities,
     },
   ]
 }
@@ -676,6 +682,115 @@ export function renderCalendarEventEntity(
     // calendars; CalDAV has no canonical web URL. Leave null; chunks
     // self-cite via the [Calendar: <name>] source line.
     sourceUrl: null,
+  }
+}
+
+/**
+ * Drive sync — pulls recently-modified Google Drive files (Docs / Sheets /
+ * Slides / Drive-native + arbitrary uploaded files) for every Google account
+ * with `driveEnabled = true`. One Divinci file per Drive file.
+ *
+ * Strategy:
+ *  - Window: last 90 days (the Drive API filter, modifiedTime >).
+ *  - Cap: 200 files per account per tick. Larger drives stay synced via
+ *    the rolling window — the oldest unmodified files outside the window
+ *    don't get refreshed but stay indexed once uploaded.
+ *  - Content extraction: Google Docs / Slides → text/plain, Sheets → CSV,
+ *    arbitrary text/* → raw fetch. PDFs / images / binary types are
+ *    surfaced as metadata-only chunks (filename + owner + modifiedTime
+ *    are still useful for "did Bob share that contract PDF?").
+ *  - sourceUrl: Drive's webViewLink — Slack unfurls these natively.
+ *
+ * Requires the `drive.readonly` OAuth scope (added to GOOGLE_SCOPES in
+ * google-oauth.ts). Existing Google accounts must re-authorize once to
+ * grant the new scope; drive-service.ts skips accounts that don't have it.
+ */
+export async function collectDriveEntities(_cfg: DivinciClientCfg): Promise<SyncableEntity[]> {
+  const accounts = await db.select().from(googleAccounts).where(eq(googleAccounts.driveEnabled, true))
+  if (accounts.length === 0) return []
+
+  const out: SyncableEntity[] = []
+  for (const account of accounts) {
+    const files = await listRecentDriveFiles(account.id)
+    for (const f of files) {
+      out.push(renderDriveFileEntity(f))
+    }
+  }
+  return out
+}
+
+/**
+ * Render one Drive file as a markdown card. Content (when extracted) is
+ * appended after the metadata header so retrieval surfaces a useful chunk
+ * even when the LLM only sees the first 80-token preview. Exported for
+ * unit testing.
+ */
+export function renderDriveFileEntity(file: {
+  id: string
+  name: string
+  mimeType: string
+  modifiedTime: string | null
+  webViewLink: string | null
+  ownerName: string | null
+  ownerEmail: string | null
+  content: string | null
+  googleAccountId: string
+}): SyncableEntity {
+  const lines: string[] = []
+  lines.push(`# ${file.name}`)
+  lines.push('')
+  lines.push(`Type: ${humanMimeType(file.mimeType)}`)
+  if (file.modifiedTime) lines.push(`Modified: ${file.modifiedTime}`)
+  if (file.ownerName || file.ownerEmail) {
+    const owner = file.ownerName && file.ownerEmail
+      ? `${file.ownerName} <${file.ownerEmail}>`
+      : file.ownerName ?? file.ownerEmail
+    lines.push(`Owner: ${owner}`)
+  }
+  if (file.webViewLink) lines.push(`Link: ${file.webViewLink}`)
+  if (file.content?.trim()) {
+    lines.push('')
+    lines.push('## Content')
+    lines.push('')
+    lines.push(file.content.trim())
+  } else {
+    lines.push('')
+    lines.push(`_(binary file — content not indexed for v1; chunks search on filename + owner + modifiedTime)_`)
+  }
+  const body = lines.join('\n').trimEnd()
+  return {
+    entityType: 'drive-file',
+    entityId: file.id,
+    body,
+    title: `Drive: ${file.name}`,
+    description: `${humanMimeType(file.mimeType)} · ${file.ownerName ?? file.ownerEmail ?? 'unknown owner'}`.slice(0, 500),
+    sourceUrl: file.webViewLink,
+  }
+}
+
+/**
+ * Map raw Drive MIME types to a human-readable label so the rendered card
+ * reads "Google Doc" instead of "application/vnd.google-apps.document".
+ */
+function humanMimeType(mime: string): string {
+  switch (mime) {
+    case 'application/vnd.google-apps.document':
+      return 'Google Doc'
+    case 'application/vnd.google-apps.spreadsheet':
+      return 'Google Sheet'
+    case 'application/vnd.google-apps.presentation':
+      return 'Google Slides'
+    case 'application/vnd.google-apps.folder':
+      return 'Folder'
+    case 'application/pdf':
+      return 'PDF'
+    case 'image/jpeg':
+    case 'image/png':
+    case 'image/gif':
+    case 'image/webp':
+      return 'Image'
+    default:
+      return mime
   }
 }
 

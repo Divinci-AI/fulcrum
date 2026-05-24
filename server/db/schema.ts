@@ -440,12 +440,16 @@ export const googleAccounts = sqliteTable('google_accounts', {
   scopes: text('scopes', { mode: 'json' }).$type<string[]>(), // Granted scopes
   calendarEnabled: integer('calendar_enabled', { mode: 'boolean' }).default(false),
   gmailEnabled: integer('gmail_enabled', { mode: 'boolean' }).default(false),
+  /** D-17 PR 6: Drive read access for RAG sync into Divinci. */
+  driveEnabled: integer('drive_enabled', { mode: 'boolean' }).default(false),
   syncIntervalMinutes: integer('sync_interval_minutes').default(15),
   lastCalendarSyncAt: text('last_calendar_sync_at'),
   lastCalendarSyncError: text('last_calendar_sync_error'),
   lastGmailSyncAt: text('last_gmail_sync_at'),
   lastGmailSyncError: text('last_gmail_sync_error'),
   lastGmailHistoryId: text('last_gmail_history_id'), // Persisted Gmail history ID for incremental polling
+  /** D-17 PR 6: last successful Drive sync timestamp. */
+  lastDriveSyncAt: text('last_drive_sync_at'),
   sendAsEmail: text('send_as_email'), // Selected "From:" address for drafts (from Gmail send-as aliases)
   needsReauth: integer('needs_reauth', { mode: 'boolean' }).default(false),
   // D-6 PR 1b: owning user for per-user scoping. Flipped to NOT NULL after
