@@ -68,6 +68,7 @@ import {
   useAssistantDivinciApiKey,
   useAssistantDivinciGroupId,
   useAssistantDivinciTopK,
+  useAssistantDivinciCollectionFulcrum,
   useAssistantRitualsEnabled,
   useAssistantMorningRitualTime,
   useAssistantMorningRitualPrompt,
@@ -194,6 +195,7 @@ function SettingsPage() {
   const { data: divinciApiKey } = useAssistantDivinciApiKey()
   const { data: divinciGroupId } = useAssistantDivinciGroupId()
   const { data: divinciTopK } = useAssistantDivinciTopK()
+  const { data: divinciCollectionFulcrum } = useAssistantDivinciCollectionFulcrum()
   const { data: ritualsEnabled, isLoading: ritualsEnabledLoading } = useAssistantRitualsEnabled()
   const { data: morningRitualTime, isLoading: morningTimeLoading } = useAssistantMorningRitualTime()
   const { data: morningRitualPrompt, isLoading: morningPromptLoading } = useAssistantMorningRitualPrompt()
@@ -304,6 +306,7 @@ function SettingsPage() {
   const [localDivinciApiKey, setLocalDivinciApiKey] = useState<string>('')
   const [localDivinciGroupId, setLocalDivinciGroupId] = useState<string>('')
   const [localDivinciTopK, setLocalDivinciTopK] = useState<number>(8)
+  const [localDivinciCollectionFulcrum, setLocalDivinciCollectionFulcrum] = useState<string>('')
 
   // Ritual settings local state (under assistant)
   const [localRitualsEnabled, setLocalRitualsEnabled] = useState(false)
@@ -434,7 +437,8 @@ function SettingsPage() {
     if (divinciApiKey !== undefined) setLocalDivinciApiKey(divinciApiKey || '')
     if (divinciGroupId !== undefined) setLocalDivinciGroupId(divinciGroupId || '')
     if (divinciTopK !== undefined) setLocalDivinciTopK(divinciTopK)
-  }, [assistantProvider, assistantModel, assistantObserverModel, assistantObserverProvider, assistantObserverOpencodeModel, assistantDocumentsDir, hermesBaseUrl, hermesApiKey, hermesModel, divinciEnabled, divinciBaseUrl, divinciApiKey, divinciGroupId, divinciTopK])
+    if (divinciCollectionFulcrum !== undefined) setLocalDivinciCollectionFulcrum(divinciCollectionFulcrum || '')
+  }, [assistantProvider, assistantModel, assistantObserverModel, assistantObserverProvider, assistantObserverOpencodeModel, assistantDocumentsDir, hermesBaseUrl, hermesApiKey, hermesModel, divinciEnabled, divinciBaseUrl, divinciApiKey, divinciGroupId, divinciTopK, divinciCollectionFulcrum])
 
   // Sync ritual settings
   useEffect(() => {
@@ -484,7 +488,8 @@ function SettingsPage() {
     localDivinciBaseUrl !== (divinciBaseUrl ?? '') ||
     localDivinciApiKey !== (divinciApiKey ?? '') ||
     localDivinciGroupId !== (divinciGroupId ?? '') ||
-    localDivinciTopK !== divinciTopK
+    localDivinciTopK !== divinciTopK ||
+    localDivinciCollectionFulcrum !== (divinciCollectionFulcrum ?? '')
 
   const hasRitualsChanges =
     localRitualsEnabled !== ritualsEnabled ||
@@ -976,6 +981,16 @@ function SettingsPage() {
           new Promise((resolve) => {
             updateConfig.mutate(
               { key: CONFIG_KEYS.ASSISTANT_DIVINCI_TOP_K, value: localDivinciTopK },
+              { onSettled: resolve }
+            )
+          })
+        )
+      }
+      if (localDivinciCollectionFulcrum !== (divinciCollectionFulcrum ?? '')) {
+        promises.push(
+          new Promise((resolve) => {
+            updateConfig.mutate(
+              { key: CONFIG_KEYS.ASSISTANT_DIVINCI_COLLECTION_FULCRUM, value: localDivinciCollectionFulcrum || null },
               { onSettled: resolve }
             )
           })
@@ -2503,6 +2518,24 @@ function SettingsPage() {
                                 <span className="text-xs text-muted-foreground">
                                   chunks per retrieval (server caps at 50)
                                 </span>
+                              </div>
+                              <div className="pt-2 border-t border-border/40 space-y-2">
+                                <p className="text-xs font-medium">Sync collections (D-17 PR 2+)</p>
+                                <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+                                  <label className="text-sm text-muted-foreground sm:w-32 sm:shrink-0">
+                                    Fulcrum
+                                  </label>
+                                  <Input
+                                    type="text"
+                                    value={localDivinciCollectionFulcrum}
+                                    onChange={(e) => setLocalDivinciCollectionFulcrum(e.target.value)}
+                                    placeholder="Divinci RagVector _id for tasks + projects"
+                                    className="flex-1 font-mono text-xs"
+                                  />
+                                </div>
+                                <p className="text-xs text-muted-foreground">
+                                  Tasks + projects sync into this collection every 5 minutes. Each entity becomes a Divinci file with its Fulcrum URL baked into `sourceUrl` so retrieved chunks self-cite. Slack/Gmail/Calendar/Drive collections land in PRs 3-6.
+                                </p>
                               </div>
                               <p className="text-xs text-muted-foreground">
                                 Create the API key + Group in your Divinci admin UI. Pre-flight retrieval is fail-soft — if Divinci is down, Hermes falls back to tools-only.

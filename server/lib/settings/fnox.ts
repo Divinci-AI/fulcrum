@@ -80,6 +80,8 @@ export const FNOX_CONFIG_MAP: Record<string, ConfigEntry> = {
   'assistant.divinci.apiKey': { fnoxKey: 'FULCRUM_ASSISTANT_DIVINCI_API_KEY', provider: 'age', type: 'string' },
   'assistant.divinci.groupId': { fnoxKey: 'FULCRUM_ASSISTANT_DIVINCI_GROUP_ID', provider: 'plain', type: 'string' },
   'assistant.divinci.topK': { fnoxKey: 'FULCRUM_ASSISTANT_DIVINCI_TOP_K', provider: 'plain', type: 'number' },
+  // D-17 PR 2: per-source collection IDs inside the Divinci Group
+  'assistant.divinci.collections.fulcrum': { fnoxKey: 'FULCRUM_ASSISTANT_DIVINCI_COLLECTION_FULCRUM', provider: 'plain', type: 'string' },
 
   // Channels - Email
   'channels.email.enabled': { fnoxKey: 'FULCRUM_EMAIL_ENABLED', provider: 'plain', type: 'boolean' },

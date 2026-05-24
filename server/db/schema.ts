@@ -931,3 +931,26 @@ export type TeamMember = typeof teamMembers.$inferSelect
 export type NewTeamMember = typeof teamMembers.$inferInsert
 export type Acl = typeof acls.$inferSelect
 export type NewAcl = typeof acls.$inferInsert
+
+// D-17 PR 2: tracks Fulcrum-row → Divinci-file mappings for the RAG sync
+// service. One row per entity (task, project, …) currently mirrored into a
+// Divinci collection. lastContentHash lets the sync skip uploads when the
+// source row hasn't changed since the last successful sync.
+export const divinciSyncMappings = sqliteTable('divinci_sync_mappings', {
+  // Composite-ish primary: entityType + entityId is unique. We use a
+  // text PK encoding `${entityType}:${entityId}` so SQLite's PK index
+  // doubles as the dedupe key without a separate unique constraint.
+  id: text('id').primaryKey(),
+  entityType: text('entity_type').notNull(), // 'task' | 'project' (extensible)
+  entityId: text('entity_id').notNull(),
+  /** The Divinci collectionId (RagVectorModel _id) this row was uploaded to. */
+  collectionId: text('collection_id').notNull(),
+  /** Divinci file id returned from POST /api/v1/rag/files. */
+  divinciFileId: text('divinci_file_id').notNull(),
+  /** SHA-256 of the canonical-rendered upload body; skip re-upload when unchanged. */
+  contentHash: text('content_hash').notNull(),
+  lastSyncedAt: text('last_synced_at').notNull(),
+  createdAt: text('created_at').notNull(),
+})
+export type DivinciSyncMapping = typeof divinciSyncMappings.$inferSelect
+export type NewDivinciSyncMapping = typeof divinciSyncMappings.$inferInsert

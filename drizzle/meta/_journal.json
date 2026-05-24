@@ -631,6 +631,13 @@
       "when": 1779343200000,
       "tag": "0089_add_slack_reactions",
       "breakpoints": true
+    },
+    {
+      "idx": 90,
+      "version": "6",
+      "when": 1779429600000,
+      "tag": "0090_add_divinci_sync_mappings",
+      "breakpoints": true
     }
   ]
 }

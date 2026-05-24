@@ -51,6 +51,9 @@ export const CONFIG_KEYS = {
   ASSISTANT_DIVINCI_API_KEY: 'assistant.divinci.apiKey',
   ASSISTANT_DIVINCI_GROUP_ID: 'assistant.divinci.groupId',
   ASSISTANT_DIVINCI_TOP_K: 'assistant.divinci.topK',
+  // D-17 PR 2: per-source target/collection IDs inside the Group. One added
+  // per sync PR. PR 2 = Fulcrum tasks+projects; PRs 3-6 add slack/gmail/cal/drive.
+  ASSISTANT_DIVINCI_COLLECTION_FULCRUM: 'assistant.divinci.collections.fulcrum',
   EMAIL_POLL_INTERVAL: 'channels.email.pollIntervalSeconds',
   CALDAV_ENABLED: 'caldav.enabled',
   CALDAV_SERVER_URL: 'caldav.serverUrl',
