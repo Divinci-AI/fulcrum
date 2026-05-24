@@ -82,6 +82,7 @@ export const FNOX_CONFIG_MAP: Record<string, ConfigEntry> = {
   'assistant.divinci.topK': { fnoxKey: 'FULCRUM_ASSISTANT_DIVINCI_TOP_K', provider: 'plain', type: 'number' },
   // D-17 PR 2: per-source collection IDs inside the Divinci Group
   'assistant.divinci.collections.fulcrum': { fnoxKey: 'FULCRUM_ASSISTANT_DIVINCI_COLLECTION_FULCRUM', provider: 'plain', type: 'string' },
+  'assistant.divinci.collections.slack': { fnoxKey: 'FULCRUM_ASSISTANT_DIVINCI_COLLECTION_SLACK', provider: 'plain', type: 'string' },
 
   // Channels - Email
   'channels.email.enabled': { fnoxKey: 'FULCRUM_EMAIL_ENABLED', provider: 'plain', type: 'boolean' },

@@ -477,6 +477,16 @@ export function useAssistantDivinciCollectionFulcrum() {
   }
 }
 
+// D-17 PR 3: Slack messages collection
+export function useAssistantDivinciCollectionSlack() {
+  const query = useConfig(CONFIG_KEYS.ASSISTANT_DIVINCI_COLLECTION_SLACK)
+  return {
+    ...query,
+    data: (query.data?.value as string | null) ?? '',
+    isDefault: query.data?.isDefault ?? true,
+  }
+}
+
 // Ritual settings (under assistant)
 export function useAssistantRitualsEnabled() {
   const query = useConfig(CONFIG_KEYS.ASSISTANT_RITUALS_ENABLED)
