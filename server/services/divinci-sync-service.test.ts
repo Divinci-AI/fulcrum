@@ -6,6 +6,9 @@ import {
   collectSyncableEntities,
   collectSlackEntities,
   renderSlackDayEntity,
+  collectGmailEntities,
+  renderGmailThreadEntity,
+  gmailThreadUrl,
   _resetDivinciSyncForTesting,
 } from './divinci-sync-service'
 import { db, tasks, projects, divinciSyncMappings, channelMessages } from '../db'
@@ -350,6 +353,156 @@ describe('divinci-sync-service.collectSlackEntities', () => {
       createdAt: old,
     })
     const entities = await collectSlackEntities(baseCfg)
+    expect(entities).toEqual([])
+  })
+})
+
+describe('divinci-sync-service.gmailThreadUrl', () => {
+  test('builds the #all/<threadId> permalink shape', () => {
+    expect(gmailThreadUrl('18c2a3b4d5e6f7a8')).toBe(
+      'https://mail.google.com/mail/u/0/#all/18c2a3b4d5e6f7a8',
+    )
+  })
+})
+
+describe('divinci-sync-service.renderGmailThreadEntity', () => {
+  test('renders a thread with subject, per-message blocks, and a Gmail URL', () => {
+    const entity = renderGmailThreadEntity('t:THREAD42', [
+      {
+        senderName: 'Alice',
+        senderId: 'alice@example.com',
+        content: 'Hey Mike, what about Q2?',
+        messageTimestamp: '2026-05-20T14:00:00.000Z',
+        direction: 'incoming',
+        metadata: { threadId: 'THREAD42', subject: 'Q2 numbers' },
+      },
+      {
+        senderName: 'Mike',
+        senderId: 'mike@divinci.ai',
+        content: 'Up 38% MoM',
+        messageTimestamp: '2026-05-20T15:00:00.000Z',
+        direction: 'outgoing',
+        metadata: { threadId: 'THREAD42', subject: 'Q2 numbers' },
+      },
+    ])
+    expect(entity.entityType).toBe('gmail-thread')
+    expect(entity.entityId).toBe('t:THREAD42')
+    expect(entity.title).toBe('Gmail: Q2 numbers')
+    expect(entity.body).toContain('# Q2 numbers')
+    expect(entity.body).toContain('Thread: THREAD42')
+    expect(entity.body).toContain('Messages: 2')
+    expect(entity.body).toContain('Alice <alice@example.com>')
+    expect(entity.body).toContain('Mike <mike@divinci.ai> (sent)')
+    expect(entity.body).toContain('Hey Mike, what about Q2?')
+    expect(entity.body).toContain('Up 38% MoM')
+    expect(entity.sourceUrl).toBe('https://mail.google.com/mail/u/0/#all/THREAD42')
+  })
+
+  test('falls back to (no subject) and omits sourceUrl when threadId absent', () => {
+    const entity = renderGmailThreadEntity('m:MSG9', [
+      {
+        senderName: null,
+        senderId: 'someone@x.com',
+        content: 'standalone',
+        messageTimestamp: '2026-05-20T10:00:00.000Z',
+        direction: 'incoming',
+        metadata: { messageId: 'MSG9' },
+      },
+    ])
+    expect(entity.title).toBe('Gmail: (no subject)')
+    expect(entity.body).toContain('(no subject)')
+    expect(entity.body).not.toContain('Thread:')
+    expect(entity.sourceUrl).toBeNull()
+  })
+})
+
+describe('divinci-sync-service.collectGmailEntities', () => {
+  test('returns empty when no email rows exist', async () => {
+    const entities = await collectGmailEntities(baseCfg)
+    expect(entities).toEqual([])
+  })
+
+  test('groups messages by threadId into one thread file each', async () => {
+    const now = new Date().toISOString()
+    await db.insert(channelMessages).values([
+      {
+        id: 'e1',
+        channelType: 'email',
+        connectionId: 'email-channel',
+        direction: 'incoming',
+        senderId: 'a@x.com',
+        senderName: 'A',
+        content: 'first message in thread T',
+        metadata: { threadId: 'T', subject: 'topic A' },
+        messageTimestamp: now,
+        createdAt: now,
+      },
+      {
+        id: 'e2',
+        channelType: 'email',
+        connectionId: 'email-channel',
+        direction: 'outgoing',
+        senderId: 'me@x.com',
+        senderName: 'Me',
+        content: 'reply in thread T',
+        metadata: { threadId: 'T', subject: 'Re: topic A' },
+        messageTimestamp: new Date(Date.now() + 1000).toISOString(),
+        createdAt: now,
+      },
+      {
+        id: 'e3',
+        channelType: 'email',
+        connectionId: 'email-channel',
+        direction: 'incoming',
+        senderId: 'b@x.com',
+        senderName: 'B',
+        content: 'different thread',
+        metadata: { threadId: 'U', subject: 'topic B' },
+        messageTimestamp: now,
+        createdAt: now,
+      },
+    ])
+    const entities = await collectGmailEntities(baseCfg)
+    expect(entities.length).toBe(2)
+    const t = entities.find((e) => e.entityId === 't:T')
+    const u = entities.find((e) => e.entityId === 't:U')
+    expect(t?.body).toContain('first message in thread T')
+    expect(t?.body).toContain('reply in thread T')
+    expect(u?.body).toContain('different thread')
+  })
+
+  test('orphan message without threadId gets its own m:<messageId> entity', async () => {
+    const now = new Date().toISOString()
+    await db.insert(channelMessages).values({
+      id: 'orphan1',
+      channelType: 'email',
+      connectionId: 'email-channel',
+      direction: 'incoming',
+      senderId: 'a@x.com',
+      content: 'no thread',
+      metadata: { messageId: 'BARE-MSG', subject: 'orphan' },
+      messageTimestamp: now,
+      createdAt: now,
+    })
+    const entities = await collectGmailEntities(baseCfg)
+    expect(entities.length).toBe(1)
+    expect(entities[0].entityId).toBe('m:BARE-MSG')
+    expect(entities[0].sourceUrl).toBeNull()
+  })
+
+  test('ignores non-email channelType rows', async () => {
+    const now = new Date().toISOString()
+    await db.insert(channelMessages).values({
+      id: 's-not-email',
+      channelType: 'slack',
+      connectionId: 'c',
+      direction: 'incoming',
+      senderId: 'u',
+      content: 'hi',
+      messageTimestamp: now,
+      createdAt: now,
+    })
+    const entities = await collectGmailEntities(baseCfg)
     expect(entities).toEqual([])
   })
 })
