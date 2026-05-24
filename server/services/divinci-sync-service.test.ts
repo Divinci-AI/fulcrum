@@ -9,9 +9,11 @@ import {
   collectGmailEntities,
   renderGmailThreadEntity,
   gmailThreadUrl,
+  collectCalendarEntities,
+  renderCalendarEventEntity,
   _resetDivinciSyncForTesting,
 } from './divinci-sync-service'
-import { db, tasks, projects, divinciSyncMappings, channelMessages } from '../db'
+import { db, tasks, projects, divinciSyncMappings, channelMessages, caldavEvents, caldavCalendars } from '../db'
 
 const baseCfg = {
   baseUrl: 'https://api.divinci.ai',
@@ -26,6 +28,8 @@ async function clearTables(): Promise<void> {
   await db.delete(tasks)
   await db.delete(projects)
   await db.delete(channelMessages)
+  await db.delete(caldavEvents)
+  await db.delete(caldavCalendars)
 }
 
 beforeEach(async () => {
@@ -503,6 +507,165 @@ describe('divinci-sync-service.collectGmailEntities', () => {
       createdAt: now,
     })
     const entities = await collectGmailEntities(baseCfg)
+    expect(entities).toEqual([])
+  })
+})
+
+describe('divinci-sync-service.renderCalendarEventEntity', () => {
+  test('renders an event with calendar name, time, location, attendees, description', () => {
+    const entity = renderCalendarEventEntity(
+      {
+        id: 'evt-1',
+        calendarId: 'cal-personal',
+        summary: '1:1 with Mike',
+        description: 'D-17 PR 5 walkthrough',
+        location: 'Zoom',
+        dtstart: '2026-05-25T14:00:00Z',
+        dtend: '2026-05-25T14:30:00Z',
+        allDay: false,
+        organizer: 'mike@divinci.ai',
+        attendees: ['alice@x.com', 'bob@x.com'],
+        status: 'confirmed',
+        recurrenceRule: null,
+      },
+      'Mike Personal',
+    )
+    expect(entity.entityType).toBe('calendar-event')
+    expect(entity.entityId).toBe('evt-1')
+    expect(entity.title).toBe('Calendar: 1:1 with Mike')
+    expect(entity.body).toContain('# 1:1 with Mike')
+    expect(entity.body).toContain('Calendar: Mike Personal')
+    expect(entity.body).toContain('When: 2026-05-25T14:00:00Z → 2026-05-25T14:30:00Z')
+    expect(entity.body).toContain('Where: Zoom')
+    expect(entity.body).toContain('Organizer: mike@divinci.ai')
+    expect(entity.body).toContain('Attendees: alice@x.com, bob@x.com')
+    expect(entity.body).toContain('Status: confirmed')
+    expect(entity.body).toContain('D-17 PR 5 walkthrough')
+    expect(entity.sourceUrl).toBeNull()
+  })
+
+  test('all-day events get the (all-day) tag', () => {
+    const entity = renderCalendarEventEntity(
+      {
+        id: 'h1',
+        calendarId: 'cal',
+        summary: 'Holiday',
+        description: null,
+        location: null,
+        dtstart: '2026-12-25',
+        dtend: null,
+        allDay: true,
+        organizer: null,
+        attendees: null,
+        status: null,
+        recurrenceRule: null,
+      },
+      null,
+    )
+    expect(entity.body).toContain('(all-day)')
+    expect(entity.body).not.toContain('Calendar:')
+  })
+
+  test('attendee preview truncates to 8 with overflow count', () => {
+    const attendees = Array.from({ length: 12 }, (_, i) => `u${i}@x.com`)
+    const entity = renderCalendarEventEntity(
+      {
+        id: 'big',
+        calendarId: 'cal',
+        summary: 'All-hands',
+        description: null,
+        location: null,
+        dtstart: '2026-06-01T10:00:00Z',
+        dtend: '2026-06-01T11:00:00Z',
+        allDay: false,
+        organizer: null,
+        attendees,
+        status: null,
+        recurrenceRule: null,
+      },
+      null,
+    )
+    expect(entity.body).toContain('(+4 more)')
+  })
+
+  test('falls back to (no title) when summary is null', () => {
+    const entity = renderCalendarEventEntity(
+      {
+        id: 'untitled',
+        calendarId: 'cal',
+        summary: null,
+        description: null,
+        location: null,
+        dtstart: '2026-06-01T10:00:00Z',
+        dtend: null,
+        allDay: false,
+        organizer: null,
+        attendees: null,
+        status: null,
+        recurrenceRule: null,
+      },
+      null,
+    )
+    expect(entity.title).toBe('Calendar: (no title)')
+    expect(entity.body).toContain('# (no title)')
+  })
+})
+
+describe('divinci-sync-service.collectCalendarEntities', () => {
+  async function seedCalendar(id: string, displayName: string | null): Promise<void> {
+    const now = new Date().toISOString()
+    await db.insert(caldavCalendars).values({
+      id,
+      remoteUrl: `https://cal.example/${id}`,
+      displayName,
+      createdAt: now,
+      updatedAt: now,
+    })
+  }
+
+  async function seedEvent(overrides: Partial<typeof caldavEvents.$inferInsert>): Promise<void> {
+    const now = new Date().toISOString()
+    await db.insert(caldavEvents).values({
+      id: 'e1',
+      calendarId: 'cal-1',
+      remoteUrl: `https://cal.example/event/${overrides.id ?? 'e1'}`,
+      summary: 'X',
+      dtstart: new Date().toISOString(),
+      createdAt: now,
+      updatedAt: now,
+      ...overrides,
+    })
+  }
+
+  test('returns empty when no events exist', async () => {
+    const entities = await collectCalendarEntities(baseCfg)
+    expect(entities).toEqual([])
+  })
+
+  test('includes events within the ±90-day window', async () => {
+    await seedCalendar('cal-1', 'My Cal')
+    await seedEvent({ id: 'e-now', remoteUrl: 'r1', dtstart: new Date().toISOString() })
+    const entities = await collectCalendarEntities(baseCfg)
+    expect(entities.length).toBe(1)
+    expect(entities[0].entityId).toBe('e-now')
+    expect(entities[0].body).toContain('My Cal')
+  })
+
+  test('excludes events outside ±90 days', async () => {
+    await seedCalendar('cal-1', null)
+    const future = new Date(Date.now() + 200 * 24 * 60 * 60 * 1000).toISOString()
+    const past = new Date(Date.now() - 200 * 24 * 60 * 60 * 1000).toISOString()
+    await seedEvent({ id: 'far-future', remoteUrl: 'rf', dtstart: future })
+    await seedEvent({ id: 'far-past', remoteUrl: 'rp', dtstart: past })
+    const entities = await collectCalendarEntities(baseCfg)
+    expect(entities).toEqual([])
+  })
+
+  test('skips events with no dtstart or unparseable dtstart', async () => {
+    await seedCalendar('cal-1', null)
+    await seedEvent({ id: 'no-start', remoteUrl: 'rns', dtstart: null })
+    await seedEvent({ id: 'bad-start', remoteUrl: 'rbs', dtstart: 'not-a-date' })
+    const entities = await collectCalendarEntities(baseCfg)
     expect(entities).toEqual([])
   })
 })

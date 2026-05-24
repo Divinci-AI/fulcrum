@@ -27,7 +27,7 @@
  */
 import { createHash } from 'node:crypto'
 import { eq } from 'drizzle-orm'
-import { db, tasks, projects, divinciSyncMappings, channelMessages } from '../db'
+import { db, tasks, projects, divinciSyncMappings, channelMessages, caldavEvents, caldavCalendars } from '../db'
 import type { DivinciSyncMapping } from '../db/schema'
 import { getSettings } from '../lib/settings'
 import { log } from '../lib/logger'
@@ -288,6 +288,11 @@ function registeredSources(): SyncSource[] {
       name: 'gmail',
       collectionId: c.gmail,
       collect: collectGmailEntities,
+    },
+    {
+      name: 'calendar',
+      collectionId: c.calendar,
+      collect: collectCalendarEntities,
     },
   ]
 }
@@ -561,6 +566,117 @@ export function renderGmailThreadEntity(
  */
 export function gmailThreadUrl(threadId: string): string {
   return `https://mail.google.com/mail/u/0/#all/${threadId}`
+}
+
+/**
+ * Calendar sync — pulls events from `caldavEvents`, which unifies both
+ * generic CalDAV sources and Google Calendar (Google's events land here via
+ * the googleAccountId-bound calendars). One Divinci file per event.
+ *
+ * Why per-event (vs. per-day or per-calendar bundles): each event is a
+ * discrete retrieval unit. "When's my next 1:1 with Bob?" maps to one
+ * row, not a day. Calendar volumes are bounded (humans schedule O(10)/day
+ * tops), so per-event grain doesn't blow file count.
+ *
+ * Window: events whose dtstart falls within ±90 days. Calendar is mostly
+ * forward-looking; we keep a quarter of recent history for queries like
+ * "what did we discuss in last week's all-hands?" and a quarter forward
+ * for upcoming.
+ *
+ * Recurring events: the underlying caldavEvents row stores the master
+ * event with an RRULE — we don't expand recurrences. For now the first
+ * dtstart determines window inclusion; the LLM can ask follow-ups about
+ * future instances via the calendar MCP tool if needed.
+ */
+export async function collectCalendarEntities(_cfg: DivinciClientCfg): Promise<SyncableEntity[]> {
+  const events = await db.select().from(caldavEvents)
+  const calendars = await db.select().from(caldavCalendars)
+  const calendarNameById = new Map(calendars.map((c) => [c.id, c.displayName ?? null]))
+
+  const windowMs = DEFAULT_CALENDAR_DAYS_WINDOW * 24 * 60 * 60 * 1000
+  const nowMs = Date.now()
+  const inWindow = events.filter((e) => {
+    if (!e.dtstart) return false
+    // dtstart may be ISO datetime or YYYY-MM-DD for all-day; Date.parse
+    // handles both (the latter as UTC midnight).
+    const tMs = Date.parse(e.dtstart)
+    if (!Number.isFinite(tMs)) return false
+    return Math.abs(tMs - nowMs) <= windowMs
+  })
+
+  const out: SyncableEntity[] = []
+  for (const e of inWindow) {
+    const calendarName = calendarNameById.get(e.calendarId) ?? null
+    out.push(renderCalendarEventEntity(e, calendarName))
+  }
+  return out
+}
+
+/** Days on either side of "now" we keep refreshed in the Divinci calendar collection. */
+const DEFAULT_CALENDAR_DAYS_WINDOW = 90
+
+/**
+ * Render one calendar event as a markdown card. Includes the calendar name
+ * for context so the LLM can disambiguate "personal" vs "work" overlap.
+ * Exported for unit testing.
+ */
+export function renderCalendarEventEntity(
+  event: {
+    id: string
+    calendarId: string
+    summary: string | null
+    description: string | null
+    location: string | null
+    dtstart: string | null
+    dtend: string | null
+    allDay: boolean | null
+    organizer: string | null
+    attendees: string[] | null
+    status: string | null
+    recurrenceRule: string | null
+  },
+  calendarName: string | null,
+): SyncableEntity {
+  const title = event.summary?.trim() || '(no title)'
+  const lines: string[] = []
+  lines.push(`# ${title}`)
+  lines.push('')
+  if (calendarName) lines.push(`Calendar: ${calendarName}`)
+  if (event.dtstart) {
+    const when = event.dtend ? `${event.dtstart} → ${event.dtend}` : event.dtstart
+    const tag = event.allDay ? ' (all-day)' : ''
+    lines.push(`When: ${when}${tag}`)
+  }
+  if (event.location?.trim()) lines.push(`Where: ${event.location.trim()}`)
+  if (event.organizer?.trim()) lines.push(`Organizer: ${event.organizer.trim()}`)
+  if (event.attendees && event.attendees.length > 0) {
+    const preview = event.attendees.slice(0, 8).join(', ')
+    const more = event.attendees.length > 8 ? ` (+${event.attendees.length - 8} more)` : ''
+    lines.push(`Attendees: ${preview}${more}`)
+  }
+  if (event.status?.trim()) lines.push(`Status: ${event.status.trim()}`)
+  if (event.recurrenceRule?.trim()) lines.push(`Recurrence: ${event.recurrenceRule.trim()}`)
+  if (event.description?.trim()) {
+    lines.push('')
+    lines.push('## Description')
+    lines.push('')
+    lines.push(event.description.trim())
+  }
+  const body = lines.join('\n').trimEnd()
+
+  const dateLabel = event.dtstart ? event.dtstart.slice(0, 16) : 'undated'
+  return {
+    entityType: 'calendar-event',
+    entityId: event.id,
+    body,
+    title: `Calendar: ${title}`,
+    description: `${dateLabel} — ${calendarName ?? 'calendar'}: ${title}`.slice(0, 500),
+    // Google calendar event URLs need a base64(eventId + ' ' + calendarId)
+    // encoding that varies between Google's regular + service-account
+    // calendars; CalDAV has no canonical web URL. Leave null; chunks
+    // self-cite via the [Calendar: <name>] source line.
+    sourceUrl: null,
+  }
 }
 
 /**
