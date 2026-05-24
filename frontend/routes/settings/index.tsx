@@ -63,6 +63,11 @@ import {
   useAssistantHermesBaseUrl,
   useAssistantHermesApiKey,
   useAssistantHermesModel,
+  useAssistantDivinciEnabled,
+  useAssistantDivinciBaseUrl,
+  useAssistantDivinciApiKey,
+  useAssistantDivinciGroupId,
+  useAssistantDivinciTopK,
   useAssistantRitualsEnabled,
   useAssistantMorningRitualTime,
   useAssistantMorningRitualPrompt,
@@ -183,6 +188,12 @@ function SettingsPage() {
   const { data: hermesBaseUrl } = useAssistantHermesBaseUrl()
   const { data: hermesApiKey } = useAssistantHermesApiKey()
   const { data: hermesModel } = useAssistantHermesModel()
+  // D-17 PR 1
+  const { data: divinciEnabled } = useAssistantDivinciEnabled()
+  const { data: divinciBaseUrl } = useAssistantDivinciBaseUrl()
+  const { data: divinciApiKey } = useAssistantDivinciApiKey()
+  const { data: divinciGroupId } = useAssistantDivinciGroupId()
+  const { data: divinciTopK } = useAssistantDivinciTopK()
   const { data: ritualsEnabled, isLoading: ritualsEnabledLoading } = useAssistantRitualsEnabled()
   const { data: morningRitualTime, isLoading: morningTimeLoading } = useAssistantMorningRitualTime()
   const { data: morningRitualPrompt, isLoading: morningPromptLoading } = useAssistantMorningRitualPrompt()
@@ -286,6 +297,13 @@ function SettingsPage() {
   // D-16: preset selector for the Hermes panel — auto-detects from baseUrl on load
   // so an operator pasting `…/v1beta/openai` shows "Google Gemini" pre-selected.
   const [localHermesPreset, setLocalHermesPreset] = useState<string>('custom')
+
+  // D-17 PR 1: Divinci RAG pre-flight retrieval (only when provider is Hermes)
+  const [localDivinciEnabled, setLocalDivinciEnabled] = useState<boolean>(false)
+  const [localDivinciBaseUrl, setLocalDivinciBaseUrl] = useState<string>('')
+  const [localDivinciApiKey, setLocalDivinciApiKey] = useState<string>('')
+  const [localDivinciGroupId, setLocalDivinciGroupId] = useState<string>('')
+  const [localDivinciTopK, setLocalDivinciTopK] = useState<number>(8)
 
   // Ritual settings local state (under assistant)
   const [localRitualsEnabled, setLocalRitualsEnabled] = useState(false)
@@ -411,7 +429,12 @@ function SettingsPage() {
     }
     if (hermesApiKey !== undefined) setLocalHermesApiKey(hermesApiKey || '')
     if (hermesModel !== undefined) setLocalHermesModel(hermesModel || '')
-  }, [assistantProvider, assistantModel, assistantObserverModel, assistantObserverProvider, assistantObserverOpencodeModel, assistantDocumentsDir, hermesBaseUrl, hermesApiKey, hermesModel])
+    if (divinciEnabled !== undefined) setLocalDivinciEnabled(divinciEnabled)
+    if (divinciBaseUrl !== undefined) setLocalDivinciBaseUrl(divinciBaseUrl || '')
+    if (divinciApiKey !== undefined) setLocalDivinciApiKey(divinciApiKey || '')
+    if (divinciGroupId !== undefined) setLocalDivinciGroupId(divinciGroupId || '')
+    if (divinciTopK !== undefined) setLocalDivinciTopK(divinciTopK)
+  }, [assistantProvider, assistantModel, assistantObserverModel, assistantObserverProvider, assistantObserverOpencodeModel, assistantDocumentsDir, hermesBaseUrl, hermesApiKey, hermesModel, divinciEnabled, divinciBaseUrl, divinciApiKey, divinciGroupId, divinciTopK])
 
   // Sync ritual settings
   useEffect(() => {
@@ -456,7 +479,12 @@ function SettingsPage() {
     localAssistantDocumentsDir !== assistantDocumentsDir ||
     localHermesBaseUrl !== hermesBaseUrl ||
     localHermesApiKey !== hermesApiKey ||
-    localHermesModel !== hermesModel
+    localHermesModel !== hermesModel ||
+    localDivinciEnabled !== divinciEnabled ||
+    localDivinciBaseUrl !== (divinciBaseUrl ?? '') ||
+    localDivinciApiKey !== (divinciApiKey ?? '') ||
+    localDivinciGroupId !== (divinciGroupId ?? '') ||
+    localDivinciTopK !== divinciTopK
 
   const hasRitualsChanges =
     localRitualsEnabled !== ritualsEnabled ||
@@ -897,6 +925,57 @@ function SettingsPage() {
           new Promise((resolve) => {
             updateConfig.mutate(
               { key: CONFIG_KEYS.ASSISTANT_HERMES_MODEL, value: localHermesModel || null },
+              { onSettled: resolve }
+            )
+          })
+        )
+      }
+      // D-17 PR 1: Divinci RAG pre-flight retrieval settings
+      if (localDivinciEnabled !== divinciEnabled) {
+        promises.push(
+          new Promise((resolve) => {
+            updateConfig.mutate(
+              { key: CONFIG_KEYS.ASSISTANT_DIVINCI_ENABLED, value: localDivinciEnabled },
+              { onSettled: resolve }
+            )
+          })
+        )
+      }
+      if (localDivinciBaseUrl !== (divinciBaseUrl ?? '')) {
+        promises.push(
+          new Promise((resolve) => {
+            updateConfig.mutate(
+              { key: CONFIG_KEYS.ASSISTANT_DIVINCI_BASE_URL, value: localDivinciBaseUrl || null },
+              { onSettled: resolve }
+            )
+          })
+        )
+      }
+      if (localDivinciApiKey !== (divinciApiKey ?? '')) {
+        promises.push(
+          new Promise((resolve) => {
+            updateConfig.mutate(
+              { key: CONFIG_KEYS.ASSISTANT_DIVINCI_API_KEY, value: localDivinciApiKey || null },
+              { onSettled: resolve }
+            )
+          })
+        )
+      }
+      if (localDivinciGroupId !== (divinciGroupId ?? '')) {
+        promises.push(
+          new Promise((resolve) => {
+            updateConfig.mutate(
+              { key: CONFIG_KEYS.ASSISTANT_DIVINCI_GROUP_ID, value: localDivinciGroupId || null },
+              { onSettled: resolve }
+            )
+          })
+        )
+      }
+      if (localDivinciTopK !== divinciTopK) {
+        promises.push(
+          new Promise((resolve) => {
+            updateConfig.mutate(
+              { key: CONFIG_KEYS.ASSISTANT_DIVINCI_TOP_K, value: localDivinciTopK },
               { onSettled: resolve }
             )
           })
@@ -2346,6 +2425,90 @@ function SettingsPage() {
                               </p>
                             )
                           })()}
+                        </div>
+                      )}
+
+                      {/* D-17 PR 1: Divinci RAG pre-flight retrieval — only shown when Hermes is the provider */}
+                      {localAssistantProvider === 'hermes' && (
+                        <div className="space-y-3 rounded-md border border-border bg-muted/30 p-3">
+                          <div className="flex items-center justify-between gap-2">
+                            <div>
+                              <p className="text-sm font-medium">Divinci RAG context</p>
+                              <p className="text-xs text-muted-foreground">
+                                Inject semantic chunks from a Divinci Group (Slack/Fulcrum/Gmail/Calendar/Drive) into Hermes' system prompt before every turn.
+                              </p>
+                            </div>
+                            <label className="flex shrink-0 items-center gap-2 text-xs">
+                              <input
+                                type="checkbox"
+                                checked={localDivinciEnabled}
+                                onChange={(e) => setLocalDivinciEnabled(e.target.checked)}
+                              />
+                              Enabled
+                            </label>
+                          </div>
+                          {localDivinciEnabled && (
+                            <>
+                              <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+                                <label className="text-sm text-muted-foreground sm:w-32 sm:shrink-0">
+                                  Base URL
+                                </label>
+                                <Input
+                                  type="url"
+                                  value={localDivinciBaseUrl}
+                                  onChange={(e) => setLocalDivinciBaseUrl(e.target.value)}
+                                  placeholder="https://api.divinci.ai"
+                                  className="flex-1 font-mono text-xs"
+                                />
+                              </div>
+                              <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+                                <label className="text-sm text-muted-foreground sm:w-32 sm:shrink-0">
+                                  API Key
+                                </label>
+                                <Input
+                                  type="password"
+                                  value={localDivinciApiKey}
+                                  onChange={(e) => setLocalDivinciApiKey(e.target.value)}
+                                  placeholder="rag:read + rag:write scopes"
+                                  className="flex-1 font-mono text-xs"
+                                />
+                              </div>
+                              <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+                                <label className="text-sm text-muted-foreground sm:w-32 sm:shrink-0">
+                                  Group ID
+                                </label>
+                                <Input
+                                  type="text"
+                                  value={localDivinciGroupId}
+                                  onChange={(e) => setLocalDivinciGroupId(e.target.value)}
+                                  placeholder="Divinci RagVectorGroup _id"
+                                  className="flex-1 font-mono text-xs"
+                                />
+                              </div>
+                              <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+                                <label className="text-sm text-muted-foreground sm:w-32 sm:shrink-0">
+                                  Top K
+                                </label>
+                                <Input
+                                  type="number"
+                                  min={1}
+                                  max={50}
+                                  value={localDivinciTopK}
+                                  onChange={(e) => {
+                                    const n = parseInt(e.target.value, 10)
+                                    if (!Number.isNaN(n)) setLocalDivinciTopK(Math.max(1, Math.min(50, n)))
+                                  }}
+                                  className="w-24 font-mono text-xs"
+                                />
+                                <span className="text-xs text-muted-foreground">
+                                  chunks per retrieval (server caps at 50)
+                                </span>
+                              </div>
+                              <p className="text-xs text-muted-foreground">
+                                Create the API key + Group in your Divinci admin UI. Pre-flight retrieval is fail-soft — if Divinci is down, Hermes falls back to tools-only.
+                              </p>
+                            </>
+                          )}
                         </div>
                       )}
                     </div>

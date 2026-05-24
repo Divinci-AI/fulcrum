@@ -201,6 +201,26 @@ export interface Settings {
       apiKey: string | null
       model: string | null
     }
+    /**
+     * D-17 PR 1: Divinci RAG pre-flight retrieval. When enabled and the
+     * assistant provider is 'hermes', `streamHermesMessage` calls Divinci's
+     * `POST /api/v1/rag/context` once per user turn and injects the
+     * returned chunks as a system-prompt section so the LLM has indexed
+     * context from Slack/Fulcrum/Gmail/Calendar/Drive before deciding
+     * which (if any) of its 127 MCP tools to call.
+     *
+     * Always-off default — operator opts in via Settings → Hermes →
+     * Divinci once they've created an API key in Divinci's UI and an
+     * indexing Group there.
+     */
+    divinci: {
+      enabled: boolean
+      baseUrl: string | null
+      apiKey: string | null
+      groupId: string | null
+      /** topK chunks per retrieval; Divinci server caps at 50. */
+      topK: number
+    }
   }
   channels: ChannelsSettings
   caldav: CalDavSettings
@@ -262,6 +282,13 @@ export const DEFAULT_SETTINGS: Settings = {
       baseUrl: 'http://localhost:8642',
       apiKey: null,
       model: null,
+    },
+    divinci: {
+      enabled: false,
+      baseUrl: null,
+      apiKey: null,
+      groupId: null,
+      topK: 8,
     },
     documentsDir: '~/.fulcrum/documents',
     ritualsEnabled: false,
@@ -382,6 +409,12 @@ export const VALID_SETTING_PATHS = new Set([
   'assistant.hermes.baseUrl',
   'assistant.hermes.apiKey',
   'assistant.hermes.model',
+  // D-17 PR 1: Divinci RAG pre-flight retrieval
+  'assistant.divinci.enabled',
+  'assistant.divinci.baseUrl',
+  'assistant.divinci.apiKey',
+  'assistant.divinci.groupId',
+  'assistant.divinci.topK',
   'channels.email.enabled',
   'channels.email.backend',
   'channels.email.googleAccountId',

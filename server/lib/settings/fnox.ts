@@ -74,6 +74,12 @@ export const FNOX_CONFIG_MAP: Record<string, ConfigEntry> = {
   'assistant.hermes.baseUrl': { fnoxKey: 'FULCRUM_ASSISTANT_HERMES_BASE_URL', provider: 'plain', type: 'string' },
   'assistant.hermes.apiKey': { fnoxKey: 'FULCRUM_ASSISTANT_HERMES_API_KEY', provider: 'age', type: 'string' },
   'assistant.hermes.model': { fnoxKey: 'FULCRUM_ASSISTANT_HERMES_MODEL', provider: 'plain', type: 'string' },
+  // D-17 PR 1: Divinci RAG pre-flight retrieval
+  'assistant.divinci.enabled': { fnoxKey: 'FULCRUM_ASSISTANT_DIVINCI_ENABLED', provider: 'plain', type: 'boolean' },
+  'assistant.divinci.baseUrl': { fnoxKey: 'FULCRUM_ASSISTANT_DIVINCI_BASE_URL', provider: 'plain', type: 'string' },
+  'assistant.divinci.apiKey': { fnoxKey: 'FULCRUM_ASSISTANT_DIVINCI_API_KEY', provider: 'age', type: 'string' },
+  'assistant.divinci.groupId': { fnoxKey: 'FULCRUM_ASSISTANT_DIVINCI_GROUP_ID', provider: 'plain', type: 'string' },
+  'assistant.divinci.topK': { fnoxKey: 'FULCRUM_ASSISTANT_DIVINCI_TOP_K', provider: 'plain', type: 'number' },
 
   // Channels - Email
   'channels.email.enabled': { fnoxKey: 'FULCRUM_EMAIL_ENABLED', provider: 'plain', type: 'boolean' },

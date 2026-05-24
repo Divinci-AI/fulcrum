@@ -28,6 +28,10 @@ import {
   getMcpToolsAsOpenAI,
   isMcpToolKnown,
 } from './hermes-mcp-bridge'
+import {
+  formatRetrievedContextSection,
+  getDivinciContext,
+} from './divinci-rag-client'
 import type { ChannelHistoryMessage } from './channels/message-storage'
 import type { AttachmentData } from '../../shared/types'
 
@@ -166,6 +170,37 @@ export async function* streamHermesMessage(
           return [...mcp, ...handRolled]
         })()
 
+  // D-17 PR 1: Divinci RAG pre-flight retrieval. When enabled, fetch
+  // semantic chunks from the configured Group before composing the system
+  // prompt so the LLM has indexed context (Slack/Fulcrum/Gmail/Cal/Drive)
+  // up front — reduces tool-storm risk (model doesn't have to discover
+  // which of 127 MCP tools to call) and grounds replies in real prior
+  // state. Fail-soft: client returns null on timeout/error → no section,
+  // tools-only flow continues unchanged.
+  const divinciCfg = settings.assistant.divinci
+  let retrievedContextSection = ''
+  if (divinciCfg.enabled && divinciCfg.baseUrl && divinciCfg.apiKey && divinciCfg.groupId) {
+    const retrieved = await getDivinciContext(
+      {
+        baseUrl: divinciCfg.baseUrl,
+        apiKey: divinciCfg.apiKey,
+        groupId: divinciCfg.groupId,
+      },
+      userMessage,
+      { topK: divinciCfg.topK },
+    )
+    if (retrieved && retrieved.chunks.length > 0) {
+      retrievedContextSection = formatRetrievedContextSection(retrieved)
+      log.chat.info('Divinci pre-flight retrieval', {
+        sessionId,
+        groupId: divinciCfg.groupId,
+        chunkCount: retrieved.chunks.length,
+        retrievalMs: retrieved.retrievalMs,
+        topK: divinciCfg.topK,
+      })
+    }
+  }
+
   // D-16 B8: prepend a Hermes-appropriate baseline system prompt so the
   // assistant knows what Fulcrum is and what it can/can't do. The capability
   // note inside is conditional on toolsForCall.length — without that flag the
@@ -174,9 +209,12 @@ export async function* streamHermesMessage(
   // parameter and refused to call them.
   const messages: ChatMessage[] = []
   const baseline = buildHermesBaseline(toolsForCall.length > 0)
-  const fullSystem = options.systemPromptAdditions
-    ? `${baseline}\n\n${options.systemPromptAdditions}`
+  const baselineWithRetrieval = retrievedContextSection
+    ? `${baseline}\n\n${retrievedContextSection}`
     : baseline
+  const fullSystem = options.systemPromptAdditions
+    ? `${baselineWithRetrieval}\n\n${options.systemPromptAdditions}`
+    : baselineWithRetrieval
   messages.push({ role: 'system', content: fullSystem })
   for (const m of history) {
     messages.push({ role: m.role as 'user' | 'assistant', content: m.content })

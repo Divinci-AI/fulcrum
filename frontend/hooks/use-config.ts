@@ -421,6 +421,52 @@ export function useAssistantHermesModel() {
   }
 }
 
+// D-17 PR 1: Divinci RAG pre-flight retrieval hooks
+export function useAssistantDivinciEnabled() {
+  const query = useConfig(CONFIG_KEYS.ASSISTANT_DIVINCI_ENABLED)
+  return {
+    ...query,
+    data: (query.data?.value as boolean | null) ?? false,
+    isDefault: query.data?.isDefault ?? true,
+  }
+}
+
+export function useAssistantDivinciBaseUrl() {
+  const query = useConfig(CONFIG_KEYS.ASSISTANT_DIVINCI_BASE_URL)
+  return {
+    ...query,
+    data: (query.data?.value as string | null) ?? '',
+    isDefault: query.data?.isDefault ?? true,
+  }
+}
+
+export function useAssistantDivinciApiKey() {
+  const query = useConfig(CONFIG_KEYS.ASSISTANT_DIVINCI_API_KEY)
+  return {
+    ...query,
+    data: (query.data?.value as string | null) ?? '',
+    isDefault: query.data?.isDefault ?? true,
+  }
+}
+
+export function useAssistantDivinciGroupId() {
+  const query = useConfig(CONFIG_KEYS.ASSISTANT_DIVINCI_GROUP_ID)
+  return {
+    ...query,
+    data: (query.data?.value as string | null) ?? '',
+    isDefault: query.data?.isDefault ?? true,
+  }
+}
+
+export function useAssistantDivinciTopK() {
+  const query = useConfig(CONFIG_KEYS.ASSISTANT_DIVINCI_TOP_K)
+  return {
+    ...query,
+    data: (query.data?.value as number | null) ?? 8,
+    isDefault: query.data?.isDefault ?? true,
+  }
+}
+
 // Ritual settings (under assistant)
 export function useAssistantRitualsEnabled() {
   const query = useConfig(CONFIG_KEYS.ASSISTANT_RITUALS_ENABLED)
