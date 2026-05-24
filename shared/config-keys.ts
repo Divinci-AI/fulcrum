@@ -56,6 +56,7 @@ export const CONFIG_KEYS = {
   ASSISTANT_DIVINCI_COLLECTION_FULCRUM: 'assistant.divinci.collections.fulcrum',
   ASSISTANT_DIVINCI_COLLECTION_SLACK: 'assistant.divinci.collections.slack',
   ASSISTANT_DIVINCI_COLLECTION_GMAIL: 'assistant.divinci.collections.gmail',
+  ASSISTANT_DIVINCI_COLLECTION_CALENDAR: 'assistant.divinci.collections.calendar',
   EMAIL_POLL_INTERVAL: 'channels.email.pollIntervalSeconds',
   CALDAV_ENABLED: 'caldav.enabled',
   CALDAV_SERVER_URL: 'caldav.serverUrl',

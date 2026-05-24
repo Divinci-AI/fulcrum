@@ -232,6 +232,8 @@ export interface Settings {
         slack: string | null
         /** Gmail messages (D-17 PR 4). One Divinci file per email thread. */
         gmail: string | null
+        /** Calendar events (D-17 PR 5). One Divinci file per event, ±90d window. */
+        calendar: string | null
       }
     }
   }
@@ -306,6 +308,7 @@ export const DEFAULT_SETTINGS: Settings = {
         fulcrum: null,
         slack: null,
         gmail: null,
+        calendar: null,
       },
     },
     documentsDir: '~/.fulcrum/documents',
@@ -436,6 +439,7 @@ export const VALID_SETTING_PATHS = new Set([
   'assistant.divinci.collections.fulcrum',
   'assistant.divinci.collections.slack',
   'assistant.divinci.collections.gmail',
+  'assistant.divinci.collections.calendar',
   'channels.email.enabled',
   'channels.email.backend',
   'channels.email.googleAccountId',

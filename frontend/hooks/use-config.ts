@@ -497,6 +497,16 @@ export function useAssistantDivinciCollectionGmail() {
   }
 }
 
+// D-17 PR 5: Calendar events collection
+export function useAssistantDivinciCollectionCalendar() {
+  const query = useConfig(CONFIG_KEYS.ASSISTANT_DIVINCI_COLLECTION_CALENDAR)
+  return {
+    ...query,
+    data: (query.data?.value as string | null) ?? '',
+    isDefault: query.data?.isDefault ?? true,
+  }
+}
+
 // Ritual settings (under assistant)
 export function useAssistantRitualsEnabled() {
   const query = useConfig(CONFIG_KEYS.ASSISTANT_RITUALS_ENABLED)
