@@ -113,6 +113,7 @@ export function getSettings(): Settings {
         collections: {
           fulcrum: (fv('assistant.divinci.collections.fulcrum') as string | null) ?? DEFAULT_SETTINGS.assistant.divinci.collections.fulcrum,
           slack: (fv('assistant.divinci.collections.slack') as string | null) ?? DEFAULT_SETTINGS.assistant.divinci.collections.slack,
+          gmail: (fv('assistant.divinci.collections.gmail') as string | null) ?? DEFAULT_SETTINGS.assistant.divinci.collections.gmail,
         },
       },
     },

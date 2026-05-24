@@ -55,6 +55,7 @@ export const CONFIG_KEYS = {
   // per sync PR. PR 2 = Fulcrum tasks+projects; PRs 3-6 add slack/gmail/cal/drive.
   ASSISTANT_DIVINCI_COLLECTION_FULCRUM: 'assistant.divinci.collections.fulcrum',
   ASSISTANT_DIVINCI_COLLECTION_SLACK: 'assistant.divinci.collections.slack',
+  ASSISTANT_DIVINCI_COLLECTION_GMAIL: 'assistant.divinci.collections.gmail',
   EMAIL_POLL_INTERVAL: 'channels.email.pollIntervalSeconds',
   CALDAV_ENABLED: 'caldav.enabled',
   CALDAV_SERVER_URL: 'caldav.serverUrl',
