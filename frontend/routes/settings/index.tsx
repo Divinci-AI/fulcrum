@@ -72,6 +72,7 @@ import {
   useAssistantDivinciCollectionSlack,
   useAssistantDivinciCollectionGmail,
   useAssistantDivinciCollectionCalendar,
+  useAssistantDivinciCollectionDrive,
   useAssistantRitualsEnabled,
   useAssistantMorningRitualTime,
   useAssistantMorningRitualPrompt,
@@ -202,6 +203,7 @@ function SettingsPage() {
   const { data: divinciCollectionSlack } = useAssistantDivinciCollectionSlack()
   const { data: divinciCollectionGmail } = useAssistantDivinciCollectionGmail()
   const { data: divinciCollectionCalendar } = useAssistantDivinciCollectionCalendar()
+  const { data: divinciCollectionDrive } = useAssistantDivinciCollectionDrive()
   const { data: ritualsEnabled, isLoading: ritualsEnabledLoading } = useAssistantRitualsEnabled()
   const { data: morningRitualTime, isLoading: morningTimeLoading } = useAssistantMorningRitualTime()
   const { data: morningRitualPrompt, isLoading: morningPromptLoading } = useAssistantMorningRitualPrompt()
@@ -316,6 +318,7 @@ function SettingsPage() {
   const [localDivinciCollectionSlack, setLocalDivinciCollectionSlack] = useState<string>('')
   const [localDivinciCollectionGmail, setLocalDivinciCollectionGmail] = useState<string>('')
   const [localDivinciCollectionCalendar, setLocalDivinciCollectionCalendar] = useState<string>('')
+  const [localDivinciCollectionDrive, setLocalDivinciCollectionDrive] = useState<string>('')
 
   // Ritual settings local state (under assistant)
   const [localRitualsEnabled, setLocalRitualsEnabled] = useState(false)
@@ -450,7 +453,8 @@ function SettingsPage() {
     if (divinciCollectionSlack !== undefined) setLocalDivinciCollectionSlack(divinciCollectionSlack || '')
     if (divinciCollectionGmail !== undefined) setLocalDivinciCollectionGmail(divinciCollectionGmail || '')
     if (divinciCollectionCalendar !== undefined) setLocalDivinciCollectionCalendar(divinciCollectionCalendar || '')
-  }, [assistantProvider, assistantModel, assistantObserverModel, assistantObserverProvider, assistantObserverOpencodeModel, assistantDocumentsDir, hermesBaseUrl, hermesApiKey, hermesModel, divinciEnabled, divinciBaseUrl, divinciApiKey, divinciGroupId, divinciTopK, divinciCollectionFulcrum, divinciCollectionSlack, divinciCollectionGmail, divinciCollectionCalendar])
+    if (divinciCollectionDrive !== undefined) setLocalDivinciCollectionDrive(divinciCollectionDrive || '')
+  }, [assistantProvider, assistantModel, assistantObserverModel, assistantObserverProvider, assistantObserverOpencodeModel, assistantDocumentsDir, hermesBaseUrl, hermesApiKey, hermesModel, divinciEnabled, divinciBaseUrl, divinciApiKey, divinciGroupId, divinciTopK, divinciCollectionFulcrum, divinciCollectionSlack, divinciCollectionGmail, divinciCollectionCalendar, divinciCollectionDrive])
 
   // Sync ritual settings
   useEffect(() => {
@@ -504,7 +508,8 @@ function SettingsPage() {
     localDivinciCollectionFulcrum !== (divinciCollectionFulcrum ?? '') ||
     localDivinciCollectionSlack !== (divinciCollectionSlack ?? '') ||
     localDivinciCollectionGmail !== (divinciCollectionGmail ?? '') ||
-    localDivinciCollectionCalendar !== (divinciCollectionCalendar ?? '')
+    localDivinciCollectionCalendar !== (divinciCollectionCalendar ?? '') ||
+    localDivinciCollectionDrive !== (divinciCollectionDrive ?? '')
 
   const hasRitualsChanges =
     localRitualsEnabled !== ritualsEnabled ||
@@ -1036,6 +1041,16 @@ function SettingsPage() {
           new Promise((resolve) => {
             updateConfig.mutate(
               { key: CONFIG_KEYS.ASSISTANT_DIVINCI_COLLECTION_CALENDAR, value: localDivinciCollectionCalendar || null },
+              { onSettled: resolve }
+            )
+          })
+        )
+      }
+      if (localDivinciCollectionDrive !== (divinciCollectionDrive ?? '')) {
+        promises.push(
+          new Promise((resolve) => {
+            updateConfig.mutate(
+              { key: CONFIG_KEYS.ASSISTANT_DIVINCI_COLLECTION_DRIVE, value: localDivinciCollectionDrive || null },
               { onSettled: resolve }
             )
           })
@@ -2614,8 +2629,20 @@ function SettingsPage() {
                                     className="flex-1 font-mono text-xs"
                                   />
                                 </div>
+                                <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+                                  <label className="text-sm text-muted-foreground sm:w-32 sm:shrink-0">
+                                    Drive
+                                  </label>
+                                  <Input
+                                    type="text"
+                                    value={localDivinciCollectionDrive}
+                                    onChange={(e) => setLocalDivinciCollectionDrive(e.target.value)}
+                                    placeholder="Divinci RagVector _id for Google Drive files"
+                                    className="flex-1 font-mono text-xs"
+                                  />
+                                </div>
                                 <p className="text-xs text-muted-foreground">
-                                  Each source syncs into its own collection (Group-merged at retrieval). Tasks+projects = one file per entity. Slack = one file per day (last 30 days). Gmail = one file per thread (no window). Calendar = one file per event (±90-day window). Drive lands in PR 6.
+                                  Each source syncs into its own collection (Group-merged at retrieval). Tasks+projects = one file per entity. Slack = one file per day (last 30 days). Gmail = one file per thread (no window). Calendar = one file per event (±90-day window). Drive = one file per Drive file (last 90 days, max 200/account), content extracted for Docs/Sheets/Slides. Drive sync requires re-authorizing your Google account to grant the new <code>drive.readonly</code> scope, then toggling Drive on per account in the Google Accounts settings.
                                 </p>
                               </div>
                               <p className="text-xs text-muted-foreground">

@@ -11,6 +11,7 @@ import {
   gmailThreadUrl,
   collectCalendarEntities,
   renderCalendarEventEntity,
+  renderDriveFileEntity,
   _resetDivinciSyncForTesting,
 } from './divinci-sync-service'
 import { db, tasks, projects, divinciSyncMappings, channelMessages, caldavEvents, caldavCalendars } from '../db'
@@ -667,5 +668,90 @@ describe('divinci-sync-service.collectCalendarEntities', () => {
     await seedEvent({ id: 'bad-start', remoteUrl: 'rbs', dtstart: 'not-a-date' })
     const entities = await collectCalendarEntities(baseCfg)
     expect(entities).toEqual([])
+  })
+})
+
+describe('divinci-sync-service.renderDriveFileEntity', () => {
+  test('renders a Google Doc with extracted content and webViewLink as sourceUrl', () => {
+    const entity = renderDriveFileEntity({
+      id: 'doc-123',
+      name: 'D-17 design notes',
+      mimeType: 'application/vnd.google-apps.document',
+      modifiedTime: '2026-05-23T12:00:00.000Z',
+      webViewLink: 'https://docs.google.com/document/d/doc-123/edit',
+      ownerName: 'Mike',
+      ownerEmail: 'mike@divinci.ai',
+      content: 'Pre-flight retrieval, multi-source sync, …',
+      googleAccountId: 'ga-1',
+    })
+    expect(entity.entityType).toBe('drive-file')
+    expect(entity.entityId).toBe('doc-123')
+    expect(entity.title).toBe('Drive: D-17 design notes')
+    expect(entity.body).toContain('# D-17 design notes')
+    expect(entity.body).toContain('Type: Google Doc')
+    expect(entity.body).toContain('Modified: 2026-05-23T12:00:00.000Z')
+    expect(entity.body).toContain('Owner: Mike <mike@divinci.ai>')
+    expect(entity.body).toContain('Link: https://docs.google.com/document/d/doc-123/edit')
+    expect(entity.body).toContain('## Content')
+    expect(entity.body).toContain('Pre-flight retrieval')
+    expect(entity.sourceUrl).toBe('https://docs.google.com/document/d/doc-123/edit')
+  })
+
+  test('renders a binary file with metadata-only marker and no Content section', () => {
+    const entity = renderDriveFileEntity({
+      id: 'pdf-9',
+      name: 'contract-v3.pdf',
+      mimeType: 'application/pdf',
+      modifiedTime: '2026-05-20T08:30:00.000Z',
+      webViewLink: 'https://drive.google.com/file/d/pdf-9/view',
+      ownerName: null,
+      ownerEmail: 'partner@x.com',
+      content: null,
+      googleAccountId: 'ga-1',
+    })
+    expect(entity.body).toContain('Type: PDF')
+    expect(entity.body).toContain('Owner: partner@x.com')
+    expect(entity.body).not.toContain('## Content')
+    expect(entity.body).toContain('content not indexed for v1')
+    expect(entity.sourceUrl).toBe('https://drive.google.com/file/d/pdf-9/view')
+  })
+
+  test('humanizes Google-native MIME types and falls through for unknowns', () => {
+    const doc = renderDriveFileEntity({
+      id: '1',
+      name: 'x',
+      mimeType: 'application/vnd.google-apps.spreadsheet',
+      modifiedTime: null,
+      webViewLink: null,
+      ownerName: null,
+      ownerEmail: null,
+      content: null,
+      googleAccountId: 'ga-1',
+    })
+    expect(doc.body).toContain('Type: Google Sheet')
+    const slides = renderDriveFileEntity({
+      id: '2',
+      name: 'y',
+      mimeType: 'application/vnd.google-apps.presentation',
+      modifiedTime: null,
+      webViewLink: null,
+      ownerName: null,
+      ownerEmail: null,
+      content: null,
+      googleAccountId: 'ga-1',
+    })
+    expect(slides.body).toContain('Type: Google Slides')
+    const unknown = renderDriveFileEntity({
+      id: '3',
+      name: 'z',
+      mimeType: 'application/x-weird-type',
+      modifiedTime: null,
+      webViewLink: null,
+      ownerName: null,
+      ownerEmail: null,
+      content: null,
+      googleAccountId: 'ga-1',
+    })
+    expect(unknown.body).toContain('Type: application/x-weird-type')
   })
 })
