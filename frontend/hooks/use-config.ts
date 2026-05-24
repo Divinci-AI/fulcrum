@@ -487,6 +487,16 @@ export function useAssistantDivinciCollectionSlack() {
   }
 }
 
+// D-17 PR 4: Gmail messages collection
+export function useAssistantDivinciCollectionGmail() {
+  const query = useConfig(CONFIG_KEYS.ASSISTANT_DIVINCI_COLLECTION_GMAIL)
+  return {
+    ...query,
+    data: (query.data?.value as string | null) ?? '',
+    isDefault: query.data?.isDefault ?? true,
+  }
+}
+
 // Ritual settings (under assistant)
 export function useAssistantRitualsEnabled() {
   const query = useConfig(CONFIG_KEYS.ASSISTANT_RITUALS_ENABLED)

@@ -284,6 +284,11 @@ function registeredSources(): SyncSource[] {
       collectionId: c.slack,
       collect: collectSlackEntities,
     },
+    {
+      name: 'gmail',
+      collectionId: c.gmail,
+      collect: collectGmailEntities,
+    },
   ]
 }
 
@@ -454,6 +459,108 @@ export function renderSlackDayEntity(
     // via the [Slack <day>] source attribution.
     sourceUrl: null,
   }
+}
+
+/**
+ * Gmail sync — pulls email messages from `channelMessages` (channelType =
+ * 'email', populated by the Gmail-API + IMAP ingest paths) and groups them
+ * by Gmail threadId, one Divinci file per thread.
+ *
+ * Threads are the natural unit for email retrieval ("what was that thread
+ * with Bob about Q2?"). Unlike Slack day-buckets, threads don't have a
+ * natural rollover boundary — but the content-hash diff still keeps re-
+ * uploads cheap: once a thread quiesces, its hash stops changing.
+ *
+ * Orphan messages without a threadId fall back to a single-message thread
+ * keyed by the metadata.messageId. They still get indexed, just as their
+ * own "thread of one".
+ *
+ * No time window for v1: Gmail threads stay relevant much longer than
+ * Slack messages ("the contract negotiation from 6 months ago"). Backfill
+ * is one-time-expensive; steady-state ticks are cheap.
+ */
+export async function collectGmailEntities(_cfg: DivinciClientCfg): Promise<SyncableEntity[]> {
+  const all = await db.select().from(channelMessages).where(eq(channelMessages.channelType, 'email'))
+
+  // Group by threadId, falling back to message-level key when absent.
+  const threads = new Map<string, typeof all>()
+  for (const m of all) {
+    const meta = (m.metadata ?? {}) as { threadId?: string; messageId?: string; subject?: string }
+    const key = meta.threadId ? `t:${meta.threadId}` : `m:${meta.messageId ?? m.id}`
+    const arr = threads.get(key) ?? []
+    arr.push(m)
+    threads.set(key, arr)
+  }
+
+  const out: SyncableEntity[] = []
+  for (const [key, messages] of threads) {
+    messages.sort((a, b) => a.messageTimestamp.localeCompare(b.messageTimestamp))
+    out.push(renderGmailThreadEntity(key, messages))
+  }
+  return out
+}
+
+/**
+ * Render a single Gmail thread as a markdown transcript. Subject comes
+ * from the first message's metadata; per-message blocks include from /
+ * timestamp / body so the LLM can answer "who said what when" without
+ * re-querying.
+ *
+ * Exported for unit testing.
+ */
+export function renderGmailThreadEntity(
+  key: string, // 't:<threadId>' or 'm:<messageId>'
+  messages: Array<{
+    senderName: string | null
+    senderId: string
+    content: string
+    messageTimestamp: string
+    direction: string
+    metadata: unknown
+  }>,
+): SyncableEntity {
+  const first = messages[0]
+  const meta = (first.metadata ?? {}) as { threadId?: string; subject?: string; messageId?: string }
+  const subject = meta.subject?.trim() || '(no subject)'
+  const threadId = key.startsWith('t:') ? key.slice(2) : null
+
+  const lines: string[] = []
+  lines.push(`# ${subject}`)
+  lines.push('')
+  if (threadId) lines.push(`Thread: ${threadId}`)
+  lines.push(`Messages: ${messages.length}`)
+  lines.push('')
+  for (let i = 0; i < messages.length; i++) {
+    const m = messages[i]
+    const who = m.senderName ? `${m.senderName} <${m.senderId}>` : m.senderId
+    const dir = m.direction === 'outgoing' ? ' (sent)' : ''
+    lines.push(`---`)
+    lines.push(`**From:** ${who}${dir}`)
+    lines.push(`**Date:** ${m.messageTimestamp}`)
+    lines.push('')
+    const body = m.content.trim()
+    if (body) lines.push(body)
+    lines.push('')
+  }
+  const body = lines.join('\n').trimEnd()
+  return {
+    entityType: 'gmail-thread',
+    entityId: key,
+    body,
+    title: `Gmail: ${subject}`,
+    description: `Gmail thread with ${messages.length} message${messages.length === 1 ? '' : 's'}: ${subject.slice(0, 200)}`,
+    sourceUrl: threadId ? gmailThreadUrl(threadId) : null,
+  }
+}
+
+/**
+ * Build a Gmail web URL for a thread. The `u/0` path means "primary signed-in
+ * account" — works for any operator viewing in the same browser session
+ * they signed in with. Cross-account it'd be wrong but Mike has one Gmail
+ * connected anyway. `#all/<threadId>` works across labels.
+ */
+export function gmailThreadUrl(threadId: string): string {
+  return `https://mail.google.com/mail/u/0/#all/${threadId}`
 }
 
 /**
