@@ -638,6 +638,13 @@
       "when": 1779429600000,
       "tag": "0090_add_divinci_sync_mappings",
       "breakpoints": true
+    },
+    {
+      "idx": 91,
+      "version": "6",
+      "when": 1779516000000,
+      "tag": "0091_add_google_drive_enabled",
+      "breakpoints": true
     }
   ]
 }

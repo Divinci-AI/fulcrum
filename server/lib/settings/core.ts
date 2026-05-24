@@ -115,6 +115,7 @@ export function getSettings(): Settings {
           slack: (fv('assistant.divinci.collections.slack') as string | null) ?? DEFAULT_SETTINGS.assistant.divinci.collections.slack,
           gmail: (fv('assistant.divinci.collections.gmail') as string | null) ?? DEFAULT_SETTINGS.assistant.divinci.collections.gmail,
           calendar: (fv('assistant.divinci.collections.calendar') as string | null) ?? DEFAULT_SETTINGS.assistant.divinci.collections.calendar,
+          drive: (fv('assistant.divinci.collections.drive') as string | null) ?? DEFAULT_SETTINGS.assistant.divinci.collections.drive,
         },
       },
     },
