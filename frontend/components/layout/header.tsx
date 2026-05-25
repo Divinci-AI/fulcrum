@@ -25,6 +25,7 @@ import {
   GridViewIcon,
   Rocket01Icon,
   Archive01Icon,
+  Book02Icon,
 } from '@hugeicons/core-free-icons'
 import { CreateTaskModal } from '@/components/kanban/create-task-modal'
 import { useChat } from '@/hooks/use-chat'
@@ -45,6 +46,7 @@ const NAV_ITEMS = [
   { to: '/apps', icon: Rocket01Icon, labelKey: 'header.apps', matchPrefix: true },
   { to: '/monitoring', icon: Chart02Icon, labelKey: 'header.monitoring', matchPrefix: true },
   { to: '/archive', icon: Archive01Icon, labelKey: 'header.archive', matchPrefix: true },
+  { to: '/docs', icon: Book02Icon, labelKey: 'header.docs', matchPrefix: true },
 ] as const
 
 export function Header({ onNewTaskRef, onOpenCommandPalette }: HeaderProps) {
