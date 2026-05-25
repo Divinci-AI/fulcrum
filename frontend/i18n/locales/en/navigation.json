@@ -12,6 +12,7 @@
     "calendar": "Calendar",
     "monitoring": "Monitoring",
     "archive": "Archive",
+    "docs": "Docs",
     "settings": "Settings",
     "commandPalette": "Command Palette ({{shortcut}})",
     "help": "Documentation"
