@@ -7,6 +7,9 @@ import {
   DropdownMenuTrigger,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSub,
+  DropdownMenuSubTrigger,
+  DropdownMenuSubContent,
 } from '@/components/ui/dropdown-menu'
 import { useGitSync } from '@/hooks/use-git-sync'
 import { useGitMergeToMain } from '@/hooks/use-git-merge'
@@ -269,26 +272,41 @@ export function GitActionsButtons({
               Commit
             </DropdownMenuItem>
           )}
-          {prUrl ? (
-            <DropdownMenuItem onClick={() => openExternalUrl(prUrl)}>
-              <HugeiconsIcon
-                icon={GitPullRequestIcon}
-                size={12}
-                strokeWidth={2}
-              />
-              View PR
-            </DropdownMenuItem>
-          ) : (
-            <DropdownMenuItem onClick={handleCreatePR} disabled={gitCreatePR.isPending}>
+          {/* GitHub actions live in a submenu so PR plumbing stays out of
+              the primary action list. */}
+          <DropdownMenuSub>
+            <DropdownMenuSubTrigger>
               <HugeiconsIcon
                 icon={GitPullRequestIcon}
                 size={12}
                 strokeWidth={2}
                 className={gitCreatePR.isPending ? 'animate-pulse' : ''}
               />
-              Create PR
-            </DropdownMenuItem>
-          )}
+              GitHub
+            </DropdownMenuSubTrigger>
+            <DropdownMenuSubContent>
+              {prUrl ? (
+                <DropdownMenuItem onClick={() => openExternalUrl(prUrl)}>
+                  <HugeiconsIcon
+                    icon={GitPullRequestIcon}
+                    size={12}
+                    strokeWidth={2}
+                  />
+                  View PR
+                </DropdownMenuItem>
+              ) : (
+                <DropdownMenuItem onClick={handleCreatePR} disabled={gitCreatePR.isPending}>
+                  <HugeiconsIcon
+                    icon={GitPullRequestIcon}
+                    size={12}
+                    strokeWidth={2}
+                    className={gitCreatePR.isPending ? 'animate-pulse' : ''}
+                  />
+                  Create PR
+                </DropdownMenuItem>
+              )}
+            </DropdownMenuSubContent>
+          </DropdownMenuSub>
         </DropdownMenuContent>
       </DropdownMenu>
     )
@@ -376,37 +394,9 @@ export function GitActionsButtons({
         </Button>
       )}
 
-      {prUrl ? (
-        <Button
-          variant="ghost"
-          size="icon-xs"
-          onClick={() => openExternalUrl(prUrl)}
-          className="h-5 w-5 text-primary hover:text-primary"
-          title="View Pull Request"
-        >
-          <HugeiconsIcon
-            icon={GitPullRequestIcon}
-            size={12}
-            strokeWidth={2}
-          />
-        </Button>
-      ) : (
-        <Button
-          variant="ghost"
-          size="icon-xs"
-          onClick={handleCreatePR}
-          disabled={gitCreatePR.isPending}
-          className="h-5 w-5 text-muted-foreground hover:text-foreground"
-          title="Create Pull Request"
-        >
-          <HugeiconsIcon
-            icon={GitPullRequestIcon}
-            size={12}
-            strokeWidth={2}
-            className={gitCreatePR.isPending ? 'animate-pulse' : ''}
-          />
-        </Button>
-      )}
+      {/* PR create/view intentionally has no inline button — GitHub actions
+          are tucked behind the actions dropdown's GitHub submenu and the
+          task details panel's Advanced section. */}
     </>
   )
 }

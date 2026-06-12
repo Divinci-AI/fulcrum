@@ -115,6 +115,7 @@ export function CreateTaskModal({ open: controlledOpen, onOpenChange, defaultRep
   const [priority, setPriority] = useState<TaskPriority>('medium')
   const [recurrenceRule, setRecurrenceRule] = useState<RecurrenceRule | ''>('')
   const [notes, setNotes] = useState('')
+  const [assignee, setAssignee] = useState('')
   const [repoPath, setRepoPath] = useState('')
   const [baseBranch, setBaseBranch] = useState('')
   const [branchSearchQuery, setBranchSearchQuery] = useState('')
@@ -434,6 +435,7 @@ export function CreateTaskModal({ open: controlledOpen, onOpenChange, defaultRep
         priority: priority,
         recurrenceRule: recurrenceRule || null,
         notes: notes.trim() || null,
+        assignee: assignee.trim() || null,
         projectId: isCodeTask ? selectedRepoProject?.id : selectedProjectId,
         prUrl: prUrl.trim() || null,
         // Dependencies
@@ -497,6 +499,7 @@ export function CreateTaskModal({ open: controlledOpen, onOpenChange, defaultRep
     setPriority('medium')
     setRecurrenceRule('')
     setNotes('')
+    setAssignee('')
     setPendingFiles([])
     setPendingLinks([])
     setLinkUrlInput('')
@@ -1186,6 +1189,17 @@ export function CreateTaskModal({ open: controlledOpen, onOpenChange, defaultRep
                 </Field>
                 )}
               </div>
+
+              {/* Assignee (free-form text; coexists with assigneeUserId user picker) */}
+              <Field>
+                <FieldLabel htmlFor="assignee">Assignee</FieldLabel>
+                <Input
+                  id="assignee"
+                  value={assignee}
+                  onChange={(e) => setAssignee(e.target.value)}
+                  placeholder="Name or label (external collaborator, vendor, etc.)"
+                />
+              </Field>
 
               {/* Notes */}
               <Field>

@@ -39,6 +39,16 @@ export const tasks = sqliteTable('tasks', {
   // them. Cleared on user delete via app logic (no FK ON DELETE in SQLite-by-
   // convention here; would need to ALTER TABLE to add a real constraint).
   assigneeUserId: text('assignee_user_id'),
+  // Free-form text label for an assignee (display-only; not linked to a user
+  // row). Coexists with assigneeUserId so external/unregistered owners can
+  // still be named on a task.
+  assignee: text('assignee'),
+  // Approval workflow: the user who signs off that the task is satisfied.
+  // Nullable FK → users.id, same conventions as assigneeUserId.
+  approverUserId: text('approver_user_id'),
+  // Set when the approver accepts the task as satisfied (the accept endpoint
+  // also moves status to DONE). Cleared if the task re-enters an active state.
+  acceptedAt: text('accepted_at'),
   // D-5: per-resource visibility. 'tenant' = every authenticated tenant member
   // gets the tenant-default role (editor) plus whatever ACL elevates them to.
   // 'restricted' = only principals named on the resource's ACL can access it.

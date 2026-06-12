@@ -645,6 +645,20 @@
       "when": 1779516000000,
       "tag": "0091_add_google_drive_enabled",
       "breakpoints": true
+    },
+    {
+      "idx": 92,
+      "version": "6",
+      "when": 1779602400000,
+      "tag": "0092_add_task_assignee_text",
+      "breakpoints": true
+    },
+    {
+      "idx": 93,
+      "version": "6",
+      "when": 1779688800000,
+      "tag": "0093_add_task_approver",
+      "breakpoints": true
     }
   ]
 }

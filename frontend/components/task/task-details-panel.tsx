@@ -21,8 +21,9 @@ import { DependencyManager } from '@/components/task/dependency-manager'
 import { AttachmentsManager } from '@/components/task/attachments-manager'
 import { TaskComments } from '@/components/task/task-comments'
 import { HugeiconsIcon } from '@hugeicons/react'
-import { Cancel01Icon, GitPullRequestIcon, Link02Icon, Loading03Icon } from '@hugeicons/core-free-icons'
-import { useUpdateTask } from '@/hooks/use-tasks'
+import { ArrowDown01Icon, Cancel01Icon, GitPullRequestIcon, Link02Icon, Loading03Icon } from '@hugeicons/core-free-icons'
+import { useAcceptTask, useUpdateTask } from '@/hooks/use-tasks'
+import { useCurrentUser } from '@/hooks/use-current-user'
 import { useAddTaskTag, useRemoveTaskTag } from '@/hooks/use-tags'
 import { useBranches } from '@/hooks/use-filesystem'
 import { useIsOverdue } from '@/hooks/use-date-utils'
@@ -35,6 +36,8 @@ interface TaskDetailsPanelProps {
 
 export function TaskDetailsPanel({ task }: TaskDetailsPanelProps) {
   const updateTask = useUpdateTask()
+  const acceptTask = useAcceptTask()
+  const { data: currentUser } = useCurrentUser()
   const addTaskTag = useAddTaskTag()
   const removeTaskTag = useRemoveTaskTag()
   const [isEditingTitle, setIsEditingTitle] = useState(false)
@@ -47,6 +50,10 @@ export function TaskDetailsPanel({ task }: TaskDetailsPanelProps) {
   const [deletingTags, setDeletingTags] = useState<Set<string>>(new Set())
   const [prUrlInput, setPrUrlInput] = useState(task.prUrl || '')
   const [isEditingPrUrl, setIsEditingPrUrl] = useState(false)
+  const [assigneeText, setAssigneeText] = useState(task.assignee || '')
+  // GitHub/git plumbing (PR link, base branch) lives behind this disclosure —
+  // collapsed by default so day-to-day task editing never surfaces it.
+  const [showAdvanced, setShowAdvanced] = useState(false)
 
   const isWorktreeTask = !!task.worktreePath
   const { data: branchData, isLoading: branchesLoading } = useBranches(isWorktreeTask ? (task.repoPath || null) : null)
@@ -97,6 +104,24 @@ export function TaskDetailsPanel({ task }: TaskDetailsPanelProps) {
       taskId: task.id,
       updates: { assigneeUserId: userId },
     })
+  }
+
+  const handleApproverChange = (userId: string | null) => {
+    updateTask.mutate({
+      taskId: task.id,
+      updates: { approverUserId: userId },
+    })
+  }
+
+  const handleAssigneeTextBlur = () => {
+    const trimmed = assigneeText.trim()
+    const next = trimmed === '' ? null : trimmed
+    if (next !== (task.assignee || null)) {
+      updateTask.mutate({
+        taskId: task.id,
+        updates: { assignee: next },
+      })
+    }
   }
 
   const handleAddTag = () => {
@@ -355,18 +380,71 @@ export function TaskDetailsPanel({ task }: TaskDetailsPanelProps) {
           </div>
 
           {/* Assignee (D-13 PR 1) */}
-          <div className="rounded-lg border bg-card p-4">
+          <div className="rounded-lg border bg-card p-4 space-y-2">
             <h3 className="text-sm font-medium text-muted-foreground mb-2">Assignee</h3>
             <AssigneePicker
               value={task.assigneeUserId}
               onChange={handleAssigneeChange}
             />
+            <Input
+              value={assigneeText}
+              onChange={(e) => setAssigneeText(e.target.value)}
+              onBlur={handleAssigneeTextBlur}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') e.currentTarget.blur()
+              }}
+              placeholder="Or free-text name (external collaborator, vendor, etc.)"
+              className="text-sm"
+            />
+          </div>
+
+          {/* Approver — who signs off that the task is satisfied */}
+          <div className="rounded-lg border bg-card p-4 space-y-2">
+            <h3 className="text-sm font-medium text-muted-foreground mb-2">Approver</h3>
+            <AssigneePicker
+              value={task.approverUserId}
+              onChange={handleApproverChange}
+              placeholder="No approver"
+            />
+            {task.acceptedAt ? (
+              <p className="text-xs text-muted-foreground">
+                Accepted {new Date(task.acceptedAt).toLocaleString()}
+              </p>
+            ) : task.approverUserId && currentUser?.id === task.approverUserId &&
+              task.status !== 'DONE' && task.status !== 'CANCELED' ? (
+              <Button
+                size="sm"
+                onClick={() => acceptTask.mutate({ taskId: task.id })}
+                disabled={acceptTask.isPending}
+                className="w-full"
+              >
+                {acceptTask.isPending ? 'Accepting…' : 'Accept as satisfied'}
+              </Button>
+            ) : task.approverUserId ? (
+              <p className="text-xs text-muted-foreground italic">Awaiting acceptance</p>
+            ) : null}
           </div>
         </div>
 
-        {/* Pull Request URL - only for code tasks */}
+        {/* Advanced — GitHub/git plumbing, only for code tasks */}
         {isWorktreeTask && (
-          <div className="rounded-lg border bg-card p-4">
+          <div className="rounded-lg border bg-card">
+            <button
+              type="button"
+              onClick={() => setShowAdvanced(!showAdvanced)}
+              className="flex w-full items-center justify-between p-4 text-sm font-medium text-muted-foreground hover:text-foreground"
+            >
+              <span>Advanced</span>
+              <HugeiconsIcon
+                icon={ArrowDown01Icon}
+                size={16}
+                className={showAdvanced ? 'transition-transform rotate-180' : 'transition-transform'}
+              />
+            </button>
+            {showAdvanced && (
+              <div className="space-y-4 px-4 pb-4">
+        {/* Pull Request URL */}
+          <div>
             <div className="flex items-center justify-between mb-2">
               <h3 className="text-sm font-medium text-muted-foreground">Pull Request</h3>
               {!isEditingPrUrl && task.prUrl && (
@@ -414,11 +492,9 @@ export function TaskDetailsPanel({ task }: TaskDetailsPanelProps) {
               </Button>
             )}
           </div>
-        )}
 
-        {/* Base Branch - only for worktree tasks */}
-        {isWorktreeTask && (
-          <div className="rounded-lg border bg-card p-4">
+        {/* Base Branch */}
+          <div>
             <h3 className="text-sm font-medium text-muted-foreground mb-2">Base Branch</h3>
             <Select
               value={task.baseBranch || ''}
@@ -460,6 +536,9 @@ export function TaskDetailsPanel({ task }: TaskDetailsPanelProps) {
             <p className="text-xs text-muted-foreground mt-1.5">
               Used for diff comparisons, rebase, merge, and PR creation.
             </p>
+          </div>
+              </div>
+            )}
           </div>
         )}
 

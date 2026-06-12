@@ -2,7 +2,7 @@ import { describe, test, expect, beforeEach, afterEach } from 'bun:test'
 import { createTestGitRepo, type TestGitRepo } from '../__tests__/fixtures/git'
 import { createTestApp } from '../__tests__/fixtures/app'
 import { setupTestEnv, type TestEnv } from '../__tests__/utils/env'
-import { db, tasks } from '../db'
+import { db, tasks, users } from '../db'
 import { eq } from 'drizzle-orm'
 import { mkdtempSync, rmSync, existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -564,6 +564,74 @@ describe('Tasks Routes', () => {
       expect(res.status).toBe(200)
       const row = db.select().from(tasks).where(eq(tasks.id, 'agent-opts-1')).get()
       expect(row?.agentOptions).toBe('{"verbose":true,"model":"opus"}')
+    })
+  })
+
+  describe('POST /api/tasks/:id/accept', () => {
+    function insertTaskWithApprover(id: string, approverUserId: string | null, status = 'IN_REVIEW'): void {
+      const now = new Date().toISOString()
+      db.insert(tasks)
+        .values({
+          id,
+          title: 'Approval Test',
+          status,
+          position: 0,
+          approverUserId,
+          createdAt: now,
+          updatedAt: now,
+        })
+        .run()
+    }
+
+    test('approver accepts: stamps acceptedAt and moves task to DONE', async () => {
+      const { post, get } = createTestApp()
+      // The default test identity is the seeded admin — make them approver.
+      const meRes = await get('/api/users/me')
+      const { user: me } = (await meRes.json()) as { user: { id: string } }
+      insertTaskWithApprover('accept-1', me.id)
+
+      const res = await post('/api/tasks/accept-1/accept')
+      const body = await res.json()
+
+      expect(res.status).toBe(200)
+      expect(body.status).toBe('DONE')
+      expect(body.acceptedAt).toBeTruthy()
+    })
+
+    test('403 when caller is not the approver', async () => {
+      const { post } = createTestApp()
+      const now = new Date().toISOString()
+      const otherId = crypto.randomUUID()
+      db.insert(users)
+        .values({ id: otherId, email: 'someone-else@example.com', createdAt: now, updatedAt: now })
+        .run()
+      insertTaskWithApprover('accept-2', otherId)
+
+      const res = await post('/api/tasks/accept-2/accept')
+      expect(res.status).toBe(403)
+    })
+
+    test('400 when task has no approver', async () => {
+      const { post } = createTestApp()
+      insertTaskWithApprover('accept-3', null)
+
+      const res = await post('/api/tasks/accept-3/accept')
+      expect(res.status).toBe(400)
+    })
+
+    test('reopening an accepted task clears acceptedAt', async () => {
+      const { post, patch, get } = createTestApp()
+      const meRes = await get('/api/users/me')
+      const { user: me } = (await meRes.json()) as { user: { id: string } }
+      insertTaskWithApprover('accept-4', me.id)
+
+      await post('/api/tasks/accept-4/accept')
+      const res = await patch('/api/tasks/accept-4', { status: 'IN_PROGRESS' })
+      const body = await res.json()
+
+      expect(res.status).toBe(200)
+      expect(body.status).toBe('IN_PROGRESS')
+      expect(body.acceptedAt).toBeNull()
     })
   })
 

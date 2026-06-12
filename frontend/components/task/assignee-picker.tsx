@@ -13,6 +13,9 @@ interface AssigneePickerProps {
   value: string | null
   onChange: (userId: string | null) => void
   className?: string
+  /** Label for the empty state / clear row. Defaults to "Unassigned";
+   * the approver picker passes "No approver". */
+  placeholder?: string
 }
 
 function userLabel(user: TenantUser): string {
@@ -28,7 +31,7 @@ function userLabel(user: TenantUser): string {
  * "Unassigned" is its own selectable row so users can clear an assignment
  * without dropping out to the keyboard.
  */
-export function AssigneePicker({ value, onChange, className }: AssigneePickerProps) {
+export function AssigneePicker({ value, onChange, className, placeholder = 'Unassigned' }: AssigneePickerProps) {
   const { data: users, isLoading } = useListUsers()
   const [open, setOpen] = useState(false)
   const [query, setQuery] = useState('')
@@ -52,7 +55,7 @@ export function AssigneePicker({ value, onChange, className }: AssigneePickerPro
             size="sm"
             className={cn('w-full justify-start text-left font-normal', className)}
           >
-            {selected ? userLabel(selected) : <span className="text-muted-foreground">Unassigned</span>}
+            {selected ? userLabel(selected) : <span className="text-muted-foreground">{placeholder}</span>}
           </Button>
         }
       />
@@ -65,7 +68,7 @@ export function AssigneePicker({ value, onChange, className }: AssigneePickerPro
           className="h-8 mb-2"
         />
         <div className="max-h-64 overflow-y-auto">
-          {/* "Unassigned" sentinel row */}
+          {/* Empty-state sentinel row (clears the selection) */}
           <button
             type="button"
             onClick={() => {
@@ -78,7 +81,7 @@ export function AssigneePicker({ value, onChange, className }: AssigneePickerPro
               value === null && 'bg-accent font-medium'
             )}
           >
-            Unassigned
+            {placeholder}
           </button>
           {isLoading && (
             <div className="px-2 py-1.5 text-sm text-muted-foreground">Loading…</div>

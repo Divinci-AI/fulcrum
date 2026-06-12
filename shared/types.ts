@@ -153,6 +153,14 @@ export interface Task {
   // by design; the API already supports filtering by `assigneeId=` and
   // broadcasts `task:assigned` WS events when this changes.
   assigneeUserId: string | null
+  // Free-form text assignee label. Independent of `assigneeUserId`; used when
+  // the owner isn't a Fulcrum user row (external collaborator, vendor, etc.).
+  assignee: string | null
+  // Approval workflow: the user who signs off that the task is satisfied,
+  // and when they accepted it. acceptedAt is set by POST /api/tasks/:id/accept
+  // (which also moves status to DONE) and cleared when the task is reopened.
+  approverUserId: string | null
+  acceptedAt: string | null
   // D-14 PR 1: set when status transitions to DONE/CANCELED; cleared on
   // transition back to active. Used by the Archive view for sort + display.
   // Distinct from updatedAt because any post-completion edit would
@@ -756,6 +764,9 @@ export interface Project {
   opencodeModel: string | null
   startupScript: string | null
   lastAccessedAt: string | null
+  // D-5 visibility. Optional because older API payload builders don't all
+  // include it; absent means 'tenant'.
+  visibility?: 'tenant' | 'restricted'
   createdAt: string
   updatedAt: string
 }

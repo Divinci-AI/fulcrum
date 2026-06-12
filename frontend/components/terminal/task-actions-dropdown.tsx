@@ -19,6 +19,9 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuSeparator,
+  DropdownMenuSub,
+  DropdownMenuSubTrigger,
+  DropdownMenuSubContent,
 } from '@/components/ui/dropdown-menu'
 import { useGitSync } from '@/hooks/use-git-sync'
 import { useGitMergeToMain } from '@/hooks/use-git-merge'
@@ -103,6 +106,9 @@ export function TaskActionsDropdown({
     recurrenceSourceTaskId: null,
     notes: null,
     assigneeUserId: null,
+    assignee: null,
+    approverUserId: null,
+    acceptedAt: null,
     completedAt: null,
     createdAt: '',
     updatedAt: '',
@@ -329,26 +335,41 @@ export function TaskActionsDropdown({
               Commit
             </DropdownMenuItem>
           )}
-          {prUrl ? (
-            <DropdownMenuItem onClick={() => openExternalUrl(prUrl)}>
-              <HugeiconsIcon
-                icon={GitPullRequestIcon}
-                size={12}
-                strokeWidth={2}
-              />
-              View PR
-            </DropdownMenuItem>
-          ) : (
-            <DropdownMenuItem onClick={handleCreatePR} disabled={gitCreatePR.isPending}>
+          {/* GitHub actions are tucked into a submenu so PR plumbing stays
+              out of the primary action list. */}
+          <DropdownMenuSub>
+            <DropdownMenuSubTrigger>
               <HugeiconsIcon
                 icon={GitPullRequestIcon}
                 size={12}
                 strokeWidth={2}
                 className={gitCreatePR.isPending ? 'animate-pulse' : ''}
               />
-              Create PR
-            </DropdownMenuItem>
-          )}
+              GitHub
+            </DropdownMenuSubTrigger>
+            <DropdownMenuSubContent>
+              {prUrl ? (
+                <DropdownMenuItem onClick={() => openExternalUrl(prUrl)}>
+                  <HugeiconsIcon
+                    icon={GitPullRequestIcon}
+                    size={12}
+                    strokeWidth={2}
+                  />
+                  View PR
+                </DropdownMenuItem>
+              ) : (
+                <DropdownMenuItem onClick={handleCreatePR} disabled={gitCreatePR.isPending}>
+                  <HugeiconsIcon
+                    icon={GitPullRequestIcon}
+                    size={12}
+                    strokeWidth={2}
+                    className={gitCreatePR.isPending ? 'animate-pulse' : ''}
+                  />
+                  Create PR
+                </DropdownMenuItem>
+              )}
+            </DropdownMenuSubContent>
+          </DropdownMenuSub>
           <DropdownMenuSeparator />
           <DropdownMenuItem onClick={handleNavigateToRepo}>
             <HugeiconsIcon

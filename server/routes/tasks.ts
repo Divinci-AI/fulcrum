@@ -1,6 +1,7 @@
 import { Hono } from 'hono'
+import { HTTPException } from 'hono/http-exception'
 import { nanoid } from 'nanoid'
-import { db, tasks, repositories, taskLinks, taskRelationships, taskAttachments, tags, taskTags, type Task, type NewTask, type TaskLink } from '../db'
+import { db, tasks, repositories, projects, taskLinks, taskRelationships, taskAttachments, tags, taskTags, type Task, type NewTask, type TaskLink } from '../db'
 import { eq, asc, and, inArray } from 'drizzle-orm'
 import { detectLinkType } from '../lib/link-utils'
 import { execSync } from 'child_process'
@@ -262,9 +263,27 @@ app.post('/', async (c) => {
         typeof body.assigneeUserId === 'string' && body.assigneeUserId.trim() !== ''
           ? body.assigneeUserId
           : null,
+      assignee:
+        typeof body.assignee === 'string' && body.assignee.trim() !== ''
+          ? body.assignee.trim()
+          : null,
       // D-3: free-form notes accepted at creation so @mentions in `notes` are
       // parsed by the post-insert mention sync. Previously dropped silently.
       notes: body.notes ?? null,
+      // Tasks created inside a restricted project inherit restricted
+      // visibility — otherwise "invite someone to only this project" leaks
+      // the project's tasks to the whole tenant. The creator still gets an
+      // admin grant via grantCreatorAdmin below, and they can flip the task
+      // back to tenant-visible explicitly if they want.
+      visibility: (() => {
+        if (!body.projectId) return 'tenant'
+        const parent = db
+          .select({ visibility: projects.visibility })
+          .from(projects)
+          .where(eq(projects.id, body.projectId))
+          .get()
+        return parent?.visibility === 'restricted' ? 'restricted' : 'tenant'
+      })(),
       createdAt: now,
       updatedAt: now,
     }
@@ -689,6 +708,10 @@ const TASK_PATCH_FIELDS: Record<string, (v: unknown) => unknown> = {
   // D-2: Task assignee. Empty string is normalized to null so callers can
   // unassign via either explicit null or "" without surprise.
   assigneeUserId: (v) => (typeof v === 'string' && v.trim() !== '' ? v : null),
+  assignee: (v) => (typeof v === 'string' && v.trim() !== '' ? v.trim() : null),
+  // Approval workflow: who signs off that the task is satisfied. Accepting
+  // itself goes through POST /:id/accept, not PATCH.
+  approverUserId: (v) => (typeof v === 'string' && v.trim() !== '' ? v : null),
   agent: (v) => v,
   aiMode: (v) => v,
   opencodeModel: (v) => v,
@@ -816,6 +839,13 @@ app.patch('/:id', async (c) => {
       ensureAssigneeViewer(updated.assigneeUserId, 'task', id, actor)
     }
 
+    // Same auto-grant for a newly named approver: they need to at least see
+    // the task they're expected to sign off on.
+    if (updated && updated.approverUserId && updated.approverUserId !== existing.approverUserId) {
+      const actor = (c.var as { user?: { id?: string } | null }).user?.id ?? null
+      ensureAssigneeViewer(updated.approverUserId, 'task', id, actor)
+    }
+
     // D-4 PR 2: fan out task:assigned when the assignee actually changed.
     // Targets both the resource topic and `me` for the old + new assignee
     // so both sides get notified ("you were unassigned", "you were
@@ -853,6 +883,45 @@ app.patch('/:id', async (c) => {
     return c.json(updated ? toApiResponse(updated, true) : null)
   } catch (err) {
     return c.json({ error: err instanceof Error ? err.message : 'Failed to update task' }, 400)
+  }
+})
+
+// POST /api/tasks/:id/accept - Approval workflow sign-off. Only the task's
+// approver can accept; accepting stamps acceptedAt and moves the task to
+// DONE through the centralized status function (so recurrence, notifications,
+// and terminal cleanup all behave as if the task was completed normally).
+app.post('/:id/accept', async (c) => {
+  const id = c.req.param('id')
+
+  try {
+    const user = requireUser(c as unknown as Parameters<typeof requireUser>[0])
+
+    const existing = db.select().from(tasks).where(eq(tasks.id, id)).get()
+    if (!existing) {
+      return c.json({ error: 'Task not found' }, 404)
+    }
+    if (!roleSatisfies(effectiveRole(user.id, 'task', id), 'viewer')) {
+      return c.json({ error: 'Task not found' }, 404)
+    }
+    if (!existing.approverUserId) {
+      return c.json({ error: 'Task has no approver assigned' }, 400)
+    }
+    if (existing.approverUserId !== user.id) {
+      return c.json({ error: 'Only the assigned approver can accept this task' }, 403)
+    }
+    if (existing.status === 'DONE' || existing.status === 'CANCELED') {
+      return c.json({ error: 'Task is already closed' }, 400)
+    }
+
+    const now = new Date().toISOString()
+    db.update(tasks).set({ acceptedAt: now, updatedAt: now }).where(eq(tasks.id, id)).run()
+    await updateTaskStatus(id, 'DONE')
+
+    const updated = db.select().from(tasks).where(eq(tasks.id, id)).get()
+    return c.json(updated ? toApiResponse(updated, true) : null)
+  } catch (err) {
+    if (err instanceof HTTPException) throw err
+    return c.json({ error: err instanceof Error ? err.message : 'Failed to accept task' }, 400)
   }
 })
 

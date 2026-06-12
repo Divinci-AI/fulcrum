@@ -13,6 +13,7 @@ interface Task {
   title: string
   status: string
   assigneeUserId: string | null
+  assignee: string | null
 }
 
 /**
@@ -128,5 +129,111 @@ test.describe('task assignee (D-2)', () => {
     const unassignedList = await getJson<Task[]>(request, '/api/tasks?assigneeId=unassigned')
     expect(unassignedList.some((t) => t.id === t3.id)).toBe(true)
     expect(unassignedList.every((t) => t.assigneeUserId === null)).toBe(true)
+  })
+})
+
+test.describe('task assignee (free-form text field)', () => {
+  let createdTaskIds: string[] = []
+
+  test.afterEach(async ({ request }) => {
+    for (const id of createdTaskIds) {
+      await del(request, `/api/tasks/${id}`)
+    }
+    createdTaskIds = []
+  })
+
+  test('newly created task starts with assignee: null when omitted', async ({ request }) => {
+    const task = await postJson<Task>(request, '/api/tasks', {
+      title: uniq('e2e-assignee-null'),
+      type: 'manual',
+    })
+    createdTaskIds.push(task.id)
+    expect(task.assignee).toBeNull()
+  })
+
+  test('POST accepts free-form assignee at creation and trims whitespace', async ({ request }) => {
+    const task = await postJson<Task>(request, '/api/tasks', {
+      title: uniq('e2e-assignee-create'),
+      type: 'manual',
+      assignee: '  Jane External  ',
+    })
+    createdTaskIds.push(task.id)
+    expect(task.assignee).toBe('Jane External')
+  })
+
+  test('POST normalizes empty / whitespace assignee to null', async ({ request }) => {
+    const t1 = await postJson<Task>(request, '/api/tasks', {
+      title: uniq('e2e-assignee-empty'),
+      type: 'manual',
+      assignee: '',
+    })
+    createdTaskIds.push(t1.id)
+    expect(t1.assignee).toBeNull()
+
+    const t2 = await postJson<Task>(request, '/api/tasks', {
+      title: uniq('e2e-assignee-spaces'),
+      type: 'manual',
+      assignee: '   ',
+    })
+    createdTaskIds.push(t2.id)
+    expect(t2.assignee).toBeNull()
+  })
+
+  test('PATCH sets, updates, and clears assignee', async ({ request }) => {
+    const task = await postJson<Task>(request, '/api/tasks', {
+      title: uniq('e2e-assignee-patch'),
+      type: 'manual',
+    })
+    createdTaskIds.push(task.id)
+    expect(task.assignee).toBeNull()
+
+    const set = await patchJson<Task>(request, `/api/tasks/${task.id}`, {
+      assignee: 'Acme Vendor',
+    })
+    expect(set.assignee).toBe('Acme Vendor')
+
+    const updated = await patchJson<Task>(request, `/api/tasks/${task.id}`, {
+      assignee: 'Acme Vendor (renamed)',
+    })
+    expect(updated.assignee).toBe('Acme Vendor (renamed)')
+
+    const clearedNull = await patchJson<Task>(request, `/api/tasks/${task.id}`, {
+      assignee: null,
+    })
+    expect(clearedNull.assignee).toBeNull()
+
+    const setAgain = await patchJson<Task>(request, `/api/tasks/${task.id}`, {
+      assignee: 'Someone',
+    })
+    expect(setAgain.assignee).toBe('Someone')
+
+    const clearedEmpty = await patchJson<Task>(request, `/api/tasks/${task.id}`, {
+      assignee: '',
+    })
+    expect(clearedEmpty.assignee).toBeNull()
+  })
+
+  test('assignee and assigneeUserId coexist independently', async ({ request }) => {
+    const userId = await provisionUser(request, 'd2_coexist')
+    const task = await postJson<Task>(request, '/api/tasks', {
+      title: uniq('e2e-assignee-both'),
+      type: 'manual',
+      assignee: 'External Contractor',
+      assigneeUserId: userId,
+    })
+    createdTaskIds.push(task.id)
+    expect(task.assignee).toBe('External Contractor')
+    expect(task.assigneeUserId).toBe(userId)
+
+    // Clearing one does not touch the other.
+    const cleared = await patchJson<Task>(request, `/api/tasks/${task.id}`, {
+      assignee: null,
+    })
+    expect(cleared.assignee).toBeNull()
+    expect(cleared.assigneeUserId).toBe(userId)
+
+    const reloaded = await getJson<Task>(request, `/api/tasks/${task.id}`)
+    expect(reloaded.assigneeUserId).toBe(userId)
+    expect(reloaded.assignee).toBeNull()
   })
 })

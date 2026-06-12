@@ -51,6 +51,7 @@ export function useCreateTask() {
       timeEstimate?: number | null
       priority?: TaskPriority | null
       notes?: string | null
+      assignee?: string | null
       projectId?: string | null
       // Recurrence
       recurrenceRule?: RecurrenceRule | null
@@ -121,7 +122,7 @@ export function useUpdateTask() {
       updates,
     }: {
       taskId: string
-      updates: Partial<Pick<Task, 'title' | 'description' | 'status' | 'viewState' | 'prUrl' | 'tags' | 'dueDate' | 'timeEstimate' | 'priority' | 'repositoryId' | 'agent' | 'aiMode' | 'baseBranch' | 'projectId' | 'recurrenceRule' | 'recurrenceEndDate' | 'pinned' | 'assigneeUserId'>>
+      updates: Partial<Pick<Task, 'title' | 'description' | 'status' | 'viewState' | 'prUrl' | 'tags' | 'dueDate' | 'timeEstimate' | 'priority' | 'repositoryId' | 'agent' | 'aiMode' | 'baseBranch' | 'projectId' | 'recurrenceRule' | 'recurrenceEndDate' | 'pinned' | 'assigneeUserId' | 'assignee' | 'approverUserId'>>
     }) =>
       fetchJSON<Task>(`${API_BASE}/api/tasks/${taskId}`, {
         method: 'PATCH',
@@ -132,6 +133,25 @@ export function useUpdateTask() {
       queryClient.invalidateQueries({ queryKey: ['tasks', taskId] })
       queryClient.invalidateQueries({ queryKey: ['task-dependencies'] })
       queryClient.invalidateQueries({ queryKey: ['projects'] })
+    },
+  })
+}
+
+/**
+ * Approval sign-off: only the task's approver can call this. The server
+ * stamps acceptedAt and moves the task to DONE.
+ */
+export function useAcceptTask() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: ({ taskId }: { taskId: string }) =>
+      fetchJSON<Task>(`${API_BASE}/api/tasks/${taskId}/accept`, {
+        method: 'POST',
+      }),
+    onSuccess: (_, { taskId }) => {
+      queryClient.invalidateQueries({ queryKey: ['tasks'] })
+      queryClient.invalidateQueries({ queryKey: ['tasks', taskId] })
     },
   })
 }
