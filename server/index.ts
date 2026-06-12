@@ -19,7 +19,7 @@ import { startAssistantScheduler, stopAssistantScheduler } from './services/assi
 import { startCaldavSync, stopCaldavSync } from './services/caldav'
 import { startGoogleCalendarSync, stopGoogleCalendarSync } from './services/google/google-calendar-service'
 import { pruneOldInvocations } from './services/observer-tracking'
-import { startExecutorClient, stopExecutorClient } from './services/executor-client'
+import { startExecutorClient, stopExecutorClient, relayPtyOutput, relayPtyExit } from './services/executor-client'
 import { log } from './lib/logger'
 import { clearSensitiveEnvVars } from './lib/env'
 
@@ -127,12 +127,16 @@ const ptyManager = initPTYManager({
       type: 'terminal:output',
       payload: { terminalId, data },
     })
+    // D-18 PR 2: terminals created on behalf of a remote hub also stream
+    // their output up the executor socket (no-op for local terminals).
+    relayPtyOutput(terminalId, data)
   },
   onExit: (terminalId, exitCode, status) => {
     broadcast({
       type: 'terminal:exit',
       payload: { terminalId, exitCode, status },
     })
+    relayPtyExit(terminalId, exitCode)
   },
 })
 
@@ -162,7 +166,7 @@ app.get('/ws/terminal', upgradeWebSocket((c) => makeTerminalWebSocketHandlers(c)
 // the currentUser middleware registered on /ws/* in app.ts). The browser
 // fan-out for node status is injected to keep executor-ws's module graph
 // free of the terminal/PTY imports.
-setExecutorBroadcast(broadcast)
+setExecutorBroadcast(broadcast, broadcastToTerminal)
 app.get('/ws/executor', upgradeWebSocket((c) => makeExecutorWebSocketHandlers(c)))
 
 // Start server

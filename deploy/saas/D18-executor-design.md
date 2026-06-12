@@ -19,7 +19,7 @@ the socket opens; sockets without identity are closed immediately. Every
 node is owned by exactly one user — the SaaS only routes a user's terminals
 to that user's own nodes.
 
-## PR 1 — Registration plane (this PR)
+## PR 1 — Registration plane (shipped)
 
 **Hub (SaaS):**
 - `executor_nodes` table: id (client-generated, stable per install),
@@ -38,7 +38,7 @@ to that user's own nodes.
 - Settings UI card: enable toggle, remote URL, API token, node name —
   plus "your nodes" list (which doubles as the SaaS-side view).
 
-## PR 2 — Terminal relay (next)
+## PR 2 — Terminal relay (shipped)
 
 Message envelope over the executor socket (hub ⇄ node), all JSON:
 
@@ -64,9 +64,20 @@ forwards to the node instead of the local PTYManager when the terminal is
 node-backed. Task "Start terminal" gains a node picker (default: the
 owner's only online node).
 
+Implementation notes (as shipped): the hub keeps `terminalId → nodeId` in
+`executor-ws.ts`; terminal-ws's handler checks `isRelayTerminal()` and
+forwards instead of touching the local PTYManager. Nodes resend their live
+terminal list with `executor:register`, and the hub drops (and broadcasts
+`terminal:destroyed` for) terminals a restarting node no longer has.
+Terminal-scoped node→hub messages are ownership-checked — node A can't
+inject output into node B's terminals. The node maps hub-assigned relay
+ids to its local PTY ids and replays buffers with the same
+attach→resize→flush→snapshot sequence the local path uses. The browser's
+"Start terminal" overlay gains a node picker when online nodes exist.
+
 Backpressure: terminal output is small relative to WS capacity; v1 relies
-on WS buffering with a per-terminal 1MB cap, dropping oldest (same policy
-as local scrollback).
+on WS buffering; scrollback caps are enforced node-side by the existing
+buffer manager.
 
 ## PR 3 — Worktree + agent dispatch
 

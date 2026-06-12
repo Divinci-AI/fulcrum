@@ -49,6 +49,9 @@ export interface TerminalCreateMessage {
     tabId?: string // Assign to tab on creation
     positionInTab?: number
     taskId?: string
+    /** D-18 PR 2: route the terminal to one of the owner's execution
+     * nodes instead of the local PTY manager. */
+    nodeId?: string
   } & RequestCorrelation
 }
 

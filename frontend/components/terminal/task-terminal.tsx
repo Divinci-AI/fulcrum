@@ -18,6 +18,7 @@ import { buildAgentCommand, matchesAgentNotFound } from '@/lib/agent-commands'
 import { AGENT_DISPLAY_NAMES, AGENT_INSTALL_COMMANDS, AGENT_DOC_URLS, type AgentType } from '@/types'
 import { useOpencodeDefaultAgent, useOpencodePlanAgent } from '@/hooks/use-config'
 import type { AnyTerminal } from './terminal-types'
+import { useExecutorNodes } from '@/hooks/use-executor-nodes'
 
 interface TaskTerminalProps {
   taskName: string
@@ -49,6 +50,10 @@ export function TaskTerminal({ taskName, cwd, taskId, className, agent = 'claude
   // shell. We still reattach to an already-running terminal for this cwd,
   // but creating a new one requires the user to click "Start terminal".
   const [createRequested, setCreateRequested] = useState(false)
+  // D-18 PR 2: which execution node to run on. null = this server.
+  const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null)
+  const { data: executorNodes } = useExecutorNodes()
+  const onlineNodes = (executorNodes ?? []).filter((n) => n.online)
   const [isStartingAgent, setIsStartingAgent] = useState(false)
   const [xtermOpened, setXtermOpened] = useState(false)
   const [agentNotFound, setAgentNotFound] = useState<AgentType | null>(null)
@@ -297,6 +302,7 @@ export function TaskTerminal({ taskName, cwd, taskId, className, agent = 'claude
         rows,
         cwd,
         taskId,
+        nodeId: selectedNodeId ?? undefined,
         // Include startup info - this is stored in the MST store to survive
         // component unmount/remount (fixes race condition with React strict mode)
         startup: {
@@ -318,7 +324,7 @@ export function TaskTerminal({ taskName, cwd, taskId, className, agent = 'claude
       })
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- startup props are captured once at creation time
-  }, [connected, cwd, xtermOpened, terminalsLoaded, terminals, taskName, createTerminal, createRequested])
+  }, [connected, cwd, xtermOpened, terminalsLoaded, terminals, taskName, createTerminal, createRequested, selectedNodeId])
 
   // Update terminalId when terminal appears in list or when temp ID is replaced with real ID
   // This handles the optimistic update flow where tempId → realId
@@ -627,18 +633,39 @@ export function TaskTerminal({ taskName, cwd, taskId, className, agent = 'claude
         {connected && terminalsLoaded && !terminalId && !isCreating && !createRequested &&
           !terminals.some((t) => t.cwd === cwd) && (
           <div className="absolute inset-0 flex items-center justify-center bg-terminal-background">
-            <button
-              type="button"
-              onClick={() => setCreateRequested(true)}
-              className={cn(
-                'rounded-md border px-4 py-2 font-mono text-sm transition-colors',
-                isDark
-                  ? 'border-white/20 text-white/70 hover:bg-white/10 hover:text-white'
-                  : 'border-black/20 text-black/70 hover:bg-black/5 hover:text-black'
+            <div className="flex flex-col items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setCreateRequested(true)}
+                className={cn(
+                  'rounded-md border px-4 py-2 font-mono text-sm transition-colors',
+                  isDark
+                    ? 'border-white/20 text-white/70 hover:bg-white/10 hover:text-white'
+                    : 'border-black/20 text-black/70 hover:bg-black/5 hover:text-black'
+                )}
+              >
+                Start terminal
+              </button>
+              {/* D-18 PR 2: node picker, shown only when the user has online
+                  execution nodes registered with this instance. */}
+              {onlineNodes.length > 0 && (
+                <select
+                  value={selectedNodeId ?? ''}
+                  onChange={(e) => setSelectedNodeId(e.target.value || null)}
+                  className={cn(
+                    'rounded border bg-transparent px-2 py-1 font-mono text-xs',
+                    isDark ? 'border-white/20 text-white/60' : 'border-black/20 text-black/60'
+                  )}
+                >
+                  <option value="">Run on: this server</option>
+                  {onlineNodes.map((n) => (
+                    <option key={n.id} value={n.id}>
+                      Run on: {n.name}
+                    </option>
+                  ))}
+                </select>
               )}
-            >
-              Start terminal
-            </button>
+            </div>
           </div>
         )}
 

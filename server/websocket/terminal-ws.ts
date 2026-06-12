@@ -7,6 +7,13 @@ import { getWorktreeBasePath, getSettings, updateSettingByPath } from '../lib/se
 import { log } from '../lib/logger'
 import { anyTopicMatches } from './topic-matcher'
 import { getPageContext } from '../services/page-context-service'
+import {
+  isRelayTerminal,
+  listRelayTerminals,
+  relayAttach,
+  relayCreateTerminal,
+  relayForward,
+} from './executor-ws'
 import type { CurrentUserContext } from '../middleware/current-user'
 
 interface ClientData {
@@ -185,7 +192,9 @@ function buildHandlers(identity: SocketIdentity): WSEvents {
     // Ensure at least one tab exists
     tabManager.ensureDefaultTab()
 
-    const terminalsList = ptyManager.listTerminals()
+    // PR 2: node-backed (relay) terminals appear alongside local ones —
+    // the browser protocol doesn't distinguish them.
+    const terminalsList = [...ptyManager.listTerminals(), ...listRelayTerminals()]
     log.ws.debug('Sending terminals:list to new client', {
       clientId: clientData.id,
       terminalCount: terminalsList.length,
@@ -231,7 +240,31 @@ function buildHandlers(identity: SocketIdentity): WSEvents {
       switch (message.type) {
         // Terminal messages
         case 'terminal:create': {
-          const { name, cols, rows, cwd, tabId, positionInTab, requestId, tempId, taskId } = message.payload
+          const { name, cols, rows, cwd, tabId, positionInTab, requestId, tempId, taskId, nodeId } = message.payload
+
+          // PR 2: nodeId routes the terminal to one of the owner's
+          // execution nodes instead of the local PTY manager.
+          if (nodeId) {
+            relayCreateTerminal(
+              { nodeId, name, cwd, cols, rows, taskId },
+              {
+                onCreated: (info) => {
+                  clientData.attachedTerminals.add(info.id)
+                  broadcast({
+                    type: 'terminal:created',
+                    payload: { terminal: info, isNew: true, requestId, tempId },
+                  })
+                },
+                onError: (error) => {
+                  sendTo(ws, {
+                    type: 'terminal:error',
+                    payload: { terminalId: tempId ?? '', error },
+                  })
+                },
+              }
+            )
+            break
+          }
 
           // If tabId provided but no cwd, use the tab's directory as default
           let effectiveCwd = cwd
@@ -318,6 +351,10 @@ function buildHandlers(identity: SocketIdentity): WSEvents {
 
         case 'terminal:destroy': {
           const { terminalId, force, reason } = message.payload
+          if (isRelayTerminal(terminalId)) {
+            relayForward(terminalId, { kind: 'destroy' })
+            break
+          }
           const terminalInfo = ptyManager.getInfo(terminalId)
 
           // Protection: Tab terminals require explicit force flag
@@ -384,17 +421,27 @@ function buildHandlers(identity: SocketIdentity): WSEvents {
 
         case 'terminal:input': {
           log.ws.debug('terminal:input', { terminalId: message.payload.terminalId, dataLen: message.payload.data.length })
+          if (relayForward(message.payload.terminalId, { kind: 'input', data: message.payload.data })) break
           ptyManager.write(message.payload.terminalId, message.payload.data)
           break
         }
 
         case 'terminal:resize': {
+          if (relayForward(message.payload.terminalId, { kind: 'resize', cols: message.payload.cols, rows: message.payload.rows })) break
           ptyManager.resize(message.payload.terminalId, message.payload.cols, message.payload.rows)
           break
         }
 
         case 'terminal:attach': {
           const { terminalId, cols, rows } = message.payload
+          // PR 2: node-backed terminals replay their buffer from the node.
+          {
+            const handled = relayAttach(terminalId, { cols, rows }, (buffer) => {
+              clientData.attachedTerminals.add(terminalId)
+              sendTo(ws, { type: 'terminal:attached', payload: { terminalId, buffer } })
+            })
+            if (handled) break
+          }
           // Ensure terminal is attached to dtach (connects PTY if not already)
           // This is async because it polls for the socket to exist (race condition fix)
           await ptyManager.attach(terminalId)
@@ -445,7 +492,7 @@ function buildHandlers(identity: SocketIdentity): WSEvents {
         case 'terminals:list': {
           sendTo(ws, {
             type: 'terminals:list',
-            payload: { terminals: ptyManager.listTerminals() },
+            payload: { terminals: [...ptyManager.listTerminals(), ...listRelayTerminals()] },
           })
           break
         }

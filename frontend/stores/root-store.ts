@@ -381,6 +381,8 @@ export const RootStore = types
         tabId?: string
         positionInTab?: number
         taskId?: string
+        /** D-18 PR 2: run on a remote execution node instead of this server. */
+        nodeId?: string
         /** Startup info for task terminals - stored in volatile to survive component unmount */
         startup?: {
           startupScript?: string | null
