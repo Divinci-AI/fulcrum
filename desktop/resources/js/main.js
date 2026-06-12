@@ -886,9 +886,37 @@ async function connectToProfile(id) {
 }
 
 /**
+ * Validate a Bearer API token against a remote Fulcrum instance.
+ * GET /api/users/me with the token must resolve an identity. CF Access
+ * does not gate API-token requests differently — the server checks the
+ * Authorization header before the CF header.
+ */
+async function verifyRemoteToken(baseUrl, token) {
+  try {
+    const res = await fetch(`${baseUrl.replace(/\/$/, '')}/api/users/me`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (res.status === 401) {
+      return { ok: false, error: 'The API token was rejected by the remote server.' };
+    }
+    if (!res.ok) {
+      return { ok: false, error: `Remote server responded ${res.status} — check the URL.` };
+    }
+    const body = await res.json();
+    if (!body?.user) {
+      return { ok: false, error: 'The token did not resolve to a user on the remote.' };
+    }
+    log.info('Verified remote API token', { email: body.user.email });
+    return { ok: true, email: body.user.email };
+  } catch (err) {
+    return { ok: false, error: `Could not reach the remote server: ${err?.message ?? err}` };
+  }
+}
+
+/**
  * Add (or update if host id collides) a remote profile and connect to it.
  */
-async function addProfileAndConnect(label, url) {
+async function addProfileAndConnect(label, url, apiToken) {
   const normalized = normalizeRemoteUrl(url);
   if (!normalized) {
     return { ok: false, error: 'Please enter a valid URL (e.g. https://fulcrum-acme.divinci.ai).' };
@@ -898,6 +926,19 @@ async function addProfileAndConnect(label, url) {
     return { ok: false, error: 'Localhost is the Local profile — no need to add it as a remote.' };
   }
 
+  // Optional Bearer token (minted at the remote's Settings → API Tokens).
+  // Stored on the profile so the desktop can call the remote's API
+  // programmatically — groundwork for executor mode, where this machine
+  // registers with the SaaS as an execution node. The UI auth (CF Access)
+  // is unaffected. Verified before saving so typos surface immediately.
+  const cleanToken = (apiToken || '').trim() || null;
+  if (cleanToken) {
+    const check = await verifyRemoteToken(normalized, cleanToken);
+    if (!check.ok) {
+      return { ok: false, error: check.error };
+    }
+  }
+
   const cleanLabel = (label || '').trim() || defaultLabelForHost(host);
   const id = host;
   const existing = getProfiles();
@@ -905,7 +946,7 @@ async function addProfileAndConnect(label, url) {
   const updated = [
     LOCAL_PROFILE,
     ...remotesWithoutCollision,
-    { id, label: cleanLabel, url: normalized },
+    { id, label: cleanLabel, url: normalized, ...(cleanToken ? { apiToken: cleanToken } : {}) },
   ];
 
   await saveSettings({
@@ -991,6 +1032,8 @@ function openAddProfileModal() {
   errorBox.textContent = '';
   labelInput.value = '';
   urlInput.value = '';
+  const tokenInput = document.getElementById('add-profile-token');
+  if (tokenInput) tokenInput.value = '';
   overlay.classList.add('visible');
   urlInput.focus();
 }
@@ -1002,8 +1045,9 @@ function closeAddProfileModal() {
 async function submitAddProfileModal() {
   const label = document.getElementById('add-profile-label')?.value ?? '';
   const url = document.getElementById('add-profile-url')?.value ?? '';
+  const apiToken = document.getElementById('add-profile-token')?.value ?? '';
   const errorBox = document.getElementById('add-profile-error');
-  const result = await addProfileAndConnect(label, url);
+  const result = await addProfileAndConnect(label, url, apiToken);
   if (!result.ok) {
     errorBox.textContent = result.error;
     errorBox.style.display = 'block';
