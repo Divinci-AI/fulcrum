@@ -24,7 +24,7 @@ import {
   users,
 } from '../db'
 import { requireUser, type CurrentUserContext } from '../middleware/current-user'
-import { grantCreatorAdmin } from '../services/access-control-service'
+import { grantCreatorAdmin, effectiveRole, roleSatisfies } from '../services/access-control-service'
 import { broadcast } from '../websocket/terminal-ws'
 
 const EXPORT_VERSION = 1
@@ -78,18 +78,31 @@ export interface TransferBundle {
 
 // GET /api/transfer/export?projectId=<optional>
 app.get('/export', (c) => {
-  requireUser(c)
+  const user = requireUser(c)
   const projectId = c.req.query('projectId')
+
+  // D-5 visibility applies to exports exactly like list endpoints: the
+  // bundle must only contain what the caller could see in the UI, or a
+  // restricted project's contents would leak through a JSON download.
+  // Same in-memory effectiveRole filter the list routes use.
+  if (projectId && !roleSatisfies(effectiveRole(user.id, 'project', projectId), 'viewer')) {
+    // 404 (not 403) to avoid confirming the existence of restricted ids.
+    return c.json({ error: 'Project not found' }, 404)
+  }
 
   const allUsers = db.select().from(users).all()
   const emailById = new Map(allUsers.map((u) => [u.id, u.email]))
 
-  const projectRows = projectId
-    ? db.select().from(projects).where(eq(projects.id, projectId)).all()
-    : db.select().from(projects).all()
-  const taskRows = projectId
-    ? db.select().from(tasks).where(eq(tasks.projectId, projectId)).all()
-    : db.select().from(tasks).all()
+  const projectRows = (
+    projectId
+      ? db.select().from(projects).where(eq(projects.id, projectId)).all()
+      : db.select().from(projects).all()
+  ).filter((p) => roleSatisfies(effectiveRole(user.id, 'project', p.id), 'viewer'))
+  const taskRows = (
+    projectId
+      ? db.select().from(tasks).where(eq(tasks.projectId, projectId)).all()
+      : db.select().from(tasks).all()
+  ).filter((t) => roleSatisfies(effectiveRole(user.id, 'task', t.id), 'viewer'))
 
   const taskIds = taskRows.map((t) => t.id)
   const tagRows = db.select().from(tags).all()

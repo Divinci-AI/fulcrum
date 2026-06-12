@@ -1,7 +1,7 @@
 import { describe, test, expect, beforeEach, afterEach } from 'bun:test'
 import { createTestApp } from '../__tests__/fixtures/app'
 import { setupTestEnv, type TestEnv } from '../__tests__/utils/env'
-import { db, tasks, projects } from '../db'
+import { db, tasks, projects, users } from '../db'
 import { eq } from 'drizzle-orm'
 
 describe('Transfer Routes', () => {
@@ -68,6 +68,39 @@ describe('Transfer Routes', () => {
     expect(importedA?.projectId).not.toBe('proj-1')
     const importedProject = db.select().from(projects).where(eq(projects.id, importedA!.projectId!)).get()
     expect(importedProject?.name).toBe('Transfer Me')
+  })
+
+  test('export excludes restricted resources the caller cannot see', async () => {
+    const { request } = createTestApp()
+    const now = new Date().toISOString()
+    db.insert(tasks)
+      .values([
+        { id: 'open-task', title: 'Visible', status: 'TO_DO', position: 0, createdAt: now, updatedAt: now },
+        { id: 'secret-task', title: 'Hidden', status: 'TO_DO', position: 1, visibility: 'restricted', createdAt: now, updatedAt: now },
+      ])
+      .run()
+    db.insert(projects)
+      .values({ id: 'secret-proj', name: 'Hidden Project', status: 'active', visibility: 'restricted', createdAt: now, updatedAt: now })
+      .run()
+
+    // A non-admin tenant member with no grants on the restricted rows.
+    db.insert(users)
+      .values({ id: crypto.randomUUID(), email: 'outsider@example.com', createdAt: now, updatedAt: now })
+      .run()
+    const res = await request('/api/transfer/export', {
+      headers: { 'Cf-Access-Authenticated-User-Email': 'outsider@example.com' },
+    })
+    const bundle = await res.json()
+
+    expect(res.status).toBe(200)
+    expect(bundle.tasks.map((t: { title: string }) => t.title)).toEqual(['Visible'])
+    expect(bundle.projects.length).toBe(0)
+
+    // Scoped export of a restricted project 404s for non-members.
+    const scoped = await request('/api/transfer/export?projectId=secret-proj', {
+      headers: { 'Cf-Access-Authenticated-User-Email': 'outsider@example.com' },
+    })
+    expect(scoped.status).toBe(404)
   })
 
   test('import rejects unrecognized bundles', async () => {
