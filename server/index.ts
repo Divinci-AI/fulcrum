@@ -1,6 +1,7 @@
 import { serve } from '@hono/node-server'
 import { createNodeWebSocket } from '@hono/node-ws'
 import { createApp } from './app'
+import { makeExecutorWebSocketHandlers, setExecutorBroadcast } from './websocket/executor-ws'
 import { initPTYManager, setBroadcastDestroyed } from './terminal/pty-instance'
 import {
   makeTerminalWebSocketHandlers,
@@ -18,6 +19,7 @@ import { startAssistantScheduler, stopAssistantScheduler } from './services/assi
 import { startCaldavSync, stopCaldavSync } from './services/caldav'
 import { startGoogleCalendarSync, stopGoogleCalendarSync } from './services/google/google-calendar-service'
 import { pruneOldInvocations } from './services/observer-tracking'
+import { startExecutorClient, stopExecutorClient } from './services/executor-client'
 import { log } from './lib/logger'
 import { clearSensitiveEnvVars } from './lib/env'
 
@@ -156,6 +158,12 @@ const { injectWebSocket, upgradeWebSocket } = createNodeWebSocket({ app })
 // socket can be tagged with the user identity resolved by the currentUser
 // middleware (registered on /ws/* in app.ts).
 app.get('/ws/terminal', upgradeWebSocket((c) => makeTerminalWebSocketHandlers(c)))
+// D-18 PR 1: execution nodes dial in here with a Bearer token (resolved by
+// the currentUser middleware registered on /ws/* in app.ts). The browser
+// fan-out for node status is injected to keep executor-ws's module graph
+// free of the terminal/PTY imports.
+setExecutorBroadcast(broadcast)
+app.get('/ws/executor', upgradeWebSocket((c) => makeExecutorWebSocketHandlers(c)))
 
 // Start server
 const server = serve(
@@ -201,6 +209,9 @@ startCaldavSync()
 // Start Google Calendar sync
 startGoogleCalendarSync()
 
+// D-18 PR 1: executor client (gated internally on executor.* settings)
+startExecutorClient()
+
 // Prune observer invocation records daily (7-day retention) so the
 // observer_invocations table doesn't grow without bound on busy channels.
 const observerPruneTimer = setInterval(() => {
@@ -226,6 +237,7 @@ setTimeout(() => {
 process.on('SIGINT', async () => {
   log.server.info('Shutting down (terminals will persist)')
   clearInterval(observerPruneTimer)
+  stopExecutorClient()
   stopPRMonitor()
   stopDivinciSync()
   stopMetricsCollector()
@@ -242,6 +254,7 @@ process.on('SIGINT', async () => {
 process.on('SIGTERM', async () => {
   log.server.info('Shutting down (terminals will persist)')
   clearInterval(observerPruneTimer)
+  stopExecutorClient()
   stopPRMonitor()
   stopDivinciSync()
   stopMetricsCollector()

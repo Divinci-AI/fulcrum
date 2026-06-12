@@ -46,6 +46,7 @@ import usersRoutes from './routes/users'
 import teamChatRoutes from './routes/team-chat'
 import integrationsRoutes from './routes/integrations'
 import transferRoutes from './routes/transfer'
+import executorsRoutes from './routes/executors'
 import teamsRoutes from './routes/teams'
 import aclsRoutes from './routes/acls'
 import ogRoutes from './routes/og'
@@ -148,6 +149,7 @@ export function createApp() {
   app.route('/api/team-chat', teamChatRoutes)
   app.route('/api/integrations', integrationsRoutes)
   app.route('/api/transfer', transferRoutes)
+  app.route('/api/executors', executorsRoutes)
 
   // MCP HTTP transport endpoints. These expose the agent tool surface
   // (including execute_command/write_file on /mcp), so they get the same

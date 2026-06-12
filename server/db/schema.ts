@@ -638,6 +638,20 @@ export const taskComments = sqliteTable('task_comments', {
   updatedAt: text('updated_at').notNull(),
 })
 
+// D-18 PR 1: execution nodes — user-owned machines (typically the desktop
+// app's local server) that dial out to this instance over /ws/executor and
+// run terminals/worktrees on behalf of their owner. Online status is
+// derived from the live socket registry; this table is the durable record.
+export const executorNodes = sqliteTable('executor_nodes', {
+  id: text('id').primaryKey(), // client-generated, stable per install
+  ownerUserId: text('owner_user_id').notNull(), // FK → users.id
+  name: text('name').notNull(),
+  platform: text('platform'),
+  version: text('version'),
+  lastSeenAt: text('last_seen_at'),
+  createdAt: text('created_at').notNull(),
+})
+
 // Team chat — one flat tenant-wide channel (channel-per-project can come
 // later by adding a nullable projectId). Fan-out is via the `team:message`
 // WS event; this table is the history.

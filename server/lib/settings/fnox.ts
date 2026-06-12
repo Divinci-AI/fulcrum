@@ -56,6 +56,12 @@ export const FNOX_CONFIG_MAP: Record<string, ConfigEntry> = {
   'appearance.language': { fnoxKey: 'FULCRUM_APPEARANCE_LANGUAGE', provider: 'plain', type: 'string' },
   'appearance.theme': { fnoxKey: 'FULCRUM_APPEARANCE_THEME', provider: 'plain', type: 'string' },
   'appearance.timezone': { fnoxKey: 'FULCRUM_APPEARANCE_TIMEZONE', provider: 'plain', type: 'string' },
+  // D-18 PR 1: executor mode (local instance dialing out to a remote Fulcrum)
+  'executor.enabled': { fnoxKey: 'FULCRUM_EXECUTOR_ENABLED', provider: 'plain', type: 'boolean' },
+  'executor.remoteUrl': { fnoxKey: 'FULCRUM_EXECUTOR_REMOTE_URL', provider: 'plain', type: 'string' },
+  'executor.apiToken': { fnoxKey: 'FULCRUM_EXECUTOR_API_TOKEN', provider: 'age', type: 'string' },
+  'executor.nodeName': { fnoxKey: 'FULCRUM_EXECUTOR_NODE_NAME', provider: 'plain', type: 'string' },
+  'executor.nodeId': { fnoxKey: 'FULCRUM_EXECUTOR_NODE_ID', provider: 'plain', type: 'string' },
 
   // Assistant
   'assistant.provider': { fnoxKey: 'FULCRUM_ASSISTANT_PROVIDER', provider: 'plain', type: 'string' },

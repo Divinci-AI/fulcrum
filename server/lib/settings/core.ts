@@ -80,6 +80,13 @@ export function getSettings(): Settings {
       theme: (fv('appearance.theme') as 'system' | 'light' | 'dark' | null) ?? null,
       timezone: (fv('appearance.timezone') as string | null) ?? null,
     },
+    executor: {
+      enabled: (fv('executor.enabled') as boolean) ?? DEFAULT_SETTINGS.executor.enabled,
+      remoteUrl: (fv('executor.remoteUrl') as string | null) ?? null,
+      apiToken: (fv('executor.apiToken') as string | null) ?? null,
+      nodeName: (fv('executor.nodeName') as string | null) ?? null,
+      nodeId: (fv('executor.nodeId') as string | null) ?? null,
+    },
     assistant: {
       provider: (fv('assistant.provider') as AssistantProvider) ?? DEFAULT_SETTINGS.assistant.provider,
       model: (fv('assistant.model') as AssistantModel) ?? DEFAULT_SETTINGS.assistant.model,

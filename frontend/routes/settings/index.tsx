@@ -104,6 +104,7 @@ import { GitHubAccountManager } from '@/components/github/github-account-manager
 import { ClaudeDesktopConnect } from '@/components/settings/claude-desktop-connect'
 import { HermesGatewayStatus } from '@/components/settings/hermes-gateway-status'
 import { InstanceTransfer } from '@/components/settings/instance-transfer'
+import { ExecutorSettings } from '@/components/settings/executor-settings'
 import { MyNotificationPreferences } from '@/components/notifications/my-notification-preferences'
 import { MyChannelIdentities } from '@/components/notifications/my-channel-identities'
 import { MyUsersAdmin } from '@/components/users/my-users-admin'
@@ -1659,6 +1660,9 @@ function SettingsPage() {
 
                     {/* Cross-instance task/project transfer */}
                     <InstanceTransfer />
+
+                    {/* D-18: execution nodes + executor-mode config */}
+                    <ExecutorSettings />
 
                     {!isAdmin && (
                       <p className="text-xs text-muted-foreground border-t pt-3">

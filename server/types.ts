@@ -520,6 +520,12 @@ export interface PresenceStateMessage {
   }
 }
 
+// D-18 PR 1: execution node online/offline fan-out so node lists stay live.
+export interface ExecutorStatusMessage {
+  type: 'executor:status'
+  payload: { nodeId: string; online: boolean }
+}
+
 export type ServerMessage =
   | TerminalCreatedMessage
   | TerminalOutputMessage
@@ -554,3 +560,4 @@ export type ServerMessage =
   | TeamMessageMessage
   | TeamMessageDeletedMessage
   | PresenceStateMessage
+  | ExecutorStatusMessage

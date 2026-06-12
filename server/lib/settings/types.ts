@@ -175,6 +175,23 @@ export interface Settings {
     theme: 'system' | 'light' | 'dark' | null
     timezone: string | null // IANA timezone, null = system default
   }
+  /**
+   * D-18 PR 1: executor mode. When enabled, THIS instance dials out to a
+   * remote Fulcrum (the SaaS) over /ws/executor and registers as an
+   * execution node owned by the token's user. See
+   * deploy/saas/D18-executor-design.md.
+   */
+  executor: {
+    enabled: boolean
+    /** Remote Fulcrum base URL, e.g. https://fulcrum-acme.divinci.ai */
+    remoteUrl: string | null
+    /** `fulc_` API token minted on the remote (Settings → API Tokens). */
+    apiToken: string | null
+    /** Display name for this node; defaults to the machine hostname. */
+    nodeName: string | null
+    /** Stable per-install node id, generated on first connect. */
+    nodeId: string | null
+  }
   assistant: {
     provider: AssistantProvider
     model: AssistantModel
@@ -287,6 +304,13 @@ export const DEFAULT_SETTINGS: Settings = {
     language: null,
     theme: null,
     timezone: null,
+  },
+  executor: {
+    enabled: false,
+    remoteUrl: null,
+    apiToken: null,
+    nodeName: null,
+    nodeId: null,
   },
   assistant: {
     provider: 'claude',
@@ -414,6 +438,11 @@ export const VALID_SETTING_PATHS = new Set([
   'appearance.language',
   'appearance.theme',
   'appearance.timezone',
+  'executor.enabled',
+  'executor.remoteUrl',
+  'executor.apiToken',
+  'executor.nodeName',
+  'executor.nodeId',
   'assistant.provider',
   'assistant.model',
   'assistant.observerModel',
