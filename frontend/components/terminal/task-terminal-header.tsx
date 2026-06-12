@@ -20,6 +20,7 @@ import { TaskActionsDropdown } from './task-actions-dropdown'
 
 import { DeleteTaskDialog } from '@/components/delete-task-dialog'
 import { useUpdateTaskStatus } from '@/hooks/use-tasks'
+import { useTaskAgentInstance } from '@/hooks/use-task-agent-instance'
 import { useTasks } from '@/hooks/use-tasks'
 import type { Task, TaskStatus } from '@/types'
 
@@ -78,6 +79,7 @@ export function TaskTerminalHeader({
   const updateTaskStatus = useUpdateTaskStatus()
   const currentTask = tasks?.find((t) => t.id === taskInfo.taskId)
   const taskStatus: TaskStatus = currentTask?.status ?? 'IN_PROGRESS'
+  const agentInstance = useTaskAgentInstance(taskInfo.taskId)
 
   // Use ResizeObserver to track container width
   useEffect(() => {
@@ -187,6 +189,17 @@ export function TaskTerminalHeader({
 
         {/* Right-side actions */}
         <div className="ml-auto flex shrink-0 items-center gap-1">
+          {/* Agent-running indicator — real process detection, not just
+              "a terminal exists" (use-task-agent-instance). */}
+          {agentInstance && showBadge && (
+            <span
+              className="flex items-center gap-1 whitespace-nowrap rounded-full bg-green-500/15 px-2 py-0.5 text-[10px] font-medium text-green-600 dark:text-green-400"
+              title={`${agentInstance.agent} running (pid ${agentInstance.pid}, ${agentInstance.ramMB} MB)`}
+            >
+              <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-green-500" />
+              {agentInstance.agent}
+            </span>
+          )}
           {/* Task status badge - visible until very narrow */}
           {showBadge && (
             <DropdownMenu>

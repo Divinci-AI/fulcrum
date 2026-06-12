@@ -115,18 +115,38 @@ const opencodeBuilder: AgentCommandBuilder = {
 }
 
 /**
- * Hermes Agent worktree-spawn placeholder. PR 9 added Hermes as an
- * assistant chat provider (Slack DM, UI chat). Worktree task spawning
- * lands in PR 10 — for now, selecting Hermes as a per-task agent emits
- * a clear "not supported yet" message rather than crashing.
+ * Hermes Agent command builder (D-16 PR 10)
+ * https://hermes-agent.nousresearch.com/docs/user-guide/cli
+ *
+ * `hermes chat -q "<query>"` starts a session with an initial query.
+ * Hermes has no system-prompt flag (identity lives in ~/.hermes/SOUL.md),
+ * so — like OpenCode — the Fulcrum context is prepended to the prompt.
+ * Plan mode has no Hermes equivalent; the restriction is stated in the
+ * prompt text instead.
  */
 const hermesBuilder: AgentCommandBuilder = {
-  buildCommand: () => {
-    return `echo "Hermes is not yet supported as a worktree agent — see D-16 PR 10. Use Claude or OpenCode for now."`
+  buildCommand({ prompt, systemPrompt, mode, additionalOptions }) {
+    const planNote =
+      mode === 'plan'
+        ? '\n\nIMPORTANT: You are in PLAN mode — research and propose a plan, do not modify files until the user approves.'
+        : ''
+    const fullPrompt = `${systemPrompt}${planNote}\n\n${prompt}`
+    const escapedFullPrompt = escapeForShell(fullPrompt)
+
+    let extraFlags = ''
+    if (additionalOptions && Object.keys(additionalOptions).length > 0) {
+      extraFlags = Object.entries(additionalOptions)
+        .map(([key, value]) => ` --${key} ${value}`)
+        .join('')
+    }
+
+    return `hermes chat -q ${escapedFullPrompt}${extraFlags}`
   },
   notFoundPatterns: [
     /hermes: command not found/,
+    /hermes: not found/,
     /'hermes' is not recognized/,
+    /command not found: hermes/,
   ],
   processPattern: /\bhermes\b/i,
 }

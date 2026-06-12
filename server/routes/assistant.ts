@@ -10,6 +10,28 @@ import type { PageContext, ImageData, AttachmentData } from '../../shared/types'
 
 const assistantRoutes = new Hono()
 
+// GET /api/assistant/hermes-status — is the local `hermes gateway`
+// reachable? Mirrors the OpenCode availability check so provider pickers
+// can show Hermes as configured/unreachable instead of failing per-request.
+assistantRoutes.get('/hermes-status', async (c) => {
+  const { getSettings } = await import('../lib/settings')
+  const hermes = getSettings().assistant?.hermes
+  const configured = !!hermes?.baseUrl
+  if (!configured) {
+    return c.json({ configured: false, reachable: false })
+  }
+  try {
+    const base = hermes.baseUrl!.replace(/\/$/, '')
+    const res = await fetch(`${base}/models`, {
+      headers: hermes.apiKey ? { Authorization: `Bearer ${hermes.apiKey}` } : undefined,
+      signal: AbortSignal.timeout(1500),
+    })
+    return c.json({ configured: true, reachable: res.ok, model: hermes.model ?? null })
+  } catch {
+    return c.json({ configured: true, reachable: false, model: hermes.model ?? null })
+  }
+})
+
 /**
  * POST /api/assistant/sessions
  * Create a new chat session

@@ -37,13 +37,12 @@ export const AGENT_DOC_URLS: Record<AgentType, string> = {
 }
 
 /**
- * Agents that can run inside a worktree task. D-16 PR 1 added 'hermes' to the
- * AgentType union for the assistant chat path, but worktree spawning for Hermes
- * isn't implemented yet (the `hermesBuilder` in agent-commands.ts is a stub).
- * UI worktree pickers iterate THIS list, not Object.keys(AGENT_DISPLAY_NAMES),
- * so Hermes stays hidden until PR 10 wires `hermes` as a real worktree agent.
+ * Agents that can run inside a worktree task. D-16 PR 10: Hermes joins the
+ * list — `hermesBuilder` in agent-commands.ts launches `hermes chat -q` with
+ * the Fulcrum context prepended to the prompt. UI worktree pickers iterate
+ * THIS list, not Object.keys(AGENT_DISPLAY_NAMES).
  */
-export const WORKTREE_AGENT_TYPES: AgentType[] = ['claude', 'opencode']
+export const WORKTREE_AGENT_TYPES: AgentType[] = ['claude', 'opencode', 'hermes']
 
 export type TaskStatus =
   | 'TO_DO'

@@ -41,11 +41,10 @@ export function AgentSetupBanner() {
   }
 
   // D-16: skip the banner for agents we don't track CLI install status for
-  // (e.g. 'hermes' — worktree spawn is a stub until D-16 PR 10 wires real
-  // hermes-agent CLI dispatch). Otherwise we'd render "Hermes CLI not found"
-  // for an operator whose actual Hermes use is via the OpenAI-compat endpoint
-  // configured at Settings → AI Assistant → Hermes, which doesn't need any
-  // local CLI.
+  // ('hermes' — the deps endpoint doesn't probe the hermes CLI). The task
+  // terminal's agent-not-found overlay covers a missing hermes binary at
+  // spawn time; chat-provider use goes through the OpenAI-compat endpoint
+  // configured at Settings → AI Assistant → Hermes and needs no local CLI.
   if (agentToCheck !== 'claude' && agentToCheck !== 'opencode') {
     return null
   }

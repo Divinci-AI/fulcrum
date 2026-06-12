@@ -101,6 +101,9 @@ import { EmailSettings } from '@/components/messaging/email-settings'
 import { CaldavAccounts } from '@/components/caldav/caldav-accounts'
 import { GoogleAccountManager } from '@/components/google/google-account-manager'
 import { GitHubAccountManager } from '@/components/github/github-account-manager'
+import { ClaudeDesktopConnect } from '@/components/settings/claude-desktop-connect'
+import { HermesGatewayStatus } from '@/components/settings/hermes-gateway-status'
+import { InstanceTransfer } from '@/components/settings/instance-transfer'
 import { MyNotificationPreferences } from '@/components/notifications/my-notification-preferences'
 import { MyChannelIdentities } from '@/components/notifications/my-channel-identities'
 import { MyUsersAdmin } from '@/components/users/my-users-admin'
@@ -1651,6 +1654,12 @@ function SettingsPage() {
                     {/* GitHub Accounts (D-6 PR 2 — per-user) */}
                     <GitHubAccountManager />
 
+                    {/* Claude Desktop MCP wiring (host-machine config) */}
+                    <ClaudeDesktopConnect />
+
+                    {/* Cross-instance task/project transfer */}
+                    <InstanceTransfer />
+
                     {!isAdmin && (
                       <p className="text-xs text-muted-foreground border-t pt-3">
                         Tenant-wide integrations (Cloudflare, Google OAuth
@@ -2439,6 +2448,8 @@ function SettingsPage() {
                               </p>
                             )
                           })()}
+
+                          <HermesGatewayStatus />
 
                           <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
                             <label className="text-sm text-muted-foreground sm:w-32 sm:shrink-0">
