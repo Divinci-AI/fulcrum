@@ -1,6 +1,7 @@
-import { usePresence } from '@/hooks/use-team-chat'
+import { useDmUnread, usePresence } from '@/hooks/use-team-chat'
 import { useCurrentUser } from '@/hooks/use-current-user'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
+import { openDm } from '@/lib/dm-bus'
 
 const MAX_AVATARS = 5
 
@@ -24,11 +25,13 @@ function routeLabel(route: string | null): string {
 /**
  * Header avatar stack: who's connected right now and what they're looking
  * at. Fed by the presence:state WS events (see use-task-sync), so it
- * updates live as teammates arrive, leave, and navigate.
+ * updates live as teammates arrive, leave, and navigate. Clicking an
+ * avatar opens a 1:1 DM thread with that user in the chat widget.
  */
 export function OnlineUsers() {
   const { data: presence } = usePresence()
   const { data: currentUser } = useCurrentUser()
+  const { data: dmUnread } = useDmUnread()
 
   const others = (presence ?? []).filter((u) => u.userId !== currentUser?.id)
   if (others.length === 0) return null
@@ -38,17 +41,28 @@ export function OnlineUsers() {
 
   return (
     <div className="hidden md:flex items-center -space-x-1.5 mr-1">
-      {shown.map((u) => (
-        <Tooltip key={u.userId}>
-          <TooltipTrigger className="relative w-6 h-6 rounded-full bg-accent/20 border border-background flex items-center justify-center text-[9px] font-semibold text-accent cursor-default">
-            {initials(u.email)}
-            <div className="absolute -bottom-0.5 -right-0.5 w-2 h-2 rounded-full bg-green-500 border border-background" />
-          </TooltipTrigger>
-          <TooltipContent side="bottom" className="text-xs">
-            {u.email ?? 'Unknown'} — viewing {routeLabel(u.route)}
-          </TooltipContent>
-        </Tooltip>
-      ))}
+      {shown.map((u) => {
+        const unread = dmUnread?.[u.userId] ?? 0
+        return (
+          <Tooltip key={u.userId}>
+            <TooltipTrigger
+              onClick={() => openDm({ userId: u.userId, email: u.email, name: null })}
+              className="relative w-6 h-6 rounded-full bg-accent/20 border border-background flex items-center justify-center text-[9px] font-semibold text-accent cursor-pointer hover:bg-accent/30 transition-colors"
+            >
+              {initials(u.email)}
+              <div className="absolute -bottom-0.5 -right-0.5 w-2 h-2 rounded-full bg-green-500 border border-background" />
+              {unread > 0 && (
+                <div className="absolute -top-1 -right-1 min-w-3.5 h-3.5 px-0.5 rounded-full bg-red-500 text-white text-[8px] font-bold flex items-center justify-center border border-background">
+                  {unread > 9 ? '9+' : unread}
+                </div>
+              )}
+            </TooltipTrigger>
+            <TooltipContent side="bottom" className="text-xs">
+              {u.email ?? 'Unknown'} — viewing {routeLabel(u.route)}. Click to chat.
+            </TooltipContent>
+          </Tooltip>
+        )
+      })}
       {overflow > 0 && (
         <div className="w-6 h-6 rounded-full bg-muted border border-background flex items-center justify-center text-[9px] font-medium text-muted-foreground">
           +{overflow}

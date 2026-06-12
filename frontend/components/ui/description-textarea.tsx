@@ -6,6 +6,7 @@ import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
 import { log } from '@/lib/logger'
 import { useListUsers, type TenantUser } from '@/hooks/use-users-admin'
+import { findMentionTrigger, filterMentionUsers } from '@/lib/mentions'
 
 interface DescriptionTextareaProps
   extends Omit<React.ComponentProps<'textarea'>, 'onChange' | 'value'> {
@@ -39,39 +40,9 @@ function pathToUrl(path: string): string {
 // coordinates and computing them requires a mirror-div trick that's
 // brittle across fonts. Anchoring below the textarea is less elegant but
 // dead simple and works.
-
-/** Find an active @-mention trigger ending at `cursor`. Returns the
- * trigger's `@` index and the query string (the chars after `@`), or null
- * if there's no active trigger. */
-function findMentionTrigger(text: string, cursor: number): { at: number; query: string } | null {
-  if (cursor === 0) return null
-  // Walk back from cursor to find a `@` preceded by start-of-string or whitespace.
-  for (let i = cursor - 1; i >= 0; i--) {
-    const ch = text[i]
-    if (ch === '@') {
-      // Boundary check: char before must be undefined or whitespace.
-      const prev = i > 0 ? text[i - 1] : ''
-      if (prev === '' || /\s/.test(prev)) {
-        const query = text.slice(i + 1, cursor)
-        // Query terminates at any whitespace — if we encounter one in
-        // the slice, this trigger is no longer active.
-        if (/\s/.test(query)) return null
-        return { at: i, query }
-      }
-      return null
-    }
-    if (/\s/.test(ch)) return null
-  }
-  return null
-}
-
-function filterUsers(users: TenantUser[], query: string): TenantUser[] {
-  if (!query) return users.slice(0, 8)
-  const q = query.toLowerCase()
-  return users
-    .filter((u) => u.email.toLowerCase().includes(q) || (u.displayName ?? '').toLowerCase().includes(q))
-    .slice(0, 8)
-}
+//
+// Trigger detection + filtering live in @/lib/mentions so TeamChat's
+// composer shares the exact same behavior.
 
 export function DescriptionTextarea({
   value,
@@ -91,7 +62,7 @@ export function DescriptionTextarea({
 
   const imagePaths = extractImagePaths(value)
   const filteredUsers = useMemo(
-    () => (users ? filterUsers(users, mentionState?.query ?? '') : []),
+    () => (users ? filterMentionUsers(users, mentionState?.query ?? '') : []),
     [users, mentionState?.query]
   )
 

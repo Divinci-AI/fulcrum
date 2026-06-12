@@ -3,6 +3,7 @@ import { useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from '@tanstack/react-router'
 import { toast } from 'sonner'
 import { useCurrentUser } from './use-current-user'
+import { openTeamChat } from '@/lib/dm-bus'
 
 interface TaskUpdatedMessage {
   type: 'task:updated'
@@ -66,13 +67,16 @@ interface ProjectUpdatedMessage {
   payload: { projectId: string }
 }
 
-// Team chat fan-out (tenant-wide broadcast). Appended straight into the
-// ['team-chat'] query cache so the Team tab updates without a refetch.
+// Team chat fan-out. Channel messages (recipientUserId null) arrive via
+// tenant-wide broadcast and land in the ['team-chat'] cache; DMs arrive
+// participant-scoped and land in ['dm', <peerId>] keyed by the OTHER
+// participant. Unread counters mirror that split.
 export interface TeamChatMessage {
   id: string
   authorUserId: string
   authorEmail: string | null
   authorName: string | null
+  recipientUserId?: string | null
   body: string
   createdAt: string
 }
@@ -82,7 +86,11 @@ interface TeamMessageMessage {
 }
 interface TeamMessageDeletedMessage {
   type: 'team:message-deleted'
-  payload: { id: string }
+  payload: { id: string; authorUserId?: string; recipientUserId?: string | null }
+}
+interface ChatMentionedMessage {
+  type: 'chat:mentioned'
+  payload: { messageId: string; mentionedUserId: string; authorEmail: string | null }
 }
 
 // Presence roster — full state on every change, cached under ['presence'].
@@ -108,6 +116,7 @@ type ServerMessage =
   | TaskCommentDeletedMessage
   | TeamMessageMessage
   | TeamMessageDeletedMessage
+  | ChatMentionedMessage
   | PresenceStateMessage
   | { type: string }
 
@@ -152,21 +161,58 @@ export function useTaskSync() {
           )
         } else if (message.type === 'team:message' && 'payload' in message) {
           const msg = (message as TeamMessageMessage).payload
-          queryClient.setQueryData<TeamChatMessage[]>(['team-chat'], (old) => {
-            if (!old) return [msg]
-            if (old.some((m) => m.id === msg.id)) return old
-            return [...old, msg]
-          })
-          // Unread counter for the floating-widget badge. The Team tab
-          // resets this when visible; our own messages never count.
-          if (msg.authorUserId !== userIdRef.current) {
-            queryClient.setQueryData<number>(['team-chat-unread'], (n) => (n ?? 0) + 1)
+          const me = userIdRef.current
+          if (msg.recipientUserId) {
+            // DM — keyed by the other participant. Receipt is already
+            // participant-scoped server-side.
+            const peer = msg.authorUserId === me ? msg.recipientUserId : msg.authorUserId
+            queryClient.setQueryData<TeamChatMessage[]>(['dm', peer], (old) => {
+              if (!old) return [msg]
+              if (old.some((m) => m.id === msg.id)) return old
+              return [...old, msg]
+            })
+            if (msg.authorUserId !== me) {
+              queryClient.setQueryData<Record<string, number>>(['dm-unread'], (m) => ({
+                ...(m ?? {}),
+                [peer]: (m?.[peer] ?? 0) + 1,
+              }))
+            }
+          } else {
+            queryClient.setQueryData<TeamChatMessage[]>(['team-chat'], (old) => {
+              if (!old) return [msg]
+              if (old.some((m) => m.id === msg.id)) return old
+              return [...old, msg]
+            })
+            // Unread counter for the floating-widget badge. The Team tab
+            // resets this when visible; our own messages never count.
+            if (msg.authorUserId !== me) {
+              queryClient.setQueryData<number>(['team-chat-unread'], (n) => (n ?? 0) + 1)
+            }
           }
         } else if (message.type === 'team:message-deleted' && 'payload' in message) {
-          const { id } = (message as TeamMessageDeletedMessage).payload
-          queryClient.setQueryData<TeamChatMessage[]>(['team-chat'], (old) =>
-            old ? old.filter((m) => m.id !== id) : old
-          )
+          const { id, authorUserId, recipientUserId } = (message as TeamMessageDeletedMessage)
+            .payload
+          if (recipientUserId) {
+            const me = userIdRef.current
+            const peer = authorUserId === me ? recipientUserId : authorUserId
+            if (peer) {
+              queryClient.setQueryData<TeamChatMessage[]>(['dm', peer], (old) =>
+                old ? old.filter((m) => m.id !== id) : old
+              )
+            }
+          } else {
+            queryClient.setQueryData<TeamChatMessage[]>(['team-chat'], (old) =>
+              old ? old.filter((m) => m.id !== id) : old
+            )
+          }
+        } else if (message.type === 'chat:mentioned' && 'payload' in message) {
+          // Server already targeted this to us. Toast with a jump into the
+          // team chat tab of the floating widget.
+          const { authorEmail } = (message as ChatMentionedMessage).payload
+          const by = authorEmail ? ` by ${authorEmail}` : ''
+          toast.info(`You were mentioned in team chat${by}`, {
+            action: { label: 'Open', onClick: () => openTeamChat() },
+          })
         } else if (message.type === 'task:mentioned' && 'payload' in message) {
           // D-4 PR 3: server already filtered this to the right recipient
           // (us). Show a toast + invalidate tasks so the list reflects any

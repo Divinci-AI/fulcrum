@@ -32,6 +32,37 @@ interface SyncResult {
 }
 
 /**
+ * Resolve the user rows mentioned in a body of text. Email lookup is exact
+ * (case-insensitive — emails were lowercased on upsert). Display-name
+ * lookup is case-insensitive too, but ONLY counts when the name resolves
+ * to a single user — ambiguous names (e.g. two "Bob"s) silently no-op
+ * rather than mention both. Unknown emails/names are dropped.
+ *
+ * Used by syncMentionsForSource (tasks/projects/comments, where the
+ * mentions table tracks state) and directly by team chat (messages are
+ * immutable, so notify-on-create needs no table sync).
+ */
+export function matchMentionedUsers(text: string | null | undefined): User[] {
+  const emails = parseMentions(text)
+  const names = parseDisplayNameMentions(text)
+  const allUsers = emails.length || names.length ? db.select().from(users).all() : []
+
+  const matchedSet = new Map<string, User>()
+  for (const u of allUsers) {
+    if (emails.includes(u.email)) matchedSet.set(u.id, u)
+  }
+  for (const name of names) {
+    const candidates = allUsers.filter(
+      (u) => (u.displayName ?? '').toLowerCase() === name.toLowerCase()
+    )
+    if (candidates.length === 1) {
+      matchedSet.set(candidates[0].id, candidates[0])
+    }
+  }
+  return Array.from(matchedSet.values())
+}
+
+/**
  * Sync the mentions table for one source to match the parsed mention set.
  * Returns which user rows were added vs removed so the caller can decide
  * which side-effects (notifications) to fire. Only users that exist in
@@ -45,27 +76,7 @@ export function syncMentionsForSource(
   sourceId: string,
   text: string | null | undefined
 ): SyncResult {
-  const emails = parseMentions(text)
-  const names = parseDisplayNameMentions(text)
-  const allUsers = emails.length || names.length ? db.select().from(users).all() : []
-
-  // Email lookup is exact (case-insensitive — emails were lowercased on
-  // upsert). Display-name lookup is case-insensitive too, but ONLY counts
-  // when the name resolves to a single user — ambiguous names (e.g. two
-  // "Bob"s) silently no-op rather than mention both.
-  const matchedSet = new Map<string, User>()
-  for (const u of allUsers) {
-    if (emails.includes(u.email)) matchedSet.set(u.id, u)
-  }
-  for (const name of names) {
-    const candidates = allUsers.filter(
-      (u) => (u.displayName ?? '').toLowerCase() === name.toLowerCase()
-    )
-    if (candidates.length === 1) {
-      matchedSet.set(candidates[0].id, candidates[0])
-    }
-  }
-  const matchedUsers: User[] = Array.from(matchedSet.values())
+  const matchedUsers = matchMentionedUsers(text)
 
   const currentRows = db
     .select()

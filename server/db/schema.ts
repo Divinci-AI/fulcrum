@@ -658,10 +658,13 @@ export const executorNodes = sqliteTable('executor_nodes', {
 
 // Team chat — one flat tenant-wide channel (channel-per-project can come
 // later by adding a nullable projectId). Fan-out is via the `team:message`
-// WS event; this table is the history.
+// WS event; this table is the history. Direct messages reuse the table:
+// recipientUserId NULL = the team channel, set = a 1:1 DM between author
+// and recipient (delivery is scoped to those two users).
 export const teamMessages = sqliteTable('team_messages', {
   id: text('id').primaryKey(),
   authorUserId: text('author_user_id').notNull(), // FK → users.id
+  recipientUserId: text('recipient_user_id'), // FK → users.id; null = team channel
   body: text('body').notNull(),
   createdAt: text('created_at').notNull(),
 })

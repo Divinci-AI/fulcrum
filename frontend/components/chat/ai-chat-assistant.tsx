@@ -9,7 +9,8 @@ import MarkdownPreview from '@uiw/react-markdown-preview'
 import { ChatMessage } from './chat-message'
 import { ChatInput, type ChatInputHandle, type FileAttachment } from './chat-input'
 import { TeamChat } from './team-chat'
-import { useTeamChatUnread } from '@/hooks/use-team-chat'
+import { useDmUnread, useTeamChatUnread } from '@/hooks/use-team-chat'
+import { onChatOpenRequests, type DmPeer } from '@/lib/dm-bus'
 import { useChat } from '@/hooks/use-chat'
 import { usePageContext } from '@/hooks/use-page-context'
 import { useOpencodeModels } from '@/hooks/use-opencode-models'
@@ -60,7 +61,13 @@ export const AiChatAssistant = observer(function AiChatAssistant() {
   const [expandedMessageId, setExpandedMessageId] = useState<string | null>(null)
   // 'agent' = the AI assistant; 'team' = human team chat (live via WS).
   const [activeTab, setActiveTab] = useState<'agent' | 'team'>('agent')
+  // When set, the team tab shows the 1:1 DM thread with this user instead
+  // of the channel. Opened via the dm-bus (header avatars, roster clicks).
+  const [dmPeer, setDmPeer] = useState<DmPeer | null>(null)
   const { data: teamUnread } = useTeamChatUnread()
+  const { data: dmUnread } = useDmUnread()
+  const dmUnreadTotal = Object.values(dmUnread ?? {}).reduce((a, b) => a + b, 0)
+  const chatUnread = teamUnread + dmUnreadTotal
   const [modelFilter, setModelFilter] = useState('')
   const filterInputRef = useRef<HTMLInputElement>(null)
   const wasStreamingRef = useRef(false)
@@ -102,6 +109,23 @@ export const AiChatAssistant = observer(function AiChatAssistant() {
     }),
     []
   )
+
+  // Open requests from elsewhere in the app (header avatar click → DM,
+  // mention toast → team channel).
+  useEffect(() => {
+    return onChatOpenRequests({
+      onDm: (peer) => {
+        setDmPeer(peer)
+        setActiveTab('team')
+        open()
+      },
+      onTeamChat: () => {
+        setDmPeer(null)
+        setActiveTab('team')
+        open()
+      },
+    })
+  }, [open])
 
   // Invalidate queries when chat streaming completes (AI may have modified data)
   useEffect(() => {
@@ -309,10 +333,10 @@ export const AiChatAssistant = observer(function AiChatAssistant() {
           <div className={`absolute inset-0 rounded-full animate-pulse-slow opacity-30 ${isDark ? 'bg-destructive' : 'bg-accent'}`} />
           {!isOpen && <div className={`absolute -inset-1 rounded-full animate-ping-slow opacity-15 ${isDark ? 'bg-destructive' : 'bg-accent'}`} />}
 
-          {/* Team-chat unread badge */}
-          {teamUnread > 0 && (!isOpen || activeTab !== 'team') && (
+          {/* Team-chat + DM unread badge */}
+          {chatUnread > 0 && (!isOpen || activeTab !== 'team') && (
             <div className="absolute -top-1 -right-1 z-20 min-w-5 h-5 px-1 rounded-full bg-red-500 text-white text-[10px] font-bold flex items-center justify-center border-2 border-background">
-              {teamUnread > 99 ? '99+' : teamUnread}
+              {chatUnread > 99 ? '99+' : chatUnread}
             </div>
           )}
         </button>
@@ -345,7 +369,12 @@ export const AiChatAssistant = observer(function AiChatAssistant() {
                     {t('title')}
                   </button>
                   <button
-                    onClick={() => setActiveTab('team')}
+                    onClick={() => {
+                      // Second click while already on the team tab pops a DM
+                      // back out to the channel.
+                      if (activeTab === 'team') setDmPeer(null)
+                      setActiveTab('team')
+                    }}
                     className={`relative px-2.5 py-1 text-[11px] font-medium rounded-full transition-all ${
                       activeTab === 'team'
                         ? 'bg-accent/20 text-accent'
@@ -353,9 +382,9 @@ export const AiChatAssistant = observer(function AiChatAssistant() {
                     }`}
                   >
                     Team
-                    {teamUnread > 0 && activeTab !== 'team' && (
+                    {chatUnread > 0 && activeTab !== 'team' && (
                       <span className="absolute -top-1 -right-1.5 min-w-3.5 h-3.5 px-0.5 rounded-full bg-red-500 text-white text-[9px] font-bold flex items-center justify-center">
-                        {teamUnread > 9 ? '9+' : teamUnread}
+                        {chatUnread > 9 ? '9+' : chatUnread}
                       </span>
                     )}
                   </button>
@@ -509,8 +538,10 @@ export const AiChatAssistant = observer(function AiChatAssistant() {
               </div>
             </div>
 
-            {/* Team chat tab */}
-            {activeTab === 'team' && <TeamChat />}
+            {/* Team chat tab (channel or 1:1 DM thread) */}
+            {activeTab === 'team' && (
+              <TeamChat peer={dmPeer} onBack={() => setDmPeer(null)} />
+            )}
 
             {/* Messages */}
             {activeTab === 'agent' && messages.length > 0 && (

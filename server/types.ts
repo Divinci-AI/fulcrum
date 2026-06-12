@@ -490,8 +490,10 @@ export interface TaskCommentDeletedMessage {
   payload: { taskId: string; commentId: string }
 }
 
-// Team chat fan-out. Tenant-wide channel, so plain broadcast() — every
-// connected client gets it; the table is the durable history.
+// Team chat fan-out. Channel messages (recipientUserId null) go out via
+// plain broadcast() — every connected client gets it. DMs (recipientUserId
+// set) are delivered ONLY to the two participants via broadcastToTopic's
+// `me` + toUserIds targeting; the table is the durable history for both.
 export interface TeamMessageMessage {
   type: 'team:message'
   payload: {
@@ -499,13 +501,22 @@ export interface TeamMessageMessage {
     authorUserId: string
     authorEmail: string | null
     authorName: string | null
+    recipientUserId: string | null
     body: string
     createdAt: string
   }
 }
 export interface TeamMessageDeletedMessage {
   type: 'team:message-deleted'
-  payload: { id: string }
+  // author/recipient included so clients can locate the right cache
+  // (channel vs a specific DM thread) without a refetch.
+  payload: { id: string; authorUserId: string; recipientUserId: string | null }
+}
+// `@mention` inside a team-chat message — targeted to the mentioned user
+// only (me-topic fan-out), so receipt alone implies "you were mentioned".
+export interface ChatMentionedMessage {
+  type: 'chat:mentioned'
+  payload: { messageId: string; mentionedUserId: string; authorEmail: string | null }
 }
 
 // Presence roster. Broadcast on connect/disconnect and page-context
@@ -562,5 +573,6 @@ export type ServerMessage =
   | TaskCommentDeletedMessage
   | TeamMessageMessage
   | TeamMessageDeletedMessage
+  | ChatMentionedMessage
   | PresenceStateMessage
   | ExecutorStatusMessage

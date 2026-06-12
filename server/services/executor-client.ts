@@ -141,7 +141,7 @@ function describeRelayTerminals(): Array<{ terminalId: string; name: string; cwd
  * repository row, but the node defends itself regardless. No shell is ever
  * involved (execFileSync with an argument array). */
 function isSafeRepoUrl(url: string): boolean {
-  return /^(https?:\/\/|git@|ssh:\/\/)[\w.@:\/~+-]+$/.test(url)
+  return /^(https?:\/\/|git@|ssh:\/\/)[\w.@:/~+-]+$/.test(url)
 }
 
 function repoNameFromUrl(url: string): string {

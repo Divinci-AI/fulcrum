@@ -680,6 +680,13 @@
       "when": 1779948000000,
       "tag": "0096_add_task_executor_node",
       "breakpoints": true
+    },
+    {
+      "idx": 97,
+      "version": "6",
+      "when": 1780034400000,
+      "tag": "0097_add_team_message_recipient",
+      "breakpoints": true
     }
   ]
 }
