@@ -8,6 +8,7 @@ import { routeTree } from './routeTree.gen'
 import { StoreProvider } from './stores'
 import './i18n' // Initialize i18n before rendering
 import './index.css'
+import '@uiw/react-markdown-preview/markdown.css'
 
 // Apply zoom from query parameter (for desktop app)
 // This sets the root font-size so all rem-based UI scales natively

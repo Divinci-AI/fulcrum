@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { useTheme } from 'next-themes'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Checkbox } from '@/components/ui/checkbox'
@@ -12,6 +13,7 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { DescriptionTextarea } from '@/components/ui/description-textarea'
+import MarkdownPreview from '@uiw/react-markdown-preview'
 import { DatePickerPopover } from '@/components/ui/date-picker-popover'
 import { TimeEstimatePicker } from '@/components/task/time-estimate-picker'
 import { PriorityPicker } from '@/components/task/priority-picker'
@@ -35,6 +37,7 @@ interface TaskDetailsPanelProps {
 }
 
 export function TaskDetailsPanel({ task }: TaskDetailsPanelProps) {
+  const { resolvedTheme } = useTheme()
   const updateTask = useUpdateTask()
   const acceptTask = useAcceptTask()
   const { data: currentUser } = useCurrentUser()
@@ -304,9 +307,15 @@ export function TaskDetailsPanel({ task }: TaskDetailsPanelProps) {
               </div>
             </div>
           ) : (
-            <div className="prose prose-sm dark:prose-invert max-w-none">
+            <div
+              className="prose prose-sm dark:prose-invert max-w-none"
+              data-color-mode={resolvedTheme === 'light' ? 'light' : 'dark'}
+            >
               {task.description ? (
-                <p className="whitespace-pre-wrap text-sm">{task.description}</p>
+                <MarkdownPreview
+                  source={task.description}
+                  style={{ backgroundColor: 'transparent', fontSize: '14px' }}
+                />
               ) : (
                 <p className="text-sm text-muted-foreground italic">No description</p>
               )}

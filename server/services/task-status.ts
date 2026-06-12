@@ -4,6 +4,7 @@ import { eq } from 'drizzle-orm'
 import { broadcast } from '../websocket/terminal-ws'
 import { sendNotification } from './notification-service'
 import { killClaudeInTerminalsForWorktree } from '../terminal/pty-instance'
+import { fireTaskStatusWebhooks } from './task-webhooks'
 import { log } from '../lib/logger'
 import { calculateNextDueDate, getTodayInTimezone } from '../../shared/date-utils'
 import type { RecurrenceRule } from '../../shared/types'
@@ -179,6 +180,9 @@ export async function updateTaskStatus(
 
   // Only trigger side effects if status actually changed
   if (statusChanged && updated) {
+    // Outbound webhooks (FULCRUM_TASK_WEBHOOK_URLS) — fire-and-forget
+    fireTaskStatusWebhooks(updated, oldStatus, newStatus)
+
     // Send notification when task moves to review (suppressed if user is actively viewing)
     if (newStatus === 'IN_REVIEW') {
       const STALE_MS = 5 * 60 * 1000 // 5 minutes

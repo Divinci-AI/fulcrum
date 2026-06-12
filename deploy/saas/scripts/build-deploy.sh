@@ -80,14 +80,34 @@ else
   log "Skipping build (--skip-build); using existing local $IMAGE_TAG"
 fi
 
-# --- Step 2: stream image to GCE host ---
+# --- Step 2: deliver image to GCE host ---
 SSH_BASE=(gcloud compute ssh "$GCE_INSTANCE" --project="$GCP_PROJECT" --zone="$GCE_ZONE")
 
+GHCR_IMAGE="ghcr.io/divinci-ai/fulcrum:dev"
+GHCR_PAT_LOCAL=$(echo "ghcr.io" | docker-credential-osxkeychain get 2>/dev/null | python3 -c "import json,sys; print(json.load(sys.stdin)['Secret'])" 2>/dev/null || true)
+
 if [ "$SKIP_STREAM" -eq 0 ]; then
-  log "Streaming image to $GCE_INSTANCE (this is the slow step — ~25-30 min over residential up)…"
-  docker save "$IMAGE_TAG" | gzip -1 \
-    | "${SSH_BASE[@]}" --command='gunzip | docker load'
-  log "Stream done."
+  if [ -n "$GHCR_PAT_LOCAL" ]; then
+    # Fast path: push to GHCR (layer dedup — only changed layers upload),
+    # then the host pulls at datacenter bandwidth (~1-2 min).
+    log "Pushing ${IMAGE_TAG} to ${GHCR_IMAGE}…"
+    docker tag "$IMAGE_TAG" "$GHCR_IMAGE"
+    docker push "$GHCR_IMAGE"
+    log "Fast-deploying via GHCR pull on $GCE_INSTANCE…"
+    "${SSH_BASE[@]}" --command="
+      set -e
+      echo '$GHCR_PAT_LOCAL' | docker login ghcr.io -u mikeumus --password-stdin
+      docker pull $GHCR_IMAGE
+      docker tag $GHCR_IMAGE $IMAGE_TAG
+    "
+    log "Pull done."
+  else
+    # Slow path: stream from local machine (~25-30 min over residential upload)
+    log "Streaming image to $GCE_INSTANCE (slow — ~25-30 min; push to GHCR first for fast path)…"
+    docker save "$IMAGE_TAG" | gzip -1 \
+      | "${SSH_BASE[@]}" --command='gunzip | docker load'
+    log "Stream done."
+  fi
 else
   log "Skipping stream (--skip-stream); image must already be on host"
 fi

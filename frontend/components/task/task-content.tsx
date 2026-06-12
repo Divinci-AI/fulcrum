@@ -1,4 +1,6 @@
 import { useState, useRef, useEffect, useMemo } from 'react'
+import { useTheme } from 'next-themes'
+import MarkdownPreview from '@uiw/react-markdown-preview'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { DescriptionTextarea } from '@/components/ui/description-textarea'
@@ -68,6 +70,7 @@ interface TaskContentProps {
 }
 
 export function TaskContent({ task, onDeleted, compact }: TaskContentProps) {
+  const { resolvedTheme } = useTheme()
   const updateTask = useUpdateTask()
   const addTaskTag = useAddTaskTag()
   const removeTaskTag = useRemoveTaskTag()
@@ -354,9 +357,15 @@ export function TaskContent({ task, onDeleted, compact }: TaskContentProps) {
                 </div>
               </div>
             ) : (
-              <div className="prose prose-sm dark:prose-invert max-w-none">
+              <div
+                className="prose prose-sm dark:prose-invert max-w-none"
+                data-color-mode={resolvedTheme === 'light' ? 'light' : 'dark'}
+              >
                 {task.description ? (
-                  <p className={`whitespace-pre-wrap ${compact ? 'text-sm' : ''}`}>{task.description}</p>
+                  <MarkdownPreview
+                    source={task.description}
+                    style={{ backgroundColor: 'transparent', fontSize: compact ? '13px' : '14px' }}
+                  />
                 ) : (
                   <p className={`text-muted-foreground italic ${compact ? 'text-sm' : ''}`}>No description</p>
                 )}
