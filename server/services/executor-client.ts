@@ -13,6 +13,11 @@ import { hostname, platform } from 'node:os'
 import { getSettings, updateSettingByPath } from '../lib/settings'
 import { log } from '../lib/logger'
 import { getPTYManager } from '../terminal/pty-instance'
+import { execFileSync } from 'node:child_process'
+import { existsSync, mkdirSync } from 'node:fs'
+import { basename, join } from 'node:path'
+import { getWorktreeBasePath } from '../lib/settings'
+import { createGitWorktree } from '../lib/git-utils'
 
 const HEARTBEAT_MS = 25_000
 const BACKOFF_BASE_MS = 1_000
@@ -81,6 +86,11 @@ interface RelayInbound {
     cols?: number
     rows?: number
     data?: string
+    // relay:worktree-init fields
+    taskId?: string
+    repoUrl?: string
+    branch?: string
+    baseBranch?: string
   }
 }
 
@@ -127,8 +137,63 @@ function describeRelayTerminals(): Array<{ terminalId: string; name: string; cwd
   return out
 }
 
+/** Accept only URL-shaped git remotes — the hub relays this string from a
+ * repository row, but the node defends itself regardless. No shell is ever
+ * involved (execFileSync with an argument array). */
+function isSafeRepoUrl(url: string): boolean {
+  return /^(https?:\/\/|git@|ssh:\/\/)[\w.@:\/~+-]+$/.test(url)
+}
+
+function repoNameFromUrl(url: string): string {
+  const tail = url.split('/').pop() ?? 'repo'
+  return tail.replace(/\.git$/, '') || 'repo'
+}
+
+/** PR 3: materialize a worktree for a hub task on this node. Clones the
+ * repo if absent (using THIS machine's git credentials — they never leave
+ * the node), then creates the branch + worktree. */
+function handleWorktreeInit(p: NonNullable<RelayInbound['payload']>): void {
+  const { reqId, repoUrl, branch, baseBranch } = p
+  if (!reqId) return
+  const fail = (error: string) =>
+    sendToHub({ type: 'relay:worktree-ready', payload: { reqId, ok: false, error } })
+
+  if (!repoUrl || !branch || !baseBranch) return fail('repoUrl, branch, and baseBranch are required')
+  if (!isSafeRepoUrl(repoUrl)) return fail('Unrecognized repository URL shape')
+
+  try {
+    const reposDir = getSettings().paths.defaultGitReposDir
+    const repoName = repoNameFromUrl(repoUrl)
+    const repoPath = join(reposDir, repoName)
+
+    if (!existsSync(repoPath)) {
+      log.server.info('Executor cloning repository for worktree init', { repoUrl, repoPath })
+      mkdirSync(reposDir, { recursive: true })
+      execFileSync('git', ['clone', repoUrl, repoPath], { stdio: 'pipe', timeout: 150_000 })
+    }
+
+    const worktreePath = join(getWorktreeBasePath(), basename(repoPath), branch)
+    const result = createGitWorktree(repoPath, worktreePath, branch, baseBranch)
+    if (!result.success) return fail(result.error ?? 'Failed to create worktree')
+
+    sendToHub({
+      type: 'relay:worktree-ready',
+      payload: { reqId, ok: true, worktreePath, repoPath, repoName, branch },
+    })
+    log.server.info('Executor worktree ready', { worktreePath, branch })
+  } catch (err) {
+    fail(err instanceof Error ? err.message : String(err))
+  }
+}
+
 async function handleRelayMessage(message: RelayInbound): Promise<void> {
   const p = message.payload ?? {}
+
+  if (message.type === 'relay:worktree-init') {
+    handleWorktreeInit(p)
+    return
+  }
+
   const ptyManager = getPTYManager()
 
   switch (message.type) {

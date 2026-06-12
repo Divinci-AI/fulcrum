@@ -25,6 +25,7 @@ import {
 } from '../services/task-comment-service'
 import { requireUser } from '../middleware/current-user'
 import { grantCreatorAdmin, ensureAssigneeViewer, effectiveRole, roleSatisfies } from '../services/access-control-service'
+import { relayInitWorktree } from '../websocket/executor-ws'
 import { mentions } from '../db'
 import { log } from '../lib/logger'
 import { createGitWorktree, copyFilesToWorktree } from '../lib/git-utils'
@@ -628,6 +629,79 @@ app.post('/:id/initialize-worktree', async (c) => {
     return c.json(updated ? toApiResponse(updated, true) : null)
   } catch (err) {
     return c.json({ error: err instanceof Error ? err.message : 'Failed to initialize worktree task' }, 400)
+  }
+})
+
+// POST /api/tasks/:id/initialize-on-node — D-18 PR 3. Materialize this
+// task's worktree on one of the caller's execution nodes: the node clones
+// the repo if absent (its own git credentials, which never leave the
+// machine) and creates the branch + worktree. On success the task stores
+// the NODE-LOCAL paths plus executorNodeId, so the terminal node picker
+// defaults to that node and "Start terminal" launches the agent there
+// via the PR 2 relay.
+app.post('/:id/initialize-on-node', async (c) => {
+  const id = c.req.param('id')
+  try {
+    const user = requireUser(c as unknown as Parameters<typeof requireUser>[0])
+    const existing = db.select().from(tasks).where(eq(tasks.id, id)).get()
+    if (!existing) return c.json({ error: 'Task not found' }, 404)
+    const role = effectiveRole(user.id, 'task', id)
+    if (!roleSatisfies(role, 'viewer')) return c.json({ error: 'Task not found' }, 404)
+    if (!roleSatisfies(role, 'editor')) return c.json({ error: 'editor role required' }, 403)
+    if (existing.worktreePath) return c.json({ error: 'Task already has worktree context' }, 400)
+
+    const body = await c.req.json<{ nodeId?: string; branch?: string; baseBranch?: string }>()
+    if (!body.nodeId) return c.json({ error: 'nodeId is required' }, 400)
+    if (!existing.repositoryId) return c.json({ error: 'Task has no linked repository' }, 400)
+
+    const repo = db.select().from(repositories).where(eq(repositories.id, existing.repositoryId)).get()
+    if (!repo?.remoteUrl) {
+      return c.json({ error: 'Linked repository has no remote URL — nodes clone over the remote' }, 400)
+    }
+
+    // Branch generation mirrors the local initialize-worktree path.
+    const slug = existing.title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 50)
+    const suffix = Math.random().toString(36).slice(2, 6)
+    const cleanPrefix = existing.prefix?.replace(/\/+$/, '')
+    const branch = body.branch?.trim() || (cleanPrefix ? `${cleanPrefix}/${slug}-${suffix}` : `${slug}-${suffix}`)
+    const baseBranch = body.baseBranch?.trim() || existing.baseBranch || 'main'
+
+    const ready = await new Promise<
+      | { ok: true; info: { worktreePath: string; repoPath: string; repoName: string; branch: string } }
+      | { ok: false; error: string }
+    >((resolve) => {
+      relayInitWorktree(
+        { nodeId: body.nodeId!, taskId: id, repoUrl: repo.remoteUrl!, branch, baseBranch },
+        user.id,
+        {
+          onReady: (info) => resolve({ ok: true, info }),
+          onError: (error) => resolve({ ok: false, error }),
+        }
+      )
+    })
+    if (!ready.ok) return c.json({ error: ready.error }, 502)
+
+    const now = new Date().toISOString()
+    db.update(tasks)
+      .set({
+        worktreePath: ready.info.worktreePath,
+        repoPath: ready.info.repoPath,
+        repoName: repo.displayName ?? ready.info.repoName,
+        branch: ready.info.branch,
+        baseBranch,
+        type: 'worktree',
+        executorNodeId: body.nodeId,
+        updatedAt: now,
+      })
+      .where(eq(tasks.id, id))
+      .run()
+    broadcast({ type: 'task:updated', payload: { taskId: id } })
+
+    const updated = db.select().from(tasks).where(eq(tasks.id, id)).get()
+    return c.json(updated ? toApiResponse(updated, true) : null)
+  } catch (err) {
+    if (err instanceof HTTPException) throw err
+    return c.json({ error: err instanceof Error ? err.message : 'Failed to initialize on node' }, 400)
   }
 })
 

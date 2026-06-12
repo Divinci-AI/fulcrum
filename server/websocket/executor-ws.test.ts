@@ -13,6 +13,7 @@ import {
   relayAttach,
   relayCreateTerminal,
   relayForward,
+  relayInitWorktree,
   setExecutorBroadcast,
 } from './executor-ws'
 
@@ -304,6 +305,56 @@ describe('executor-ws', () => {
       expect(listRelayTerminals(attackerId).length).toBe(0)
 
       nodeA.handlers.onClose?.(closeEvent, nodeA.sock.ws)
+    })
+
+    test('worktree-init round-trips with node-scoped replies (PR 3)', () => {
+      const node = registerNode('wt-owner@example.com', 'node-wt')
+      const intruder = registerNode('wt-intruder@example.com', 'node-intruder')
+
+      let ready: { worktreePath: string; branch: string } | null = null
+      let error: string | null = null
+      relayInitWorktree(
+        { nodeId: 'node-wt', taskId: 't1', repoUrl: 'https://github.com/acme/app.git', branch: 'feat-x', baseBranch: 'main' },
+        node.userId,
+        { onReady: (info) => { ready = info }, onError: (e) => { error = e } }
+      )
+
+      const sent = node.sock.sent.find((m) => m.type === 'relay:worktree-init')
+      expect(sent).toBeDefined()
+      const reqId = (sent!.payload as { reqId: string }).reqId
+
+      // A reply from a DIFFERENT node with the right reqId is ignored.
+      intruder.handlers.onMessage?.(
+        msgEvent({ type: 'relay:worktree-ready', payload: { reqId, ok: true, worktreePath: '/evil', repoPath: '/evil', repoName: 'evil', branch: 'feat-x' } }),
+        intruder.sock.ws
+      )
+      expect(ready).toBeNull()
+
+      // The real node's reply resolves it.
+      node.handlers.onMessage?.(
+        msgEvent({ type: 'relay:worktree-ready', payload: { reqId, ok: true, worktreePath: '/home/u/.fulcrum/worktrees/app/feat-x', repoPath: '/home/u/repos/app', repoName: 'app', branch: 'feat-x' } }),
+        node.sock.ws
+      )
+      expect(error).toBeNull()
+      expect(ready!.worktreePath).toBe('/home/u/.fulcrum/worktrees/app/feat-x')
+      expect(ready!.branch).toBe('feat-x')
+
+      node.handlers.onClose?.(closeEvent, node.sock.ws)
+      intruder.handlers.onClose?.(closeEvent, intruder.sock.ws)
+    })
+
+    test('worktree-init is owner-only', () => {
+      const node = registerNode('wt-victim@example.com', 'node-wtv')
+      const attackerId = insertUser('wt-attacker@example.com')
+      let error: string | null = null
+      relayInitWorktree(
+        { nodeId: 'node-wtv', taskId: 't2', repoUrl: 'https://github.com/acme/app.git', branch: 'b', baseBranch: 'main' },
+        attackerId,
+        { onReady: () => { throw new Error('must not init') }, onError: (e) => { error = e } }
+      )
+      expect(error).toBe('Execution node not found')
+      expect(node.sock.sent.some((m) => m.type === 'relay:worktree-init')).toBe(false)
+      node.handlers.onClose?.(closeEvent, node.sock.ws)
     })
 
     test('create against an offline node errors immediately', () => {

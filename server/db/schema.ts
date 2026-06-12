@@ -47,6 +47,10 @@ export const tasks = sqliteTable('tasks', {
   // Approval workflow: the user who signs off that the task is satisfied.
   // Nullable FK → users.id, same conventions as assigneeUserId.
   approverUserId: text('approver_user_id'),
+  // D-18 PR 3: when the task's worktree lives on an execution node, this is
+  // the node id — worktreePath/repoPath are then node-local paths, and the
+  // terminal node picker defaults to this node.
+  executorNodeId: text('executor_node_id'),
   // Set when the approver accepts the task as satisfied (the accept endpoint
   // also moves status to DONE). Cleared if the task re-enters an active state.
   acceptedAt: text('accepted_at'),

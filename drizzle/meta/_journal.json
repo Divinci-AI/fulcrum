@@ -673,6 +673,13 @@
       "when": 1779861600000,
       "tag": "0095_add_executor_nodes",
       "breakpoints": true
+    },
+    {
+      "idx": 96,
+      "version": "6",
+      "when": 1779948000000,
+      "tag": "0096_add_task_executor_node",
+      "breakpoints": true
     }
   ]
 }

@@ -79,12 +79,22 @@ Backpressure: terminal output is small relative to WS capacity; v1 relies
 on WS buffering; scrollback caps are enforced node-side by the existing
 buffer manager.
 
-## PR 3 — Worktree + agent dispatch
+## PR 3 — Worktree + agent dispatch (shipped)
 
-`relay:worktree-init { taskId, repoUrl, branch, baseBranch }` so a SaaS
-task can materialize a worktree on the node (clone if the repo is absent),
-then reuse PR 2 to launch the agent in it. Repo access uses the node's own
-git credentials — they never leave the machine.
+`relay:worktree-init { reqId, taskId, repoUrl, branch, baseBranch }` →
+`relay:worktree-ready { reqId, ok, worktreePath, repoPath, repoName,
+branch, error? }`. POST /api/tasks/:id/initialize-on-node (editor on the
+task + owner of the node) derives the branch like the local initializer,
+relays the init, and on success stores the NODE-LOCAL paths plus
+`executorNodeId` on the task. The node clones over the repository's
+remote URL if absent (execFileSync arg-array — no shell; URL shape
+validated node-side) using its own git credentials, which never leave
+the machine. Replies are reqId+node-scoped, so another node can't spoof
+a ready. Agent dispatch needs nothing new: "Start terminal" defaults its
+node picker to `executorNodeId`, and the existing client-side startup
+flow writes the agent command through the PR 2 relay. The hub's own git
+endpoints don't operate on node-local paths (they error gracefully);
+node-side git surfaces are a future PR.
 
 ## Failure semantics
 

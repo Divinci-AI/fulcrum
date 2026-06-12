@@ -41,6 +41,7 @@ interface ExecutorClientMessage {
     | 'relay:terminal-output'
     | 'relay:terminal-buffer'
     | 'relay:terminal-exit'
+    | 'relay:worktree-ready'
   payload?: {
     nodeId?: string
     name?: string
@@ -56,6 +57,11 @@ interface ExecutorClientMessage {
     error?: string
     data?: string
     exitCode?: number
+    // relay:worktree-ready fields
+    worktreePath?: string
+    repoPath?: string
+    repoName?: string
+    branch?: string
   }
 }
 
@@ -285,6 +291,61 @@ export function relayAttach(
   return true
 }
 
+// PR 3: worktree initialization. Clones can be slow — generous timeout.
+const RELAY_INIT_TIMEOUT_MS = 180_000
+
+export interface WorktreeReadyInfo {
+  worktreePath: string
+  repoPath: string
+  repoName: string
+  branch: string
+}
+
+const pendingInits = new Map<
+  string,
+  {
+    nodeId: string
+    timer: ReturnType<typeof setTimeout>
+    onReady: (info: WorktreeReadyInfo) => void
+    onError: (error: string) => void
+  }
+>()
+
+/** Ask a node to materialize a git worktree for a task. Owner-gated like
+ * every other browser-initiated relay operation. */
+export function relayInitWorktree(
+  options: { nodeId: string; taskId: string; repoUrl: string; branch: string; baseBranch: string },
+  requesterUserId: string | null,
+  callbacks: { onReady: (info: WorktreeReadyInfo) => void; onError: (error: string) => void }
+): void {
+  const conn = connectionForNode(options.nodeId)
+  if (!conn || !requesterUserId || conn.ownerUserId !== requesterUserId) {
+    callbacks.onError('Execution node not found')
+    return
+  }
+  const reqId = crypto.randomUUID()
+  const timer = setTimeout(() => {
+    pendingInits.delete(reqId)
+    callbacks.onError('Execution node did not finish initializing the worktree (timeout)')
+  }, RELAY_INIT_TIMEOUT_MS)
+  pendingInits.set(reqId, { nodeId: options.nodeId, timer, onReady: callbacks.onReady, onError: callbacks.onError })
+  const sent = sendToNode(options.nodeId, {
+    type: 'relay:worktree-init',
+    payload: {
+      reqId,
+      taskId: options.taskId,
+      repoUrl: options.repoUrl,
+      branch: options.branch,
+      baseBranch: options.baseBranch,
+    },
+  })
+  if (!sent) {
+    clearTimeout(timer)
+    pendingInits.delete(reqId)
+    callbacks.onError('Execution node is offline')
+  }
+}
+
 /** Rebuild the routing map for a node from its registration payload. */
 function syncNodeTerminals(nodeId: string, ownerUserId: string, descriptors: RelayTerminalDescriptor[]): void {
   const reported = new Set(descriptors.map((d) => d.terminalId))
@@ -350,6 +411,25 @@ function handleRelayMessage(nodeId: string, message: ExecutorClientMessage): voi
       const waiters = pendingAttaches.get(p.terminalId)
       pendingAttaches.delete(p.terminalId)
       for (const cb of waiters ?? []) cb(p.data ?? '')
+      return
+    }
+    case 'relay:worktree-ready': {
+      if (!p.reqId) return
+      const pending = pendingInits.get(p.reqId)
+      // Replies only count from the node the request was sent to.
+      if (!pending || pending.nodeId !== nodeId) return
+      pendingInits.delete(p.reqId)
+      clearTimeout(pending.timer)
+      if (p.ok && p.worktreePath && p.repoPath && p.repoName && p.branch) {
+        pending.onReady({
+          worktreePath: p.worktreePath,
+          repoPath: p.repoPath,
+          repoName: p.repoName,
+          branch: p.branch,
+        })
+      } else {
+        pending.onError(p.error ?? 'Execution node failed to initialize the worktree')
+      }
       return
     }
     case 'relay:terminal-exit': {

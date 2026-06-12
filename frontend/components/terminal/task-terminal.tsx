@@ -34,9 +34,12 @@ interface TaskTerminalProps {
   serverPort?: number
   autoFocus?: boolean
   isScratch?: boolean
+  /** D-18 PR 3: preselect this execution node in the Start-terminal picker
+   * (set from task.executorNodeId when the worktree lives on a node). */
+  defaultNodeId?: string | null
 }
 
-export function TaskTerminal({ taskName, cwd, taskId, className, agent = 'claude', aiMode, description, startupScript, agentOptions, opencodeModel, serverPort = 7777, autoFocus = false, isScratch = false }: TaskTerminalProps) {
+export function TaskTerminal({ taskName, cwd, taskId, className, agent = 'claude', aiMode, description, startupScript, agentOptions, opencodeModel, serverPort = 7777, autoFocus = false, isScratch = false, defaultNodeId = null }: TaskTerminalProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const termRef = useRef<AnyTerminal | null>(null)
   const hasFocusedRef = useRef(false)
@@ -51,7 +54,8 @@ export function TaskTerminal({ taskName, cwd, taskId, className, agent = 'claude
   // but creating a new one requires the user to click "Start terminal".
   const [createRequested, setCreateRequested] = useState(false)
   // D-18 PR 2: which execution node to run on. null = this server.
-  const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null)
+  // PR 3: defaults to the node hosting the task's worktree, if any.
+  const [selectedNodeId, setSelectedNodeId] = useState<string | null>(defaultNodeId)
   const { data: executorNodes } = useExecutorNodes()
   const onlineNodes = (executorNodes ?? []).filter((n) => n.online)
   const [isStartingAgent, setIsStartingAgent] = useState(false)

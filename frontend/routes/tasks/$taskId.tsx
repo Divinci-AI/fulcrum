@@ -1012,6 +1012,7 @@ function TaskView() {
               taskName={task.title}
               cwd={task.worktreePath}
               taskId={task.id}
+              defaultNodeId={task.executorNodeId ?? null}
               agent={task.agent}
               aiMode={aiMode}
               description={aiModeDescription}
@@ -1112,6 +1113,7 @@ function TaskView() {
               taskName={task.title}
               cwd={task.worktreePath}
               taskId={task.id}
+              defaultNodeId={task.executorNodeId ?? null}
               agent={task.agent}
               aiMode={aiMode}
               description={aiModeDescription}

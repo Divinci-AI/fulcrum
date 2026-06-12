@@ -160,6 +160,9 @@ export interface Task {
   // (which also moves status to DONE) and cleared when the task is reopened.
   approverUserId: string | null
   acceptedAt: string | null
+  /** D-18 PR 3: execution node hosting this task's worktree (optional —
+   * absent/null means the worktree is local to the serving instance). */
+  executorNodeId?: string | null
   // D-14 PR 1: set when status transitions to DONE/CANCELED; cleared on
   // transition back to active. Used by the Archive view for sort + display.
   // Distinct from updatedAt because any post-completion edit would
