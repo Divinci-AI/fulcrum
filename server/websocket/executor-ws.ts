@@ -112,6 +112,9 @@ export interface RelayTerminalInfo {
   positionInTab?: number
   /** Which execution node this terminal lives on. */
   nodeId: string
+  /** Owner of the node — every relay operation from the browser side is
+   * gated on this (nodes and their terminals are strictly per-user). */
+  ownerUserId: string
 }
 
 const RELAY_CREATE_TIMEOUT_MS = 10_000
@@ -123,6 +126,13 @@ const pendingCreates = new Map<
 >()
 // attach waiters: terminalId → callbacks expecting the replay buffer
 const pendingAttaches = new Map<string, Array<(buffer: string) => void>>()
+
+function connectionForNode(nodeId: string): ExecutorConnection | null {
+  for (const conn of connections.values()) {
+    if (conn.nodeId === nodeId) return conn
+  }
+  return null
+}
 
 function socketForNode(nodeId: string): WSContext | null {
   for (const [ws, conn] of connections.entries()) {
@@ -146,17 +156,28 @@ export function isRelayTerminal(terminalId: string): boolean {
   return relayTerminals.has(terminalId)
 }
 
-export function listRelayTerminals(): RelayTerminalInfo[] {
-  return Array.from(relayTerminals.values())
+/** Relay terminals visible to `forUserId` — strictly the ones living on
+ * that user's own nodes. Anonymous browsers see none. */
+export function listRelayTerminals(forUserId: string | null): RelayTerminalInfo[] {
+  if (!forUserId) return []
+  return Array.from(relayTerminals.values()).filter((t) => t.ownerUserId === forUserId)
 }
 
 export function relayCreateTerminal(
   options: { nodeId: string; name: string; cwd?: string; cols: number; rows: number; taskId?: string },
+  requesterUserId: string | null,
   callbacks: { onCreated: (info: RelayTerminalInfo) => void; onError: (error: string) => void }
 ): void {
   const { nodeId } = options
-  if (!socketForNode(nodeId)) {
+  const conn = connectionForNode(nodeId)
+  if (!conn) {
     callbacks.onError('Execution node is offline')
+    return
+  }
+  // Nodes are per-user: only the node's owner may run terminals on it.
+  if (!requesterUserId || conn.ownerUserId !== requesterUserId) {
+    log.ws.warn('Relay create denied: requester does not own node', { nodeId, requesterUserId })
+    callbacks.onError('Execution node not found')
     return
   }
   const terminalId = crypto.randomUUID()
@@ -202,6 +223,7 @@ export function relayCreateTerminal(
     rows: options.rows,
     createdAt: Date.now(),
     nodeId,
+    ownerUserId: conn.ownerUserId,
   }
   const originalOnCreated = pending.onCreated
   pending.onCreated = () => originalOnCreated(baseInfo)
@@ -211,6 +233,7 @@ export function relayCreateTerminal(
  * when the terminal isn't relayed (caller falls through to the local PTY). */
 export function relayForward(
   terminalId: string,
+  requesterUserId: string | null,
   message:
     | { kind: 'input'; data: string }
     | { kind: 'resize'; cols: number; rows: number }
@@ -218,6 +241,13 @@ export function relayForward(
 ): boolean {
   const info = relayTerminals.get(terminalId)
   if (!info) return false
+  // Owner-only. Returning true (handled, silently dropped) rather than
+  // false: falling through to the local PTY for a relay id would be wrong,
+  // and an attacker probing ids learns nothing.
+  if (!requesterUserId || info.ownerUserId !== requesterUserId) {
+    log.ws.warn('Relay forward denied: requester does not own terminal', { terminalId, requesterUserId })
+    return true
+  }
   if (message.kind === 'input') {
     sendToNode(info.nodeId, { type: 'relay:terminal-input', payload: { terminalId, data: message.data } })
   } else if (message.kind === 'resize') {
@@ -235,11 +265,16 @@ export function relayForward(
 /** Request a buffer replay from the node; resolves via relay:terminal-buffer. */
 export function relayAttach(
   terminalId: string,
+  requesterUserId: string | null,
   opts: { cols?: number; rows?: number },
   onBuffer: (buffer: string) => void
 ): boolean {
   const info = relayTerminals.get(terminalId)
   if (!info) return false
+  if (!requesterUserId || info.ownerUserId !== requesterUserId) {
+    log.ws.warn('Relay attach denied: requester does not own terminal', { terminalId, requesterUserId })
+    return true // handled: no buffer for non-owners
+  }
   const waiters = pendingAttaches.get(terminalId) ?? []
   waiters.push(onBuffer)
   pendingAttaches.set(terminalId, waiters)
@@ -251,7 +286,7 @@ export function relayAttach(
 }
 
 /** Rebuild the routing map for a node from its registration payload. */
-function syncNodeTerminals(nodeId: string, descriptors: RelayTerminalDescriptor[]): void {
+function syncNodeTerminals(nodeId: string, ownerUserId: string, descriptors: RelayTerminalDescriptor[]): void {
   const reported = new Set(descriptors.map((d) => d.terminalId))
   // Drop terminals the node no longer has (it restarted, dtach died, etc.)
   for (const [id, info] of relayTerminals.entries()) {
@@ -271,6 +306,7 @@ function syncNodeTerminals(nodeId: string, descriptors: RelayTerminalDescriptor[
         rows: d.rows,
         createdAt: Date.now(),
         nodeId,
+        ownerUserId,
       })
     }
   }
@@ -409,7 +445,7 @@ export function makeExecutorWebSocketHandlers(c: Context<CurrentUserContext>): W
         }
         log.ws.info('Executor node registered', { nodeId, name, userId: user.id })
         // PR 2: rebuild the relay routing map from the node's live list.
-        syncNodeTerminals(nodeId, message.payload?.terminals ?? [])
+        syncNodeTerminals(nodeId, user.id, message.payload?.terminals ?? [])
         broadcastNodeStatus(nodeId, true)
         return
       }

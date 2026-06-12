@@ -194,7 +194,7 @@ function buildHandlers(identity: SocketIdentity): WSEvents {
 
     // PR 2: node-backed (relay) terminals appear alongside local ones —
     // the browser protocol doesn't distinguish them.
-    const terminalsList = [...ptyManager.listTerminals(), ...listRelayTerminals()]
+    const terminalsList = [...ptyManager.listTerminals(), ...listRelayTerminals(clientData.userId)]
     log.ws.debug('Sending terminals:list to new client', {
       clientId: clientData.id,
       terminalCount: terminalsList.length,
@@ -247,6 +247,7 @@ function buildHandlers(identity: SocketIdentity): WSEvents {
           if (nodeId) {
             relayCreateTerminal(
               { nodeId, name, cwd, cols, rows, taskId },
+              clientData.userId,
               {
                 onCreated: (info) => {
                   clientData.attachedTerminals.add(info.id)
@@ -352,7 +353,7 @@ function buildHandlers(identity: SocketIdentity): WSEvents {
         case 'terminal:destroy': {
           const { terminalId, force, reason } = message.payload
           if (isRelayTerminal(terminalId)) {
-            relayForward(terminalId, { kind: 'destroy' })
+            relayForward(terminalId, clientData.userId, { kind: 'destroy' })
             break
           }
           const terminalInfo = ptyManager.getInfo(terminalId)
@@ -421,13 +422,13 @@ function buildHandlers(identity: SocketIdentity): WSEvents {
 
         case 'terminal:input': {
           log.ws.debug('terminal:input', { terminalId: message.payload.terminalId, dataLen: message.payload.data.length })
-          if (relayForward(message.payload.terminalId, { kind: 'input', data: message.payload.data })) break
+          if (relayForward(message.payload.terminalId, clientData.userId, { kind: 'input', data: message.payload.data })) break
           ptyManager.write(message.payload.terminalId, message.payload.data)
           break
         }
 
         case 'terminal:resize': {
-          if (relayForward(message.payload.terminalId, { kind: 'resize', cols: message.payload.cols, rows: message.payload.rows })) break
+          if (relayForward(message.payload.terminalId, clientData.userId, { kind: 'resize', cols: message.payload.cols, rows: message.payload.rows })) break
           ptyManager.resize(message.payload.terminalId, message.payload.cols, message.payload.rows)
           break
         }
@@ -436,7 +437,7 @@ function buildHandlers(identity: SocketIdentity): WSEvents {
           const { terminalId, cols, rows } = message.payload
           // PR 2: node-backed terminals replay their buffer from the node.
           {
-            const handled = relayAttach(terminalId, { cols, rows }, (buffer) => {
+            const handled = relayAttach(terminalId, clientData.userId, { cols, rows }, (buffer) => {
               clientData.attachedTerminals.add(terminalId)
               sendTo(ws, { type: 'terminal:attached', payload: { terminalId, buffer } })
             })
@@ -492,7 +493,7 @@ function buildHandlers(identity: SocketIdentity): WSEvents {
         case 'terminals:list': {
           sendTo(ws, {
             type: 'terminals:list',
-            payload: { terminals: [...ptyManager.listTerminals(), ...listRelayTerminals()] },
+            payload: { terminals: [...ptyManager.listTerminals(), ...listRelayTerminals(clientData.userId)] },
           })
           break
         }

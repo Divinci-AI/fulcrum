@@ -168,6 +168,7 @@ describe('executor-ws', () => {
       let error: string | null = null
       relayCreateTerminal(
         { nodeId: 'node-r1', name: 'Task Shell', cwd: '/work', cols: 80, rows: 24 },
+        node.userId,
         { onCreated: (info) => { created = info }, onError: (e) => { error = e } }
       )
 
@@ -186,10 +187,13 @@ describe('executor-ws', () => {
       expect(error).toBeNull()
       expect(created!.id).toBe(terminalId)
       expect(isRelayTerminal(terminalId)).toBe(true)
-      expect(listRelayTerminals().some((t) => t.id === terminalId)).toBe(true)
+      expect(listRelayTerminals(node.userId).some((t) => t.id === terminalId)).toBe(true)
+      // ...and invisible to everyone else (anonymous and other users).
+      expect(listRelayTerminals(null).length).toBe(0)
+      expect(listRelayTerminals('someone-else').length).toBe(0)
 
       // Input/resize forward to the node socket.
-      expect(relayForward(terminalId, { kind: 'input', data: 'ls\n' })).toBe(true)
+      expect(relayForward(terminalId, node.userId, { kind: 'input', data: 'ls\n' })).toBe(true)
       expect(node.sock.sent.some((m) => m.type === 'relay:terminal-input')).toBe(true)
 
       // Output from the owner node reaches browsers via the injected fan-out.
@@ -203,7 +207,7 @@ describe('executor-ws', () => {
 
       // Attach round-trip: hub asks, node replies with the buffer.
       let buffer: string | null = null
-      expect(relayAttach(terminalId, { cols: 100, rows: 30 }, (b) => { buffer = b })).toBe(true)
+      expect(relayAttach(terminalId, node.userId, { cols: 100, rows: 30 }, (b) => { buffer = b })).toBe(true)
       expect(node.sock.sent.some((m) => m.type === 'relay:terminal-attach')).toBe(true)
       node.handlers.onMessage?.(
         msgEvent({ type: 'relay:terminal-buffer', payload: { terminalId, data: 'replayed' } }),
@@ -212,7 +216,7 @@ describe('executor-ws', () => {
       expect(buffer).toBe('replayed')
 
       // Destroy clears the registry.
-      expect(relayForward(terminalId, { kind: 'destroy' })).toBe(true)
+      expect(relayForward(terminalId, node.userId, { kind: 'destroy' })).toBe(true)
       expect(isRelayTerminal(terminalId)).toBe(false)
 
       node.handlers.onClose?.(closeEvent, node.sock.ws)
@@ -268,10 +272,45 @@ describe('executor-ws', () => {
       handlers.onClose?.(closeEvent, sock.ws)
     })
 
+    test('browser-side relay operations are owner-only (IDOR hardening)', () => {
+      const nodeA = registerNode('victim@example.com', 'node-v', [
+        { terminalId: 'victim-term', name: 'V', cwd: '/v', cols: 80, rows: 24 },
+      ])
+      const attackerId = insertUser('attacker@example.com')
+
+      // Create on someone else's node → denied with a non-enumerating error.
+      let error: string | null = null
+      relayCreateTerminal(
+        { nodeId: 'node-v', name: 'Evil', cols: 80, rows: 24 },
+        attackerId,
+        { onCreated: () => { throw new Error('must not create') }, onError: (e) => { error = e } }
+      )
+      expect(error).toBe('Execution node not found')
+
+      // Input/destroy/attach on someone else's terminal → swallowed
+      // (handled=true so it never falls through to the local PTY), and
+      // nothing reaches the node socket.
+      const sentBefore = nodeA.sock.sent.length
+      expect(relayForward('victim-term', attackerId, { kind: 'input', data: 'rm -rf /\n' })).toBe(true)
+      expect(relayForward('victim-term', null, { kind: 'destroy' })).toBe(true)
+      let gotBuffer = false
+      expect(relayAttach('victim-term', attackerId, {}, () => { gotBuffer = true })).toBe(true)
+      expect(nodeA.sock.sent.length).toBe(sentBefore)
+      expect(gotBuffer).toBe(false)
+      expect(isRelayTerminal('victim-term')).toBe(true) // not destroyed
+
+      // The owner's list shows it; the attacker's doesn't.
+      expect(listRelayTerminals(nodeA.userId).some((t) => t.id === 'victim-term')).toBe(true)
+      expect(listRelayTerminals(attackerId).length).toBe(0)
+
+      nodeA.handlers.onClose?.(closeEvent, nodeA.sock.ws)
+    })
+
     test('create against an offline node errors immediately', () => {
       let error: string | null = null
       relayCreateTerminal(
         { nodeId: 'no-such-node', name: 'X', cols: 80, rows: 24 },
+        'any-user',
         { onCreated: () => {}, onError: (e) => { error = e } }
       )
       expect(error).toBe('Execution node is offline')
