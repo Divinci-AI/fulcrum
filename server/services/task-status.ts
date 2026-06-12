@@ -1,59 +1,12 @@
-import { db, type Task, repositories } from '../db'
+import { db, type Task } from '../db'
 import { tasks, taskTags, terminalViewState } from '../db/schema'
 import { eq } from 'drizzle-orm'
 import { broadcast } from '../websocket/terminal-ws'
 import { sendNotification } from './notification-service'
 import { killClaudeInTerminalsForWorktree } from '../terminal/pty-instance'
 import { log } from '../lib/logger'
-import { getWorktreeBasePath, getScratchBasePath } from '../lib/settings'
-import { createGitWorktree, copyFilesToWorktree } from '../lib/git-utils'
-import { execSync } from 'child_process'
-import * as fs from 'fs'
-import * as path from 'path'
 import { calculateNextDueDate, getTodayInTimezone } from '../../shared/date-utils'
 import type { RecurrenceRule } from '../../shared/types'
-
-// Generate worktree path and branch name for a task
-function generateWorktreeInfo(
-  repoPath: string,
-  taskTitle: string,
-  prefix?: string | null
-): { worktreePath: string; branch: string } {
-  const worktreesDir = getWorktreeBasePath()
-
-  // Generate branch name from task title
-  const slugifiedTitle = taskTitle
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-|-$/g, '')
-    .slice(0, 50)
-
-  const suffix = Math.random().toString(36).slice(2, 6)
-  const cleanPrefix = prefix?.replace(/\/+$/, '')
-  const branch = cleanPrefix ? `${cleanPrefix}/${slugifiedTitle}-${suffix}` : `${slugifiedTitle}-${suffix}`
-  const worktreeName = branch
-  const repoName = path.basename(repoPath)
-  const worktreePath = path.join(worktreesDir, repoName, worktreeName)
-
-  return { worktreePath, branch }
-}
-
-// Generate scratch directory path for a task
-function generateScratchDirInfo(taskTitle: string): { dirPath: string } {
-  const scratchDir = getScratchBasePath()
-
-  const slugifiedTitle = taskTitle
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-|-$/g, '')
-    .slice(0, 50)
-
-  const suffix = Math.random().toString(36).slice(2, 6)
-  const dirName = `${slugifiedTitle}-${suffix}`
-  const dirPath = path.join(scratchDir, dirName)
-
-  return { dirPath }
-}
 
 /**
  * Create the next recurrence of a completed repeating task.
@@ -172,7 +125,7 @@ export async function updateTaskStatus(
 
   // Build update object
   const now = new Date().toISOString()
-  const updateData: { status: string; updatedAt: string; position?: number; startedAt?: string; pinned?: boolean; worktreePath?: string; branch?: string; repoPath?: string; repoName?: string; baseBranch?: string; completedAt?: string | null } = {
+  const updateData: { status: string; updatedAt: string; position?: number; startedAt?: string; pinned?: boolean; worktreePath?: string; branch?: string; repoPath?: string; repoName?: string; baseBranch?: string; completedAt?: string | null; acceptedAt?: string | null } = {
     status: newStatus,
     updatedAt: now,
   }
@@ -196,76 +149,21 @@ export async function updateTaskStatus(
       updateData.completedAt = now
     } else if (!isTerminal && wasTerminal) {
       updateData.completedAt = null
+      // A reopened task is no longer accepted — the approver signs off
+      // again once it comes back through review.
+      updateData.acceptedAt = null
     }
     // DONE↔CANCELED (both terminal): leave the existing completedAt alone.
   }
 
-  // Handle TO_DO -> IN_PROGRESS transition: set startedAt and create worktree if needed
+  // Handle TO_DO -> IN_PROGRESS transition: set startedAt.
+  //
+  // Worktree/scratch directories are NOT auto-created here anymore — tasks
+  // are decoupled from terminals by default. The explicit endpoints
+  // POST /api/tasks/:id/initialize-worktree and /initialize-scratch are the
+  // only paths that materialize a working directory.
   if (statusChanged && oldStatus === 'TO_DO' && newStatus === 'IN_PROGRESS') {
     updateData.startedAt = now
-
-    // If task has repositoryId but no worktreePath, create worktree now
-    if (existing.repositoryId && !existing.worktreePath) {
-      const repo = db.select().from(repositories).where(eq(repositories.id, existing.repositoryId)).get()
-      if (repo) {
-        // Honor explicit branch if provided, otherwise auto-generate
-        let branch: string
-        let worktreePath: string
-        if (existing.branch) {
-          branch = existing.branch
-          const worktreesDir = getWorktreeBasePath()
-          const repoName = path.basename(repo.path)
-          worktreePath = path.join(worktreesDir, repoName, branch)
-        } else {
-          ;({ worktreePath, branch } = generateWorktreeInfo(repo.path, existing.title, existing.prefix))
-        }
-
-        // Honor explicit baseBranch if provided, otherwise auto-detect (default 'main')
-        let baseBranch = existing.baseBranch ?? 'main'
-        if (!existing.baseBranch) {
-          try {
-            const defaultBranch = execSync('git symbolic-ref refs/remotes/origin/HEAD', {
-              cwd: repo.path,
-              encoding: 'utf-8',
-            }).trim().replace('refs/remotes/origin/', '')
-            if (defaultBranch) baseBranch = defaultBranch
-          } catch {
-            // Fallback to 'main' if can't detect
-          }
-        }
-
-        const result = createGitWorktree(repo.path, worktreePath, branch, baseBranch)
-        if (result.success) {
-          updateData.worktreePath = worktreePath
-          updateData.branch = branch
-          updateData.repoPath = repo.path
-          updateData.repoName = repo.displayName
-          updateData.baseBranch = baseBranch
-
-          // Copy files if patterns configured
-          if (repo.copyFiles) {
-            try {
-              copyFilesToWorktree(repo.path, worktreePath, repo.copyFiles)
-            } catch (err) {
-              log.api.error('Failed to copy files during status transition', { error: String(err) })
-            }
-          }
-        } else {
-          log.api.error('Failed to create worktree during status transition', { error: result.error })
-        }
-      }
-    }
-
-    // If task is scratch type but no worktreePath, create scratch directory now
-    if (existing.type === 'scratch' && !existing.worktreePath) {
-      const { dirPath } = generateScratchDirInfo(existing.title)
-      try {
-        fs.mkdirSync(dirPath, { recursive: true })
-        updateData.worktreePath = dirPath
-      } catch (err) {
-        log.api.error('Failed to create scratch directory during status transition', { error: String(err) })
-      }
-    }
   }
 
   // Update database

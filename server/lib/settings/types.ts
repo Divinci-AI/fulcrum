@@ -279,7 +279,7 @@ export const DEFAULT_SETTINGS: Settings = {
     claudeCodePath: null,
   },
   tasks: {
-    defaultTaskType: 'worktree',
+    defaultTaskType: 'manual',
     startWorktreeTasksImmediately: true,
     scratchStartupScript: null,
   },

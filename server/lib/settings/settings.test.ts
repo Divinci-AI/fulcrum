@@ -408,7 +408,7 @@ describe('Settings', () => {
       ensureFulcrumDir()
       const settings = getSettings()
 
-      expect(settings.tasks.defaultTaskType).toBe('worktree')
+      expect(settings.tasks.defaultTaskType).toBe('manual')
       expect(settings.tasks.startWorktreeTasksImmediately).toBe(true)
     })
 

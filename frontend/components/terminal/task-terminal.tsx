@@ -45,6 +45,10 @@ export function TaskTerminal({ taskName, cwd, taskId, className, agent = 'claude
   const attachedRef = useRef(false)
   const [terminalId, setTerminalId] = useState<string | null>(null)
   const [isCreating, setIsCreating] = useState(false)
+  // Tasks are decoupled from terminals: visiting a task never auto-spawns a
+  // shell. We still reattach to an already-running terminal for this cwd,
+  // but creating a new one requires the user to click "Start terminal".
+  const [createRequested, setCreateRequested] = useState(false)
   const [isStartingAgent, setIsStartingAgent] = useState(false)
   const [xtermOpened, setXtermOpened] = useState(false)
   const [agentNotFound, setAgentNotFound] = useState<AgentType | null>(null)
@@ -70,6 +74,7 @@ export function TaskTerminal({ taskName, cwd, taskId, className, agent = 'claude
     hasFocusedRef.current = false
     setTerminalId(null)
     setIsCreating(false)
+    setCreateRequested(false)
   }, [cwd])
 
   const { setTerminalFocused } = useKeyboardContext()
@@ -268,6 +273,12 @@ export function TaskTerminal({ taskName, cwd, taskId, className, agent = 'claude
       return
     }
 
+    // No terminal exists for this cwd. Don't create one until the user asks —
+    // the "Start terminal" overlay below sets createRequested.
+    if (!createRequested) {
+      return
+    }
+
     // Create terminal only once
     if (!createdTerminalRef.current && termRef.current) {
       log.taskTerminal.info('Creating new terminal', {
@@ -307,7 +318,7 @@ export function TaskTerminal({ taskName, cwd, taskId, className, agent = 'claude
       })
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- startup props are captured once at creation time
-  }, [connected, cwd, xtermOpened, terminalsLoaded, terminals, taskName, createTerminal])
+  }, [connected, cwd, xtermOpened, terminalsLoaded, terminals, taskName, createTerminal, createRequested])
 
   // Update terminalId when terminal appears in list or when temp ID is replaced with real ID
   // This handles the optimistic update flow where tempId → realId
@@ -610,6 +621,26 @@ export function TaskTerminal({ taskName, cwd, taskId, className, agent = 'claude
           ref={containerRef}
           className={cn('h-full w-full overflow-hidden p-2 bg-terminal-background', className)}
         />
+
+        {/* Start-terminal overlay — no terminal exists for this task and the
+            user hasn't asked for one. Tasks never auto-spawn terminals. */}
+        {connected && terminalsLoaded && !terminalId && !isCreating && !createRequested &&
+          !terminals.some((t) => t.cwd === cwd) && (
+          <div className="absolute inset-0 flex items-center justify-center bg-terminal-background">
+            <button
+              type="button"
+              onClick={() => setCreateRequested(true)}
+              className={cn(
+                'rounded-md border px-4 py-2 font-mono text-sm transition-colors',
+                isDark
+                  ? 'border-white/20 text-white/70 hover:bg-white/10 hover:text-white'
+                  : 'border-black/20 text-black/70 hover:bg-black/5 hover:text-black'
+              )}
+            >
+              Start terminal
+            </button>
+          </div>
+        )}
 
         {/* Loading overlay - shown while terminal is being created */}
         {isCreating && !terminalId && (
