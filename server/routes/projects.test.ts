@@ -3,7 +3,7 @@ import { mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { createTestApp } from '../__tests__/fixtures/app'
 import { setupTestEnv, type TestEnv } from '../__tests__/utils/env'
-import { db, projects, repositories, apps, appServices } from '../db'
+import { db, projects, repositories, apps, appServices, users, acls, tasks } from '../db'
 import { eq } from 'drizzle-orm'
 
 describe('Projects Routes', () => {
@@ -1096,6 +1096,133 @@ describe('Projects Routes', () => {
       const res = await post('/api/projects/nonexistent/access', {})
 
       expect(res.status).toBe(404)
+    })
+  })
+
+  describe('POST /api/projects/:id/invites', () => {
+    function insertProject(id: string, visibility = 'tenant'): void {
+      const now = new Date().toISOString()
+      db.insert(projects)
+        .values({ id, name: 'Invite Project', status: 'active', visibility, createdAt: now, updatedAt: now })
+        .run()
+    }
+
+    test('provisions a new user and grants project access', async () => {
+      insertProject('inv-proj-1')
+      const { post } = createTestApp()
+
+      const res = await post('/api/projects/inv-proj-1/invites', {
+        email: 'newcomer@example.com',
+        role: 'editor',
+      })
+      const body = await res.json()
+
+      expect(res.status).toBe(201)
+      expect(body.provisioned).toBe(true)
+      expect(body.user.email).toBe('newcomer@example.com')
+      expect(body.grant.resourceType).toBe('project')
+      expect(body.grant.resourceId).toBe('inv-proj-1')
+      expect(body.grant.role).toBe('editor')
+
+      const grant = db
+        .select()
+        .from(acls)
+        .where(eq(acls.resourceId, 'inv-proj-1'))
+        .get()
+      expect(grant?.principalId).toBe(body.user.id)
+    })
+
+    test('grants access to an existing user without re-provisioning', async () => {
+      insertProject('inv-proj-2')
+      // createTestApp first: its admin seeding only runs when the users
+      // table is empty.
+      const { post } = createTestApp()
+      const now = new Date().toISOString()
+      const existingId = crypto.randomUUID()
+      db.insert(users)
+        .values({ id: existingId, email: 'already-here@example.com', createdAt: now, updatedAt: now })
+        .run()
+      const res = await post('/api/projects/inv-proj-2/invites', {
+        email: 'already-here@example.com',
+        role: 'viewer',
+      })
+      const body = await res.json()
+
+      expect(res.status).toBe(201)
+      expect(body.provisioned).toBe(false)
+      expect(body.user.id).toBe(existingId)
+      expect(body.grant.role).toBe('viewer')
+    })
+
+    test('upserts the role when a grant already exists', async () => {
+      insertProject('inv-proj-3')
+      const { post } = createTestApp()
+
+      await post('/api/projects/inv-proj-3/invites', { email: 'twice@example.com', role: 'viewer' })
+      const res = await post('/api/projects/inv-proj-3/invites', { email: 'twice@example.com', role: 'admin' })
+      const body = await res.json()
+
+      expect(res.status).toBe(201)
+      expect(body.grant.role).toBe('admin')
+      const grants = db.select().from(acls).where(eq(acls.resourceId, 'inv-proj-3')).all()
+      expect(grants.length).toBe(1)
+    })
+
+    test('400 on invalid email or role', async () => {
+      insertProject('inv-proj-4')
+      const { post } = createTestApp()
+
+      expect((await post('/api/projects/inv-proj-4/invites', { email: 'not-an-email' })).status).toBe(400)
+      expect((await post('/api/projects/inv-proj-4/invites', { email: 'x@y.com', role: 'owner' })).status).toBe(400)
+    })
+
+    test('404 for unknown project', async () => {
+      const { post } = createTestApp()
+      const res = await post('/api/projects/nope/invites', { email: 'x@y.com' })
+      expect(res.status).toBe(404)
+    })
+
+    test('invited member can see restricted tasks inside the project', async () => {
+      insertProject('inv-proj-5', 'restricted')
+      const { post, get } = createTestApp()
+
+      // Invite a new member with viewer role.
+      const inviteRes = await post('/api/projects/inv-proj-5/invites', {
+        email: 'member@example.com',
+        role: 'viewer',
+      })
+      expect(inviteRes.status).toBe(201)
+
+      // A restricted task inside the project, with no direct grant for the member.
+      const now = new Date().toISOString()
+      db.insert(tasks)
+        .values({
+          id: 'cascade-task-1',
+          title: 'Hidden Task',
+          status: 'TO_DO',
+          position: 0,
+          projectId: 'inv-proj-5',
+          visibility: 'restricted',
+          createdAt: now,
+          updatedAt: now,
+        })
+        .run()
+
+      // Member sees it through the project grant cascade…
+      const memberRes = await get('/api/tasks/cascade-task-1', {
+        'Cf-Access-Authenticated-User-Email': 'member@example.com',
+      })
+      expect(memberRes.status).toBe(200)
+
+      // …while an unrelated tenant member does not.
+      const strangerNow = new Date().toISOString()
+      db.insert(users)
+        .values({ id: crypto.randomUUID(), email: 'stranger@example.com', createdAt: strangerNow, updatedAt: strangerNow })
+        .run()
+      const strangerRes = await get('/api/tasks/cascade-task-1', {
+        'Cf-Access-Authenticated-User-Email': 'stranger@example.com',
+      })
+      expect(strangerRes.status).toBe(404)
     })
   })
 })

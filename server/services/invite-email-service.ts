@@ -44,10 +44,16 @@ interface DraftInviteEmailOptions {
   tenantUrl: string
   /** Optional display name for the invitee. */
   inviteeDisplayName?: string | null
+  /** Project-scoped invites: name of the project the invitee was granted
+   * access to. Adjusts the subject/body so the email says what they were
+   * actually invited to. */
+  projectName?: string | null
 }
 
-function buildSubject(): string {
-  return "You've been invited to Fulcrum"
+function buildSubject(opts?: DraftInviteEmailOptions): string {
+  return opts?.projectName
+    ? `You've been invited to "${opts.projectName}" on Fulcrum`
+    : "You've been invited to Fulcrum"
 }
 
 function buildBody(opts: DraftInviteEmailOptions, inviterEmail: string): string {
@@ -57,7 +63,9 @@ function buildBody(opts: DraftInviteEmailOptions, inviterEmail: string): string 
   return [
     greeting,
     '',
-    `I've added you to Fulcrum at ${opts.tenantUrl}.`,
+    opts.projectName
+      ? `I've invited you to the "${opts.projectName}" project on Fulcrum at ${opts.tenantUrl}.`
+      : `I've added you to Fulcrum at ${opts.tenantUrl}.`,
     '',
     "Fulcrum is our workspace for tracking tasks, projects, and the AI agents we run alongside them. Once you sign in with your work email, you'll be able to assign yourself tasks, @-mention me, and pick up the running threads.",
     '',
@@ -151,7 +159,7 @@ export async function draftInviteEmail(
   try {
     const draft = await createDraft(inviterAccount.id, {
       to: [opts.inviteeEmail],
-      subject: buildSubject(),
+      subject: buildSubject(opts),
       body: buildBody(opts, inviterAccount.email),
     })
     logger.info('Drafted invite email', {

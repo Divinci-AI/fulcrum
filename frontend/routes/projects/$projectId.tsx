@@ -69,6 +69,7 @@ import {
 } from '@/hooks/use-project-attachments'
 import { openExternalUrl } from '@/lib/editor-url'
 import { ProjectAgentSettings } from '@/components/project/project-agent-settings'
+import { ProjectMembersPanel } from '@/components/project/project-members-panel'
 
 export const Route = createFileRoute('/projects/$projectId')({
   component: ProjectDetailView,
@@ -962,6 +963,15 @@ function ProjectDetailView() {
             <div className="film-grain relative rounded-lg border p-4" style={{ background: 'var(--gradient-card)' }}>
               <InlineAttachments projectId={projectId} />
             </div>
+          </div>
+
+          {/* Members — project-scoped sharing and invites */}
+          <div className="film-grain relative rounded-lg border p-4 space-y-2" style={{ background: 'var(--gradient-card)' }}>
+            <h3 className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Members</h3>
+            <ProjectMembersPanel
+              projectId={projectId}
+              visibility={project.visibility ?? 'tenant'}
+            />
           </div>
 
           {/* Tags and Notes - Two column grid */}

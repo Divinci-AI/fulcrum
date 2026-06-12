@@ -3,9 +3,14 @@ import { nanoid } from 'nanoid'
 import { existsSync, rmSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { resolve, join } from 'node:path'
-import { db, projects, repositories, apps, appServices, terminalTabs, projectRepositories, tasks, tags, projectTags, projectAttachments, projectLinks, mentions } from '../db'
+import { db, projects, repositories, apps, appServices, terminalTabs, projectRepositories, tasks, tags, projectTags, projectAttachments, projectLinks, mentions, users, acls } from '../db'
 import { buildMentionText, syncAndNotify } from '../services/mention-service'
 import { grantCreatorAdmin, effectiveRole, roleSatisfies } from '../services/access-control-service'
+import { requireUser } from '../middleware/current-user'
+import { createUserByAdmin } from '../services/user-service'
+import { addEmailToPolicy } from '../services/cloudflare-access'
+import { draftInviteEmail } from '../services/invite-email-service'
+import { getPublicBaseUrl } from '../lib/public-url'
 import { eq, desc, sql, and, or, inArray } from 'drizzle-orm'
 import type { ProjectWithDetails, ProjectRepositoryDetails, Tag, ProjectAttachment, ProjectLink } from '../../shared/types'
 import type { NewProject } from '../db'
@@ -237,6 +242,7 @@ function buildProjectWithDetails(
     opencodeModel: project.opencodeModel ?? null,
     startupScript: project.startupScript ?? null,
     lastAccessedAt: project.lastAccessedAt,
+    visibility: (project.visibility as 'tenant' | 'restricted' | null) ?? 'tenant',
     createdAt: project.createdAt,
     updatedAt: project.updatedAt,
     // DEPRECATED: Use repositories array instead
@@ -1255,6 +1261,113 @@ app.post('/bulk', async (c) => {
   } catch (err) {
     return c.json({ error: err instanceof Error ? err.message : 'Failed to bulk create projects' }, 500)
   }
+})
+
+// POST /api/projects/:id/invites — invite someone to THIS project only.
+//
+// Body: { email: string, role?: 'viewer' | 'editor' | 'admin' (default 'editor') }
+//
+// Semantics:
+//   - Caller needs admin role on the project (project ACL admin, or implicit
+//     via tenant-default + grantCreatorAdmin).
+//   - If the invitee already has a Fulcrum user row, any project admin can
+//     grant them access. If they don't exist yet, tenant-wide provisioning is
+//     involved (CF Access policy, user row visible in pickers), so the caller
+//     must also be a tenant admin — same bar as POST /api/users.
+//   - Creates/updates the project ACL grant, then best-effort drafts an
+//     invite email mentioning the project.
+//
+// Note: granting on a tenant-visible project is allowed but mostly
+// meaningless (every member is already editor). For "only this project"
+// sharing, set the project's visibility to 'restricted' via
+// PATCH /api/acls/visibility/project/:id — the Members UI surfaces this.
+app.post('/:id/invites', async (c) => {
+  const projectId = c.req.param('id')
+
+  const user = requireUser(c as unknown as Parameters<typeof requireUser>[0])
+
+  const project = db.select().from(projects).where(eq(projects.id, projectId)).get()
+  if (!project) {
+    return c.json({ error: 'Project not found' }, 404)
+  }
+  // Tenant admins can invite to any project; otherwise the caller needs an
+  // explicit admin role on this project (tenant-default editor isn't enough
+  // to share a resource with new people).
+  if (!user.isAdmin && !roleSatisfies(effectiveRole(user.id, 'project', projectId), 'admin')) {
+    return c.json({ error: 'admin role on this project required to invite' }, 403)
+  }
+
+  const body = await c.req.json<{ email?: string; role?: string }>()
+  const email = typeof body.email === 'string' ? body.email.trim().toLowerCase() : ''
+  if (!email || !email.includes('@')) {
+    return c.json({ error: 'email (string) is required' }, 400)
+  }
+  const role = body.role ?? 'editor'
+  if (role !== 'viewer' && role !== 'editor' && role !== 'admin') {
+    return c.json({ error: "role must be 'viewer', 'editor', or 'admin'" }, 400)
+  }
+
+  // Resolve or provision the invitee.
+  let invitee = db.select().from(users).where(eq(users.email, email)).get()
+  let provisioned = false
+  let cfAccess: { ok: boolean; configured: boolean; reason?: string } | null = null
+  if (!invitee) {
+    if (!user.isAdmin) {
+      return c.json(
+        { error: 'invitee is not a Fulcrum user yet; a tenant admin must invite them' },
+        403
+      )
+    }
+    invitee = createUserByAdmin(email)
+    provisioned = true
+    const cf = await addEmailToPolicy(invitee.email)
+    cfAccess = cf.skipped
+      ? { ok: true, configured: false }
+      : { ok: cf.ok, configured: true, reason: cf.reason }
+  }
+
+  // Upsert the project grant.
+  const now = new Date().toISOString()
+  const existingGrant = db
+    .select()
+    .from(acls)
+    .where(
+      and(
+        eq(acls.resourceType, 'project'),
+        eq(acls.resourceId, projectId),
+        eq(acls.principalType, 'user'),
+        eq(acls.principalId, invitee.id)
+      )
+    )
+    .get()
+  let grant
+  if (existingGrant) {
+    db.update(acls).set({ role }).where(eq(acls.id, existingGrant.id)).run()
+    grant = { ...existingGrant, role }
+  } else {
+    grant = {
+      id: crypto.randomUUID(),
+      resourceType: 'project' as const,
+      resourceId: projectId,
+      principalType: 'user' as const,
+      principalId: invitee.id,
+      role,
+      grantedAt: now,
+      grantedBy: user.id,
+    }
+    db.insert(acls).values(grant).run()
+  }
+
+  // Best-effort invite email naming the project. Soft-fails by design.
+  const inviteEmail = await draftInviteEmail({
+    inviterUserId: user.id,
+    inviteeEmail: invitee.email,
+    tenantUrl: getPublicBaseUrl(c),
+    inviteeDisplayName: invitee.displayName,
+    projectName: project.name,
+  })
+
+  return c.json({ user: invitee, provisioned, grant, cfAccess, inviteEmail }, 201)
 })
 
 // POST /api/projects/:id/access - Update lastAccessedAt timestamp

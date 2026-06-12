@@ -205,6 +205,26 @@ export function effectiveRole(
   if (visibility === null) return null // resource doesn't exist
 
   const grants = getMatchingGrants(userId, resourceType, resourceId)
+
+  // Project membership cascades to the project's tasks: an explicit grant
+  // on the project counts as the same-strength grant on each task inside
+  // it. This is what makes "invite someone to only this project" work —
+  // without it a restricted task would need its own per-user grant even
+  // for project members. Deliberately only EXPLICIT project grants are
+  // inherited (not the tenant-default editor role a tenant-visible project
+  // implies), so restricting a task inside a tenant-visible project still
+  // hides it from non-members.
+  if (resourceType === 'task') {
+    const row = db
+      .select({ projectId: tasks.projectId })
+      .from(tasks)
+      .where(eq(tasks.id, resourceId))
+      .get()
+    if (row?.projectId) {
+      grants.push(...getMatchingGrants(userId, 'project', row.projectId))
+    }
+  }
+
   const grantedRole = maxRole(grants)
   return combineGrantWithVisibility(visibility, grantedRole)
 }
