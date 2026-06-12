@@ -111,14 +111,13 @@ app.get('/callback', async (c) => {
   const code = c.req.query('code')
   const error = c.req.query('error')
   const stateParam = c.req.query('state')
-  const fullUrl = c.req.url
 
+  // Never log the code (even a prefix) or the full URL — the URL's query
+  // string contains the entire authorization code.
   logger.info('OAuth callback received', {
     hasCode: !!code,
-    codePrefix: code?.slice(0, 20) + '...',
     error,
     stateParam,
-    fullUrl,
     hostHeader: c.req.header('host'),
     originHeader: c.req.header('origin'),
     refererHeader: c.req.header('referer'),
@@ -169,7 +168,6 @@ app.get('/callback', async (c) => {
     logger.info('OAuth callback: exchanging code for tokens', {
       redirectUri,
       clientId: client._clientId,
-      codePrefix: code.slice(0, 20) + '...',
     })
 
     const tokens = await exchangeCodeForTokens(client, code, redirectUri)

@@ -87,7 +87,6 @@ export async function exchangeCodeForTokens(
   logger.info('exchangeCodeForTokens: starting token exchange', {
     redirectUri,
     clientId: client._clientId,
-    codePrefix: code.slice(0, 20) + '...',
   })
 
   let tokens

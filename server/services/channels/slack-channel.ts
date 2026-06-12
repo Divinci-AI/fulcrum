@@ -47,6 +47,37 @@ const SUPPORTED_MIME_TYPES = new Set([
 /** Max file size we'll download (10 MB) */
 const MAX_FILE_SIZE = 10 * 1024 * 1024
 
+/**
+ * Only forward the bot token to redirect targets we recognize as Slack
+ * infrastructure. Following an arbitrary Location header with the
+ * Authorization header attached would hand the token to whatever host the
+ * redirect points at.
+ */
+function isTrustedSlackRedirect(location: string, originalUrl: string): boolean {
+  try {
+    const target = new URL(location, originalUrl)
+    if (target.protocol !== 'https:') return false
+    const host = target.hostname
+    return (
+      host === 'slack.com' ||
+      host.endsWith('.slack.com') ||
+      host.endsWith('.slack-edge.com') ||
+      host === 'slack-files.com' ||
+      host.endsWith('.slack-files.com')
+    )
+  } catch {
+    return false
+  }
+}
+
+function safeHostname(location: string): string {
+  try {
+    return new URL(location).hostname
+  } catch {
+    return 'unparseable'
+  }
+}
+
 /** Expected magic bytes for binary file types */
 const MAGIC_BYTES: Record<string, (buf: Buffer) => boolean> = {
   'application/pdf': (buf) => buf.length >= 5 && buf.subarray(0, 5).toString('ascii').startsWith('%PDF-'),
@@ -461,8 +492,13 @@ export class SlackChannel implements MessagingChannel {
       })
       if (response.status >= 300 && response.status < 400) {
         const location = response.headers.get('location')
-        if (location) {
+        if (location && isTrustedSlackRedirect(location, file.url_private_download)) {
           response = await fetch(location, { headers: authHeaders })
+        } else if (location) {
+          log.messaging.warn('Refusing Slack file redirect to untrusted origin', {
+            fileName: file.name,
+            redirectHost: safeHostname(location),
+          })
         }
       }
     }

@@ -17,6 +17,7 @@ import { startMessagingChannels, stopMessagingChannels } from './services/channe
 import { startAssistantScheduler, stopAssistantScheduler } from './services/assistant-scheduler'
 import { startCaldavSync, stopCaldavSync } from './services/caldav'
 import { startGoogleCalendarSync, stopGoogleCalendarSync } from './services/google/google-calendar-service'
+import { pruneOldInvocations } from './services/observer-tracking'
 import { log } from './lib/logger'
 import { clearSensitiveEnvVars } from './lib/env'
 
@@ -200,9 +201,31 @@ startCaldavSync()
 // Start Google Calendar sync
 startGoogleCalendarSync()
 
+// Prune observer invocation records daily (7-day retention) so the
+// observer_invocations table doesn't grow without bound on busy channels.
+const observerPruneTimer = setInterval(() => {
+  try {
+    const pruned = pruneOldInvocations()
+    if (pruned > 0) {
+      log.server.info('Pruned old observer invocations', { pruned })
+    }
+  } catch (err) {
+    log.server.warn('Observer invocation pruning failed', { error: String(err) })
+  }
+}, 24 * 60 * 60 * 1000)
+// Run one prune shortly after boot too, so long-stopped servers catch up.
+setTimeout(() => {
+  try {
+    pruneOldInvocations()
+  } catch {
+    // best-effort
+  }
+}, 60 * 1000)
+
 // Graceful shutdown - detach PTYs but keep dtach sessions running for persistence
 process.on('SIGINT', async () => {
   log.server.info('Shutting down (terminals will persist)')
+  clearInterval(observerPruneTimer)
   stopPRMonitor()
   stopDivinciSync()
   stopMetricsCollector()
@@ -218,6 +241,7 @@ process.on('SIGINT', async () => {
 
 process.on('SIGTERM', async () => {
   log.server.info('Shutting down (terminals will persist)')
+  clearInterval(observerPruneTimer)
   stopPRMonitor()
   stopDivinciSync()
   stopMetricsCollector()

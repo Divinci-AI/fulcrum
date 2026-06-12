@@ -48,6 +48,7 @@ import aclsRoutes from './routes/acls'
 import ogRoutes from './routes/og'
 import { resolveOgMeta, injectOgMeta } from './lib/og-meta'
 import { currentUser } from './middleware/current-user'
+import { mcpAuth } from './middleware/mcp-auth'
 import { writeEntry } from './lib/logger'
 import type { LogEntry } from '../shared/logger'
 
@@ -87,6 +88,7 @@ export function createApp() {
       allowMethods: ['GET', 'POST', 'PATCH', 'PUT', 'DELETE', 'OPTIONS'],
       allowHeaders: [
         'Content-Type',
+        'Authorization',
         'mcp-session-id',
         'Last-Event-ID',
         'mcp-protocol-version',
@@ -141,7 +143,14 @@ export function createApp() {
   app.route('/api/teams', teamsRoutes)
   app.route('/api/acls', aclsRoutes)
 
-  // MCP HTTP transport endpoints
+  // MCP HTTP transport endpoints. These expose the agent tool surface
+  // (including execute_command/write_file on /mcp), so they get the same
+  // identity resolution as /api plus a hard gate: authenticated identity
+  // or a direct loopback connection — never anonymous remote access.
+  app.use('/mcp', currentUser)
+  app.use('/mcp/*', currentUser)
+  app.use('/mcp', mcpAuth)
+  app.use('/mcp/*', mcpAuth)
   app.route('/mcp/observer', mcpObserverRoutes)
   app.route('/mcp', mcpRoutes)
 
