@@ -61,14 +61,54 @@ interface ProjectMentionedMessage {
   payload: { projectId: string; mentionedUserId: string; authorEmail: string | null }
 }
 
+interface ProjectUpdatedMessage {
+  type: 'project:updated'
+  payload: { projectId: string }
+}
+
+// Team chat fan-out (tenant-wide broadcast). Appended straight into the
+// ['team-chat'] query cache so the Team tab updates without a refetch.
+export interface TeamChatMessage {
+  id: string
+  authorUserId: string
+  authorEmail: string | null
+  authorName: string | null
+  body: string
+  createdAt: string
+}
+interface TeamMessageMessage {
+  type: 'team:message'
+  payload: TeamChatMessage
+}
+interface TeamMessageDeletedMessage {
+  type: 'team:message-deleted'
+  payload: { id: string }
+}
+
+// Presence roster — full state on every change, cached under ['presence'].
+export interface PresenceUser {
+  userId: string
+  email: string | null
+  route: string | null
+  lastActiveAt: string
+}
+interface PresenceStateMessage {
+  type: 'presence:state'
+  payload: { users: PresenceUser[] }
+}
+
 type ServerMessage =
   | TaskUpdatedMessage
   | NotificationMessage
   | TaskMentionedMessage
   | TaskAssignedMessage
   | ProjectMentionedMessage
+  | ProjectUpdatedMessage
   | TaskCommentAddedMessage
   | TaskCommentDeletedMessage
+  | TeamMessageMessage
+  | TeamMessageDeletedMessage
+  | PresenceStateMessage
   | { type: string }
 
 function getWsUrl(): string {
@@ -99,6 +139,34 @@ export function useTaskSync() {
         const message: ServerMessage = JSON.parse(event.data)
         if (message.type === 'task:updated') {
           queryClient.invalidateQueries({ queryKey: ['tasks'] })
+          queryClient.invalidateQueries({ queryKey: ['acls'] })
+        } else if (message.type === 'project:updated') {
+          // Teammates editing projects / members / visibility — refresh
+          // project queries live across every connected client.
+          queryClient.invalidateQueries({ queryKey: ['projects'] })
+          queryClient.invalidateQueries({ queryKey: ['acls'] })
+        } else if (message.type === 'presence:state' && 'payload' in message) {
+          queryClient.setQueryData(
+            ['presence'],
+            (message as PresenceStateMessage).payload.users
+          )
+        } else if (message.type === 'team:message' && 'payload' in message) {
+          const msg = (message as TeamMessageMessage).payload
+          queryClient.setQueryData<TeamChatMessage[]>(['team-chat'], (old) => {
+            if (!old) return [msg]
+            if (old.some((m) => m.id === msg.id)) return old
+            return [...old, msg]
+          })
+          // Unread counter for the floating-widget badge. The Team tab
+          // resets this when visible; our own messages never count.
+          if (msg.authorUserId !== userIdRef.current) {
+            queryClient.setQueryData<number>(['team-chat-unread'], (n) => (n ?? 0) + 1)
+          }
+        } else if (message.type === 'team:message-deleted' && 'payload' in message) {
+          const { id } = (message as TeamMessageDeletedMessage).payload
+          queryClient.setQueryData<TeamChatMessage[]>(['team-chat'], (old) =>
+            old ? old.filter((m) => m.id !== id) : old
+          )
         } else if (message.type === 'task:mentioned' && 'payload' in message) {
           // D-4 PR 3: server already filtered this to the right recipient
           // (us). Show a toast + invalidate tasks so the list reflects any

@@ -27,6 +27,7 @@ import {
   Archive01Icon,
   Book02Icon,
 } from '@hugeicons/core-free-icons'
+import { OnlineUsers } from '@/components/layout/online-users'
 import { CreateTaskModal } from '@/components/kanban/create-task-modal'
 import { useChat } from '@/hooks/use-chat'
 import { cn } from '@/lib/utils'
@@ -143,6 +144,7 @@ export function Header({ onNewTaskRef, onOpenCommandPalette }: HeaderProps) {
       </div>
 
       <div className="flex shrink-0 items-center gap-2">
+        <OnlineUsers />
         <CreateTaskModal open={createTaskOpen} onOpenChange={setCreateTaskOpen} />
         {/* AI Chat Button - shown on mobile, hidden on desktop where floating button is used */}
         <button

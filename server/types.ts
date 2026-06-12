@@ -487,6 +487,39 @@ export interface TaskCommentDeletedMessage {
   payload: { taskId: string; commentId: string }
 }
 
+// Team chat fan-out. Tenant-wide channel, so plain broadcast() — every
+// connected client gets it; the table is the durable history.
+export interface TeamMessageMessage {
+  type: 'team:message'
+  payload: {
+    id: string
+    authorUserId: string
+    authorEmail: string | null
+    authorName: string | null
+    body: string
+    createdAt: string
+  }
+}
+export interface TeamMessageDeletedMessage {
+  type: 'team:message-deleted'
+  payload: { id: string }
+}
+
+// Presence roster. Broadcast on connect/disconnect and page-context
+// updates; also sent directly to a socket right after it identifies, so
+// new clients see the room immediately.
+export interface PresenceStateMessage {
+  type: 'presence:state'
+  payload: {
+    users: Array<{
+      userId: string
+      email: string | null
+      route: string | null
+      lastActiveAt: string
+    }>
+  }
+}
+
 export type ServerMessage =
   | TerminalCreatedMessage
   | TerminalOutputMessage
@@ -518,3 +551,6 @@ export type ServerMessage =
   | ProjectMentionedMessage
   | TaskCommentAddedMessage
   | TaskCommentDeletedMessage
+  | TeamMessageMessage
+  | TeamMessageDeletedMessage
+  | PresenceStateMessage

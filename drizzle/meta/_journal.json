@@ -659,6 +659,13 @@
       "when": 1779688800000,
       "tag": "0093_add_task_approver",
       "breakpoints": true
+    },
+    {
+      "idx": 94,
+      "version": "6",
+      "when": 1779775200000,
+      "tag": "0094_add_team_messages",
+      "breakpoints": true
     }
   ]
 }

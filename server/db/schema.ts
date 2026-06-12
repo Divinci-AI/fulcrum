@@ -638,6 +638,16 @@ export const taskComments = sqliteTable('task_comments', {
   updatedAt: text('updated_at').notNull(),
 })
 
+// Team chat — one flat tenant-wide channel (channel-per-project can come
+// later by adding a nullable projectId). Fan-out is via the `team:message`
+// WS event; this table is the history.
+export const teamMessages = sqliteTable('team_messages', {
+  id: text('id').primaryKey(),
+  authorUserId: text('author_user_id').notNull(), // FK → users.id
+  body: text('body').notNull(),
+  createdAt: text('created_at').notNull(),
+})
+
 // Mentions (Phase D-3). One row per (source, mentioned user) pair. A
 // "source" is any entity that has free-form text where someone can write
 // `@<email>` — tasks, projects, and (D-13 PR 3) comments. The pair is

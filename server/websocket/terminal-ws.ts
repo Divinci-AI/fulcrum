@@ -6,6 +6,7 @@ import { getTabManager } from '../terminal/tab-manager'
 import { getWorktreeBasePath, getSettings, updateSettingByPath } from '../lib/settings'
 import { log } from '../lib/logger'
 import { anyTopicMatches } from './topic-matcher'
+import { getPageContext } from '../services/page-context-service'
 import type { CurrentUserContext } from '../middleware/current-user'
 
 interface ClientData {
@@ -84,6 +85,38 @@ export function makeTerminalWebSocketHandlers(c: Context<CurrentUserContext>): W
     userEmail: user?.email ?? null,
   }
   return buildHandlers(identity)
+}
+
+/**
+ * Presence roster: one entry per identified user with at least one open
+ * socket. Route comes from the page-context cache (the frontend already
+ * publishes it on navigation), so presence shows "who is looking at what"
+ * without a second reporting channel. Anonymous sockets are invisible.
+ */
+function buildPresenceRoster(): Array<{
+  userId: string
+  email: string | null
+  route: string | null
+  lastActiveAt: string
+}> {
+  const byUser = new Map<string, { email: string | null }>()
+  for (const data of clients.values()) {
+    if (data.userId) byUser.set(data.userId, { email: data.userEmail })
+  }
+  const now = new Date().toISOString()
+  return Array.from(byUser.entries()).map(([userId, { email }]) => {
+    const ctx = getPageContext(userId)
+    return {
+      userId,
+      email,
+      route: ctx?.route ?? null,
+      lastActiveAt: ctx?.updatedAt ?? now,
+    }
+  })
+}
+
+export function broadcastPresence(): void {
+  broadcast({ type: 'presence:state', payload: { users: buildPresenceRoster() } })
 }
 
 export function broadcastToTerminal(terminalId: string, message: ServerMessage): void {
@@ -166,6 +199,14 @@ function buildHandlers(identity: SocketIdentity): WSEvents {
       type: 'tabs:list',
       payload: { tabs: tabManager.list() },
     })
+
+    // Presence: tell everyone (including this socket) the new roster.
+    // Anonymous sockets don't change the roster, so skip the fan-out.
+    if (clientData.userId) {
+      broadcastPresence()
+    } else {
+      sendTo(ws, { type: 'presence:state', payload: { users: buildPresenceRoster() } })
+    }
 
     // Send current theme to newly connected client
     const settings = getSettings()
@@ -662,6 +703,9 @@ function buildHandlers(identity: SocketIdentity): WSEvents {
           if (clientData.userId) {
             const { setPageContext } = await import('../services/page-context-service')
             setPageContext(clientData.userId, message.payload)
+            // The roster carries each user's current route — keep every
+            // client's presence view live as people navigate.
+            broadcastPresence()
           }
           break
         }
@@ -672,13 +716,17 @@ function buildHandlers(identity: SocketIdentity): WSEvents {
   },
 
   onClose(evt, ws) {
+    const hadIdentity = clients.get(ws)?.userId != null
     clients.delete(ws)
     log.ws.info('Client disconnected', { remainingClients: clients.size })
+    if (hadIdentity) broadcastPresence()
   },
 
   onError(evt, ws) {
     log.ws.error('WebSocket error', { error: String(evt) })
+    const hadIdentity = clients.get(ws)?.userId != null
     clients.delete(ws)
+    if (hadIdentity) broadcastPresence()
   },
   }
 }

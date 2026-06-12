@@ -8,6 +8,8 @@ import { Bot, X, Trash2, Info, ChevronDown, Check } from 'lucide-react'
 import MarkdownPreview from '@uiw/react-markdown-preview'
 import { ChatMessage } from './chat-message'
 import { ChatInput, type ChatInputHandle, type FileAttachment } from './chat-input'
+import { TeamChat } from './team-chat'
+import { useTeamChatUnread } from '@/hooks/use-team-chat'
 import { useChat } from '@/hooks/use-chat'
 import { usePageContext } from '@/hooks/use-page-context'
 import { useOpencodeModels } from '@/hooks/use-opencode-models'
@@ -56,6 +58,9 @@ export const AiChatAssistant = observer(function AiChatAssistant() {
   const chatInputRef = useRef<ChatInputHandle>(null)
   const [isDropdownOpen, setIsDropdownOpen] = useState(false)
   const [expandedMessageId, setExpandedMessageId] = useState<string | null>(null)
+  // 'agent' = the AI assistant; 'team' = human team chat (live via WS).
+  const [activeTab, setActiveTab] = useState<'agent' | 'team'>('agent')
+  const { data: teamUnread } = useTeamChatUnread()
   const [modelFilter, setModelFilter] = useState('')
   const filterInputRef = useRef<HTMLInputElement>(null)
   const wasStreamingRef = useRef(false)
@@ -303,6 +308,13 @@ export const AiChatAssistant = observer(function AiChatAssistant() {
           {/* Breathing glow animation */}
           <div className={`absolute inset-0 rounded-full animate-pulse-slow opacity-30 ${isDark ? 'bg-destructive' : 'bg-accent'}`} />
           {!isOpen && <div className={`absolute -inset-1 rounded-full animate-ping-slow opacity-15 ${isDark ? 'bg-destructive' : 'bg-accent'}`} />}
+
+          {/* Team-chat unread badge */}
+          {teamUnread > 0 && (!isOpen || activeTab !== 'team') && (
+            <div className="absolute -top-1 -right-1 z-20 min-w-5 h-5 px-1 rounded-full bg-red-500 text-white text-[10px] font-bold flex items-center justify-center border-2 border-background">
+              {teamUnread > 99 ? '99+' : teamUnread}
+            </div>
+          )}
         </button>
       </div>
 
@@ -318,13 +330,40 @@ export const AiChatAssistant = observer(function AiChatAssistant() {
           <div className="film-grain relative flex flex-col font-sans rounded-xl shadow-2xl overflow-hidden max-h-[min(600px,calc(100vh-140px))] bg-popover border border-border" style={{ background: 'var(--gradient-card)' }}>
             {/* Header */}
             <div className="flex items-center justify-between px-3 sm:px-6 pt-3 sm:pt-4 pb-2">
-              <div className="flex items-center gap-1.5">
+              <div className="flex items-center gap-2">
                 <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
-                <span className="text-xs font-medium text-muted-foreground">{t('title')}</span>
+                {/* Agent / Team tabs */}
+                <div className="flex items-center rounded-full p-0.5 bg-muted/60">
+                  <button
+                    onClick={() => setActiveTab('agent')}
+                    className={`px-2.5 py-1 text-[11px] font-medium rounded-full transition-all ${
+                      activeTab === 'agent'
+                        ? 'bg-accent/20 text-accent'
+                        : 'text-muted-foreground hover:text-foreground'
+                    }`}
+                  >
+                    {t('title')}
+                  </button>
+                  <button
+                    onClick={() => setActiveTab('team')}
+                    className={`relative px-2.5 py-1 text-[11px] font-medium rounded-full transition-all ${
+                      activeTab === 'team'
+                        ? 'bg-accent/20 text-accent'
+                        : 'text-muted-foreground hover:text-foreground'
+                    }`}
+                  >
+                    Team
+                    {teamUnread > 0 && activeTab !== 'team' && (
+                      <span className="absolute -top-1 -right-1.5 min-w-3.5 h-3.5 px-0.5 rounded-full bg-red-500 text-white text-[9px] font-bold flex items-center justify-center">
+                        {teamUnread > 9 ? '9+' : teamUnread}
+                      </span>
+                    )}
+                  </button>
+                </div>
               </div>
               <div className="flex items-center gap-2">
                 {/* Provider Toggle - hidden on very small screens */}
-                {isOpencodeAvailable && (
+                {activeTab === 'agent' && isOpencodeAvailable && (
                   <div className="hidden sm:flex items-center rounded-full p-0.5 bg-muted/60">
                     <button
                       onClick={() => setProvider('claude')}
@@ -350,7 +389,7 @@ export const AiChatAssistant = observer(function AiChatAssistant() {
                 )}
 
                 {/* Model Selector Dropdown */}
-                <div ref={dropdownRef} className="relative">
+                <div ref={dropdownRef} className={activeTab === 'agent' ? 'relative' : 'hidden'}>
                   <button
                     onClick={() => {
                       const newState = !isDropdownOpen
@@ -452,7 +491,7 @@ export const AiChatAssistant = observer(function AiChatAssistant() {
                     </div>
                   )}
                 </div>
-                {hasMessages && (
+                {activeTab === 'agent' && hasMessages && (
                   <button
                     onClick={clearMessages}
                     className="p-1.5 rounded-full transition-colors hover:bg-muted"
@@ -470,8 +509,11 @@ export const AiChatAssistant = observer(function AiChatAssistant() {
               </div>
             </div>
 
+            {/* Team chat tab */}
+            {activeTab === 'team' && <TeamChat />}
+
             {/* Messages */}
-            {messages.length > 0 && (
+            {activeTab === 'agent' && messages.length > 0 && (
               <div
                 ref={scrollRef}
                 className="overflow-y-auto px-4 py-2 max-h-[350px] scrollbar-thin scrollbar-track-transparent scrollbar-thumb-muted"
@@ -497,17 +539,19 @@ export const AiChatAssistant = observer(function AiChatAssistant() {
             )}
 
             {/* Error display when no messages */}
-            {messages.length === 0 && error && (
+            {activeTab === 'agent' && messages.length === 0 && error && (
               <div className="mx-4 my-2 p-3 rounded-lg bg-red-500/10 border border-red-500/20 text-red-400 text-sm">
                 {error}
               </div>
             )}
 
             {/* Input Section */}
-            <ChatInput ref={chatInputRef} onSend={handleSend} isLoading={isStreaming} placeholder={hasMessages ? ' ' : undefined} onCancel={cancelStream} />
+            {activeTab === 'agent' && (
+              <ChatInput ref={chatInputRef} onSend={handleSend} isLoading={isStreaming} placeholder={hasMessages ? ' ' : undefined} onCancel={cancelStream} />
+            )}
 
             {/* Footer Info - hidden on mobile */}
-            <div className="hidden sm:flex items-center justify-between px-4 pb-3 pt-1 text-xs gap-4 text-muted-foreground">
+            <div className={`${activeTab === 'agent' ? 'hidden sm:flex' : 'hidden'} items-center justify-between px-4 pb-3 pt-1 text-xs gap-4 text-muted-foreground`}>
               <div className="flex items-center gap-2">
                 <Info className="w-3 h-3" />
                 <span>

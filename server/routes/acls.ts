@@ -22,6 +22,7 @@ import {
 } from '../services/access-control-service'
 import type { CurrentUserContext } from '../middleware/current-user'
 import { requireUser } from '../middleware/current-user'
+import { broadcast } from '../websocket/terminal-ws'
 
 const app = new Hono<CurrentUserContext>()
 
@@ -52,6 +53,17 @@ function principalExists(type: PrincipalType, id: string): boolean {
     return Boolean(db.select().from(users).where(eq(users.id, id)).get())
   }
   return Boolean(db.select().from(teams).where(eq(teams.id, id)).get())
+}
+
+
+// Live-update fan-out: ACL/visibility changes affect what other connected
+// clients can see (member panels, restricted lists) — nudge them to refetch.
+function broadcastResourceUpdated(resourceType: string, resourceId: string): void {
+  if (resourceType === 'task') {
+    broadcast({ type: 'task:updated', payload: { taskId: resourceId } })
+  } else {
+    broadcast({ type: 'project:updated', payload: { projectId: resourceId } })
+  }
 }
 
 // GET /api/acls?resourceType=task&resourceId=abc — list grants on a
@@ -134,6 +146,7 @@ app.post('/', async (c) => {
     grantedBy: user.id,
   }
   db.insert(acls).values(grant).run()
+  broadcastResourceUpdated(resourceType, body.resourceId)
   return c.json(grant, 201)
 })
 
@@ -157,6 +170,7 @@ app.patch('/:grantId', async (c) => {
   if (!role) return c.json({ error: 'role must be viewer | editor | admin' }, 400)
 
   db.update(acls).set({ role }).where(eq(acls.id, grant.id)).run()
+  broadcastResourceUpdated(grant.resourceType, grant.resourceId)
   const updated = db.select().from(acls).where(eq(acls.id, grant.id)).get()
   return c.json(updated)
 })
@@ -177,6 +191,7 @@ app.delete('/:grantId', (c) => {
   }
 
   db.delete(acls).where(eq(acls.id, grant.id)).run()
+  broadcastResourceUpdated(grant.resourceType, grant.resourceId)
   return c.json({ ok: true })
 })
 
@@ -207,6 +222,7 @@ app.patch('/visibility/:resourceType/:resourceId', async (c) => {
   } else {
     db.update(projects).set({ visibility: v }).where(eq(projects.id, resourceId)).run()
   }
+  broadcastResourceUpdated(resourceType, resourceId)
   return c.json({ resourceType, resourceId, visibility: v })
 })
 

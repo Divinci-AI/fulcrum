@@ -43,6 +43,7 @@ import searchRoutes from './routes/search'
 import scratchDirsRoutes from './routes/scratch-dirs'
 import serverExposeRoutes from './routes/server-expose'
 import usersRoutes from './routes/users'
+import teamChatRoutes from './routes/team-chat'
 import teamsRoutes from './routes/teams'
 import aclsRoutes from './routes/acls'
 import ogRoutes from './routes/og'
@@ -142,6 +143,7 @@ export function createApp() {
   app.route('/api/version', versionRoutes)
   app.route('/api/teams', teamsRoutes)
   app.route('/api/acls', aclsRoutes)
+  app.route('/api/team-chat', teamChatRoutes)
 
   // MCP HTTP transport endpoints. These expose the agent tool surface
   // (including execute_command/write_file on /mcp), so they get the same
