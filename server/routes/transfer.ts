@@ -24,7 +24,7 @@ import {
   users,
 } from '../db'
 import { requireUser, type CurrentUserContext } from '../middleware/current-user'
-import { grantCreatorAdmin, effectiveRole, roleSatisfies } from '../services/access-control-service'
+import { grantCreatorAdmin, ensureAssigneeViewer, effectiveRole, roleSatisfies } from '../services/access-control-service'
 import { broadcast } from '../websocket/terminal-ws'
 
 const EXPORT_VERSION = 1
@@ -256,6 +256,14 @@ app.post('/import', async (c) => {
       })
       .run()
     grantCreatorAdmin(user.id, 'task', newId)
+    // Same semantics as POST /api/tasks: importing a task assigned to
+    // someone is the create-with-assignee flow, so the assignee/approver
+    // get the same viewer auto-grant they'd get there. Emails that don't
+    // resolve on this instance were already nulled above.
+    const assigneeId = t.assigneeEmail ? (idByEmail.get(t.assigneeEmail) ?? null) : null
+    const approverId = t.approverEmail ? (idByEmail.get(t.approverEmail) ?? null) : null
+    if (assigneeId) ensureAssigneeViewer(assigneeId, 'task', newId, user.id)
+    if (approverId) ensureAssigneeViewer(approverId, 'task', newId, user.id)
     for (const tagName of t.tags ?? []) {
       db.insert(taskTags)
         .values({ id: crypto.randomUUID(), taskId: newId, tagId: getOrCreateTagId(tagName, now), createdAt: now })

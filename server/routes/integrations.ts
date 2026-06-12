@@ -10,17 +10,20 @@ import {
   disconnectClaudeDesktop,
   getClaudeDesktopStatus,
 } from '../services/claude-desktop-config'
-import { requireUser, type CurrentUserContext } from '../middleware/current-user'
+import { requireAdminUser, type CurrentUserContext } from '../middleware/current-user'
 
 const app = new Hono<CurrentUserContext>()
 
+// All three are admin-gated: they read/write files in the HOST machine's
+// home directory. On a multi-user deployment a regular member must not be
+// able to modify the operator's Claude Desktop config.
 app.get('/claude-desktop', (c) => {
-  requireUser(c)
+  requireAdminUser(c)
   return c.json(getClaudeDesktopStatus())
 })
 
 app.post('/claude-desktop/connect', (c) => {
-  requireUser(c)
+  requireAdminUser(c)
   try {
     return c.json(connectClaudeDesktop())
   } catch (err) {
@@ -29,7 +32,7 @@ app.post('/claude-desktop/connect', (c) => {
 })
 
 app.post('/claude-desktop/disconnect', (c) => {
-  requireUser(c)
+  requireAdminUser(c)
   try {
     return c.json(disconnectClaudeDesktop())
   } catch (err) {
