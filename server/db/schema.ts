@@ -1,4 +1,5 @@
 import { sqliteTable, text, integer, real } from 'drizzle-orm/sqlite-core'
+import { encryptedText, encryptedJson } from './encrypted-column'
 
 export const tasks = sqliteTable('tasks', {
   id: text('id').primaryKey(),
@@ -360,7 +361,9 @@ export const messagingConnections = sqliteTable('messaging_connections', {
   id: text('id').primaryKey(),
   channelType: text('channel_type').notNull(), // 'whatsapp' | 'discord' | 'telegram'
   enabled: integer('enabled', { mode: 'boolean' }).default(false),
-  authState: text('auth_state', { mode: 'json' }), // JSON: Channel-specific auth credentials
+  // JSON: channel-specific auth credentials (e.g. WhatsApp session keys).
+  // Encrypted at rest (lib/field-crypto).
+  authState: encryptedJson('auth_state'),
   displayName: text('display_name'), // Connected account name (phone number, username, etc.)
   status: text('status').notNull().default('disconnected'), // 'disconnected' | 'connecting' | 'connected' | 'qr_pending'
   createdAt: text('created_at').notNull(),
@@ -444,8 +447,10 @@ export const googleAccounts = sqliteTable('google_accounts', {
   id: text('id').primaryKey(),
   name: text('name').notNull(),
   email: text('email'), // Google account email
-  accessToken: text('access_token'),
-  refreshToken: text('refresh_token'),
+  // Encrypted at rest (lib/field-crypto): transparently encrypted/decrypted
+  // at the Drizzle driver boundary using the age.txt-derived key.
+  accessToken: encryptedText('access_token'),
+  refreshToken: encryptedText('refresh_token'),
   tokenExpiry: integer('token_expiry'), // Unix timestamp in milliseconds
   scopes: text('scopes', { mode: 'json' }).$type<string[]>(), // Granted scopes
   calendarEnabled: integer('calendar_enabled', { mode: 'boolean' }).default(false),
@@ -514,10 +519,11 @@ export const caldavAccounts = sqliteTable('caldav_accounts', {
   serverUrl: text('server_url').notNull(),
   authType: text('auth_type').notNull().default('basic'), // 'basic' | 'google-oauth'
   username: text('username'), // Basic auth
-  password: text('password'), // Basic auth
+  // Encrypted at rest (lib/field-crypto), as are the OAuth secret + tokens.
+  password: encryptedText('password'), // Basic auth
   googleClientId: text('google_client_id'), // OAuth
-  googleClientSecret: text('google_client_secret'), // OAuth
-  oauthTokens: text('oauth_tokens', { mode: 'json' }).$type<import('../lib/settings/types').CalDavOAuthTokens | null>(),
+  googleClientSecret: encryptedText('google_client_secret'), // OAuth
+  oauthTokens: encryptedJson('oauth_tokens').$type<import('../lib/settings/types').CalDavOAuthTokens | null>(),
   syncIntervalMinutes: integer('sync_interval_minutes').default(15),
   enabled: integer('enabled', { mode: 'boolean' }).default(true),
   lastSyncedAt: text('last_synced_at'),

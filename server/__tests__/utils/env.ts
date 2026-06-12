@@ -5,6 +5,7 @@ import { resetDatabase } from '../../db'
 import { resetLogFilePath } from '../../lib/logger'
 import { resetDtachService } from '../../terminal/dtach-service'
 import { clearFnoxCache } from '../../lib/settings'
+import { _resetFieldCryptoCache } from '../../lib/field-crypto'
 
 /**
  * Creates an isolated test environment with its own FULCRUM_DIR.
@@ -28,6 +29,10 @@ export function setupTestEnv(): TestEnv {
 
   // Clear fnox in-memory config cache for test isolation
   clearFnoxCache()
+
+  // Field-crypto caches the age.txt-derived key — reset so a key written
+  // by a previous test's FULCRUM_DIR doesn't leak into this one.
+  _resetFieldCryptoCache()
 
   const fulcrumDir = mkdtempSync(join(tmpdir(), 'fulcrum-test-'))
 

@@ -6,6 +6,7 @@ import { existsSync } from 'node:fs'
 import * as schema from './schema'
 import { initializeFulcrumDirectories, getDatabasePath } from '../lib/settings'
 import { log } from '../lib/logger'
+import { encryptExistingDbSecrets } from './encrypt-at-rest'
 
 // Use globalThis to ensure singleton across multiple module instances
 // (Bun test runner can sometimes create duplicate module instances)
@@ -46,6 +47,11 @@ function initializeDatabase(): BunSQLiteDatabase<typeof schema> {
 
   // Run migrations (works for both source and bundled mode)
   runMigrations(state.sqlite, state.db)
+
+  // Encrypt any plaintext secret columns from before field-level
+  // encryption existed. No-op without a key or when everything is
+  // already encrypted.
+  encryptExistingDbSecrets(state.sqlite)
 
   return state.db
 }
