@@ -75,9 +75,12 @@ describe('resolveOgMeta', () => {
     expect(meta!.image).toMatch(new RegExp(`/og/task/${TASK_ID}\\.png\\?v=[a-z0-9]+$`))
   })
 
-  it('returns null for unknown task id', () => {
+  it('falls back to the default card for unknown task id', () => {
+    // Deleted/foreign task links must still unfurl — null would serve the
+    // shell with no OG tags at all (regression caught by the prod e2e).
     const meta = resolveOgMeta('/tasks', { task: '00000000-0000-0000-0000-000000000000' }, baseHeaders())
-    expect(meta).toBeNull()
+    expect(meta).not.toBeNull()
+    expect(meta!.image).toContain('/og/default.png')
   })
 
   it('rejects non-UUID task param without crashing', () => {

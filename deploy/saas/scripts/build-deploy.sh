@@ -93,7 +93,9 @@ if [ "$SKIP_STREAM" -eq 0 ]; then
     log "Pushing ${IMAGE_TAG} to ${GHCR_IMAGE}…"
     docker tag "$IMAGE_TAG" "$GHCR_IMAGE"
     docker push "$GHCR_IMAGE"
-    log "Fast-deploying via GHCR pull on $GCE_INSTANCE…"
+    # Braces required: macOS bash 3.2 folds a trailing multibyte char (…)
+    # into the variable name, tripping set -u.
+    log "Fast-deploying via GHCR pull on ${GCE_INSTANCE}…"
     "${SSH_BASE[@]}" --command="
       set -e
       echo '$GHCR_PAT_LOCAL' | docker login ghcr.io -u mikeumus --password-stdin

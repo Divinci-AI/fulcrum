@@ -22,8 +22,11 @@ import { expect, test, request as pwRequest } from '@playwright/test'
 const SLACKBOT_UA = 'Slackbot-LinkExpanding 1.0 (+https://api.slack.com/robots)'
 
 // Skip locally — CF Access only exists in prod, so the test setup
-// isn't meaningful there.
-test.skip(({}, { project }) => project.name === 'local', 'Prod-only — exercises CF Access path-based bypass')
+// isn't meaningful there. (beforeEach because Playwright 1.59 stopped
+// passing testInfo to file-level test.skip predicates.)
+test.beforeEach(({}, testInfo) => {
+  test.skip(testInfo.project.name === 'local', 'Prod-only — exercises CF Access path-based bypass')
+})
 
 test.describe('OG endpoints reachable for crawlers without CF Access auth', () => {
   test('GET /og/default.png returns a real PNG', async ({ baseURL }) => {

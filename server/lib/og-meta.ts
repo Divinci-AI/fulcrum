@@ -116,21 +116,25 @@ export function resolveOgMeta(
     const seg = reqPath.slice('/tasks/'.length).split('/')[0]
     if (seg && UUID_RE.test(seg)) taskId = seg
   }
+  // Unknown ids fall through to the default card below — returning null
+  // would serve the shell with no OG tags at all, which breaks unfurls
+  // for deleted/foreign links.
   if (taskId) {
     const task = db.select().from(tasks).where(eq(tasks.id, taskId)).get()
-    if (!task) return null
-    const project = task.projectId
-      ? db.select().from(projects).where(eq(projects.id, task.projectId)).get()
-      : null
-    const title = `${truncate(task.title, 100)} · Fulcrum`
-    const description = describeTask(task, project?.name ?? null)
-    const v = shortHash(task.updatedAt ?? task.id)
-    return {
-      title,
-      description: description || 'Fulcrum task',
-      image: `${origin}/og/task/${task.id}.png?v=${v}`,
-      url: `${origin}${reqPath}${taskId === reqQuery.task ? `?task=${taskId}` : ''}`,
-      type: 'article',
+    if (task) {
+      const project = task.projectId
+        ? db.select().from(projects).where(eq(projects.id, task.projectId)).get()
+        : null
+      const title = `${truncate(task.title, 100)} · Fulcrum`
+      const description = describeTask(task, project?.name ?? null)
+      const v = shortHash(task.updatedAt ?? task.id)
+      return {
+        title,
+        description: description || 'Fulcrum task',
+        image: `${origin}/og/task/${task.id}.png?v=${v}`,
+        url: `${origin}${reqPath}${taskId === reqQuery.task ? `?task=${taskId}` : ''}`,
+        type: 'article',
+      }
     }
   }
 
@@ -139,16 +143,17 @@ export function resolveOgMeta(
     const seg = reqPath.slice('/projects/'.length).split('/')[0]
     if (seg && UUID_RE.test(seg)) {
       const project = db.select().from(projects).where(eq(projects.id, seg)).get()
-      if (!project) return null
-      const v = shortHash(project.updatedAt ?? project.id)
-      return {
-        title: `${truncate(project.name, 100)} · Fulcrum`,
-        description: project.description
-          ? truncate(project.description, 180)
-          : 'Project on Fulcrum',
-        image: `${origin}/og/project/${project.id}.png?v=${v}`,
-        url: `${origin}${reqPath}`,
-        type: 'article',
+      if (project) {
+        const v = shortHash(project.updatedAt ?? project.id)
+        return {
+          title: `${truncate(project.name, 100)} · Fulcrum`,
+          description: project.description
+            ? truncate(project.description, 180)
+            : 'Project on Fulcrum',
+          image: `${origin}/og/project/${project.id}.png?v=${v}`,
+          url: `${origin}${reqPath}`,
+          type: 'article',
+        }
       }
     }
   }
@@ -158,16 +163,17 @@ export function resolveOgMeta(
     const seg = reqPath.slice('/repositories/'.length).split('/')[0]
     if (seg && UUID_RE.test(seg)) {
       const repo = db.select().from(repositories).where(eq(repositories.id, seg)).get()
-      if (!repo) return null
-      const branch = repo.lastBaseBranch ? ` · ${repo.lastBaseBranch}` : ''
-      const agent = repo.defaultAgent ? ` · ${repo.defaultAgent}` : ''
-      const v = shortHash(repo.updatedAt ?? repo.id)
-      return {
-        title: `${truncate(repo.displayName, 100)} · Fulcrum`,
-        description: `Repository${branch}${agent}`,
-        image: `${origin}/og/repo/${repo.id}.png?v=${v}`,
-        url: `${origin}${reqPath}`,
-        type: 'article',
+      if (repo) {
+        const branch = repo.lastBaseBranch ? ` · ${repo.lastBaseBranch}` : ''
+        const agent = repo.defaultAgent ? ` · ${repo.defaultAgent}` : ''
+        const v = shortHash(repo.updatedAt ?? repo.id)
+        return {
+          title: `${truncate(repo.displayName, 100)} · Fulcrum`,
+          description: `Repository${branch}${agent}`,
+          image: `${origin}/og/repo/${repo.id}.png?v=${v}`,
+          url: `${origin}${reqPath}`,
+          type: 'article',
+        }
       }
     }
   }
