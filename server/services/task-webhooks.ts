@@ -1,6 +1,7 @@
 import { db, type Task } from '../db'
 import { tags, taskTags } from '../db/schema'
 import { eq } from 'drizzle-orm'
+import { createHmac } from 'node:crypto'
 import { log } from '../lib/logger'
 
 /**
@@ -10,13 +11,16 @@ import { log } from '../lib/logger'
  * On every task status transition, each URL receives:
  *
  *   POST <url>
+ *   headers: X-Fulcrum-Timestamp: <ms>, X-Fulcrum-Signature: sha256=<hmac hex>
  *   { "event": "task.status_changed",
  *     "oldStatus": "IN_REVIEW", "newStatus": "DONE", "at": "<ISO8601>",
  *     "task": { "id", "title", "status", "projectId", "priority", "tags" } }
  *
- * Delivery is fire-and-forget with a 10s timeout; failures are logged and
- * never block the status update. There are no retries (v1) — receivers that
- * need reliability should reconcile by polling GET /api/tasks.
+ * When FULCRUM_TASK_WEBHOOK_SECRET is set, each request is HMAC-SHA256 signed
+ * over `${timestamp}.${body}` so the receiver can verify authenticity + reject
+ * replays — this is preferred over putting a token in the URL (which leaks into
+ * request logs). Delivery is fire-and-forget with a 10s timeout; no retries —
+ * receivers needing reliability should reconcile by polling GET /api/tasks.
  */
 export function fireTaskStatusWebhooks(task: Task, oldStatus: string, newStatus: string): void {
   const raw = process.env.FULCRUM_TASK_WEBHOOK_URLS
@@ -55,10 +59,19 @@ export function fireTaskStatusWebhooks(task: Task, oldStatus: string, newStatus:
     },
   })
 
+  const secret = process.env.FULCRUM_TASK_WEBHOOK_SECRET
+  const timestamp = String(Date.now())
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' }
+  if (secret) {
+    headers['X-Fulcrum-Timestamp'] = timestamp
+    headers['X-Fulcrum-Signature'] =
+      'sha256=' + createHmac('sha256', secret).update(`${timestamp}.${payload}`).digest('hex')
+  }
+
   for (const url of urls) {
     fetch(url, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers,
       body: payload,
       signal: AbortSignal.timeout(10_000),
     })
