@@ -2,7 +2,7 @@ import { Hono } from 'hono'
 import { HTTPException } from 'hono/http-exception'
 import { nanoid } from 'nanoid'
 import { db, tasks, repositories, projects, taskLinks, taskRelationships, taskAttachments, tags, taskTags, type Task, type NewTask, type TaskLink } from '../db'
-import { eq, asc, and, inArray } from 'drizzle-orm'
+import { and, asc, eq, inArray, isNull, type SQL } from 'drizzle-orm'
 import { detectLinkType } from '../lib/link-utils'
 import { execSync } from 'child_process'
 import * as fs from 'fs'
@@ -24,7 +24,7 @@ import {
   listTaskComments,
 } from '../services/task-comment-service'
 import { requireUser } from '../middleware/current-user'
-import { grantCreatorAdmin, ensureAssigneeViewer, effectiveRole, roleSatisfies } from '../services/access-control-service'
+import { grantCreatorAdmin, ensureAssigneeViewer, effectiveRole, effectiveRolesForTasks, roleSatisfies } from '../services/access-control-service'
 import { relayInitWorktree } from '../websocket/executor-ws'
 import { mentions } from '../db'
 import { log } from '../lib/logger'
@@ -159,30 +159,35 @@ app.get('/', (c) => {
   const assigneeFilter =
     rawAssigneeId === 'me' ? currentUserId ?? '__no_current_user__' : rawAssigneeId
 
-  const query = db.select().from(tasks).orderBy(asc(tasks.position))
-
-  let allTasks = query.all()
-
-  // Filter by status (supports comma-separated values e.g. "IN_PROGRESS,TO_DO")
+  // Filters run in SQL, not in memory. They used to load the WHOLE tasks table
+  // and then `.filter()` it — so `?projectId=X` returning one card still read
+  // all 4,756 rows first. Measured 2026-08-22: GET /api/tasks took 11.0s, and
+  // because the SQLite handle is synchronous it stalled every other request in
+  // the same page load (/api/tags 10.3s, /api/terminal-view-state 9.8s).
+  const conditions: SQL[] = []
   if (status) {
-    const statuses = status.split(',')
-    allTasks = allTasks.filter((t) => statuses.includes(t.status))
+    const statuses = status.split(',').filter(Boolean)
+    if (statuses.length > 0) conditions.push(inArray(tasks.status, statuses))
   }
-
-  // Apply filters in memory (for simplicity with nullable fields)
   if (projectId) {
-    allTasks = allTasks.filter((t) => t.projectId === projectId)
+    conditions.push(eq(tasks.projectId, projectId))
   } else if (orphans) {
-    allTasks = allTasks.filter((t) => t.projectId === null)
+    conditions.push(isNull(tasks.projectId))
   }
-
   if (assigneeFilter === 'unassigned') {
-    allTasks = allTasks.filter((t) => t.assigneeUserId === null)
+    conditions.push(isNull(tasks.assigneeUserId))
   } else if (assigneeFilter) {
-    allTasks = allTasks.filter((t) => t.assigneeUserId === assigneeFilter)
+    conditions.push(eq(tasks.assigneeUserId, assigneeFilter))
   }
 
-  // Filter by tag if specified
+  const base = db.select().from(tasks)
+  let allTasks = (conditions.length > 0
+    ? base.where(and(...conditions))
+    : base
+  ).orderBy(asc(tasks.position)).all()
+
+  // Tag filtering stays in memory — it needs the task_tags join per row — but
+  // it now runs over the FILTERED set rather than the whole table.
   if (tag) {
     allTasks = allTasks.filter((t) => {
       const taskTags = getTaskTags(t.id)
@@ -190,12 +195,19 @@ app.get('/', (c) => {
     })
   }
 
-  // D-5 PR 3: filter by effectiveRole. Tenant-visible tasks pass through
-  // for everyone (incl. anonymous) because the tenant-default role is
-  // editor. Restricted tasks only pass for principals with a matching
-  // grant. N×1 lookup; acceptable at current scale.
+  // D-5 PR 3: filter by effectiveRole. Tenant-visible tasks pass through for
+  // everyone (incl. anonymous) because the tenant-default role is editor.
+  //
+  // This used to call effectiveRole() PER TASK, which costs six synchronous
+  // queries each — three of them re-reading `visibility` and `projectId`
+  // columns already present on the row in hand, plus the user's team ids twice.
+  // The comment here used to say "N×1 lookup; acceptable at current scale"; at
+  // 4,756 tasks that was ~28,500 queries per board load and had become the
+  // dominant cost. The batch form does three queries total and is pinned to
+  // agree with effectiveRole row-for-row by access-control-batch.test.ts.
   const userId = (c.var as { user?: { id?: string } | null }).user?.id ?? null
-  allTasks = allTasks.filter((t) => effectiveRole(userId, 'task', t.id) !== null)
+  const roles = effectiveRolesForTasks(userId, allTasks)
+  allTasks = allTasks.filter((t) => roles.get(t.id) != null)
 
   return c.json(allTasks.map((t) => toApiResponse(t, true)))
 })

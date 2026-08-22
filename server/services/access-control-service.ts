@@ -9,7 +9,7 @@
  * `access-control-helpers.ts` so they're testable without a database.
  * This file only handles the DB queries and assembly.
  */
-import { and, eq } from 'drizzle-orm'
+import { and, eq, inArray } from 'drizzle-orm'
 import { db, acls, teamMembers, tasks, projects } from '../db'
 import {
   type Role,
@@ -185,6 +185,95 @@ export function ensureAssigneeViewer(
       grantedBy,
     })
     .run()
+}
+
+/**
+ * Batch form of `effectiveRole` for a list of tasks.
+ *
+ * WHY THIS EXISTS
+ * `effectiveRole` costs SIX synchronous queries per task: visibility,
+ * getUserTeamIds, the task's ACL rows, the task's projectId, getUserTeamIds
+ * AGAIN, and the project's ACL rows. The task-list route called it once per
+ * task. At 4,756 tasks that is ~28,500 queries on a synchronous SQLite handle,
+ * measured at 11.0s for GET /api/tasks — and because the handle is
+ * synchronous, it stalls every OTHER request too (/api/tags 10.3s,
+ * /api/terminal-view-state 9.8s in the same page load, neither of which is
+ * remotely expensive on its own).
+ *
+ * Three of those six queries were pure waste: `visibility` and `projectId` are
+ * columns the caller already has in hand, and the user's team ids cannot
+ * change within one request.
+ *
+ * This does 3 queries TOTAL regardless of task count: team ids once, then all
+ * task ACL rows and all project ACL rows for the ids in play.
+ *
+ * ⚠️ THE DECISION LOGIC IS NOT REIMPLEMENTED HERE. It reuses the same
+ * `maxRole` + `combineGrantWithVisibility` helpers, in the same order, with the
+ * same project-grant cascade. A second copy of an authorization rule is how the
+ * two silently diverge — so `access-control-batch.test.ts` asserts, over a
+ * fixture that exercises every visibility/grant combination, that this returns
+ * EXACTLY what calling `effectiveRole` per task returns. If you change one, that
+ * test fails until you change the other.
+ */
+export function effectiveRolesForTasks(
+  userId: string | null,
+  rows: Array<{ id: string; projectId: string | null; visibility: string | null }>
+): Map<string, Role | null> {
+  const out = new Map<string, Role | null>()
+  if (rows.length === 0) return out
+
+  const teamIds = getUserTeamIds(userId)
+  const canMatch = Boolean(userId) || teamIds.length > 0
+
+  // One pass for task grants, one for project grants. Both are filtered by the
+  // ids actually present, so this does not grow with the ACL table.
+  const taskIds = rows.map((r) => r.id)
+  const projectIds = [...new Set(rows.map((r) => r.projectId).filter((p): p is string => !!p))]
+
+  const grantsFor = (resourceType: ResourceType, ids: string[]): Map<string, Role[]> => {
+    const map = new Map<string, Role[]>()
+    if (!canMatch || ids.length === 0) return map
+    // Chunked to stay clear of SQLite's bound-parameter ceiling; a board can
+    // carry more ids than the default limit allows in one IN (...).
+    const CHUNK = 500
+    for (let i = 0; i < ids.length; i += CHUNK) {
+      const slice = ids.slice(i, i + CHUNK)
+      const found = db
+        .select({
+          resourceId: acls.resourceId,
+          role: acls.role,
+          principalType: acls.principalType,
+          principalId: acls.principalId,
+        })
+        .from(acls)
+        .where(and(eq(acls.resourceType, resourceType), inArray(acls.resourceId, slice)))
+        .all()
+      for (const r of found) {
+        const isMine =
+          (r.principalType === 'user' && userId && r.principalId === userId) ||
+          (r.principalType === 'team' && teamIds.includes(r.principalId))
+        if (!isMine) continue
+        const list = map.get(r.resourceId) ?? []
+        list.push(r.role as Role)
+        map.set(r.resourceId, list)
+      }
+    }
+    return map
+  }
+
+  const taskGrants = grantsFor('task', taskIds)
+  const projectGrants = grantsFor('project', projectIds)
+
+  for (const row of rows) {
+    // A row that reached us from the tasks table exists by definition, so the
+    // "resource doesn't exist -> null" arm of effectiveRole cannot apply here;
+    // a null visibility column still flows through combineGrantWithVisibility
+    // exactly as it would there.
+    const grants: Role[] = [...(taskGrants.get(row.id) ?? [])]
+    if (row.projectId) grants.push(...(projectGrants.get(row.projectId) ?? []))
+    out.set(row.id, combineGrantWithVisibility(row.visibility as Visibility, maxRole(grants)))
+  }
+  return out
 }
 
 /**
