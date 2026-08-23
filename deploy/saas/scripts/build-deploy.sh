@@ -16,6 +16,12 @@
 #   ./scripts/build-deploy.sh --prune            # also `docker image prune -f` on host after recreate
 #   ./scripts/build-deploy.sh --help
 #
+# NOTE (2026-08-23): building here and streaming a ~3 GB image is no longer the
+# fastest route. CI now publishes ghcr.io/divinci-ai/fulcrum:{dev,v<ver>,sha-<7>}
+# on every push to main, so a deploy can be a `docker pull` on the host — see
+# RUNBOOK.md §7. This script remains correct and is still the right tool for
+# building from a non-default working tree or when CI is unavailable.
+#
 # Requires the operator's `~/.zshrc` to export:
 #   GCP_PROJECT     (default: fulcrum-mike-2026)
 #   GCE_INSTANCE    (default: fulcrum-saas-1)

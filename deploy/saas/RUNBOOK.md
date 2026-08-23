@@ -31,9 +31,9 @@ linux/arm64) and pushes on every merge to main. Tags emitted:
 - `:v<package.json version>` (versioned)
 - `:sha-<7-char>` (immutable, for rollback)
 
-No operator action needed beyond `git merge`. Currently dormant because
-Divinci-AI's Actions billing is blocked — re-enable billing and the
-workflow starts firing.
+No operator action needed beyond `git merge`. **LIVE since 2026-08-23** —
+this paragraph used to say the workflow was dormant on Actions billing; that
+is no longer true. See §7 for the pull-based deploy it enables.
 
 #### A.2 — Manual push (current path while Actions billing is blocked)
 
@@ -292,7 +292,68 @@ tenant's container against it. The data bind-mount is preserved across
 recreate (the bind source is on the host filesystem, outside the
 container layer), so SQLite + fnox config survive.
 
-### The fast path: `scripts/build-deploy.sh`
+### The fastest path (since 2026-08-23): pull the CI-built image
+
+`.github/workflows/docker-image.yml` is **no longer dormant** — the note in §1
+saying it waits on Actions billing is stale. It builds linux/amd64 +
+linux/arm64 on every push to main and pushes three tags. Verified on run
+32622211861 (commit b285ee53):
+
+```
+ghcr.io/divinci-ai/fulcrum:dev
+ghcr.io/divinci-ai/fulcrum:v<package.json version>
+ghcr.io/divinci-ai/fulcrum:sha-<7-char>       # immutable — use this to roll back
+```
+
+So the deploy is a pull, not a build:
+
+```sh
+gcloud compute ssh fulcrum-saas-1 --zone=us-central1-a --project=fulcrum-mike-2026 \
+  --command='sudo docker pull ghcr.io/divinci-ai/fulcrum:dev \
+             && sudo docker tag ghcr.io/divinci-ai/fulcrum:dev divinci-ai/fulcrum:dev'
+# then Step 2 below (stop / rm / compose up / wait healthy)
+```
+
+The retag preserves the un-namespaced reference the compose template expects.
+
+**The host needs a `read:packages` credential — the package is private.**
+Without it the pull fails `error from registry: unauthorized`. Mint a CLASSIC
+PAT with `read:packages` and NOTHING else (fine-grained PATs still do not work
+with GHCR), then, from a terminal — never inside an agent session, and never
+via `echo`, which appends a newline to the secret:
+
+```sh
+printf '%s' 'THE_TOKEN' | gcloud compute ssh fulcrum-saas-1 \
+  --zone=us-central1-a --project=fulcrum-mike-2026 \
+  --command='sudo docker login ghcr.io -u mikeumus --password-stdin'
+```
+
+That writes the token (base64, not encrypted) into `/root/.docker/config.json`.
+It is long-lived on a VM that stays up for months — set an expiry and put the
+date somewhere you will see it, because when it lapses deploys fail at the pull
+with the same `unauthorized` and nothing announces why.
+
+⚠️ **Do NOT make the package public to avoid the credential.** The image
+contains the whole application and the repo is PolyForm Perimeter licensed —
+publishing the image publishes the product.
+
+**The alternative worth considering:** the VM's service account already carries
+`devstorage.read_only`, so it can pull from **GCP Artifact Registry** with no
+static credential at all — nothing to store, rotate, or leak. The cost is
+wiring GitHub Actions to authenticate to GCP via Workload Identity Federation.
+Not done; recorded here so the trade is visible rather than re-derived.
+
+⚠️ **Why the CI push used to fail** (and how to recognise it again): OCI labels
+are INHERITED from the base image, and `oven/bun` sets
+`org.opencontainers.image.source=https://github.com/oven-sh/bun`. Our package
+was therefore linked to **oven-sh/bun**, and `Divinci-AI/fulcrum`'s
+GITHUB_TOKEN had no rights over it — the build succeeded and the push died
+`denied: permission_denied: read_package`. Fixed by stamping our own label in
+the Dockerfile (b285ee53) plus granting the repo Write under the package's
+*Manage Actions access*. If you add another image built `FROM` a labelled base,
+expect the same and stamp the label from the start.
+
+### The build-it-yourself path: `scripts/build-deploy.sh`
 
 ```sh
 # Full deploy of acme — build, stream, recreate, e2e
