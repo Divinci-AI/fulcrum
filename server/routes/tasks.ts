@@ -102,12 +102,12 @@ function deleteTaskAttachments(taskId: string): void {
 const app = new Hono()
 
 // Helper to get links for a task
-function getTaskLinks(taskId: string): TaskLink[] {
+export function getTaskLinks(taskId: string): TaskLink[] {
   return db.select().from(taskLinks).where(eq(taskLinks.taskId, taskId)).all()
 }
 
 // Helper to get tags for a task from join table
-function getTaskTags(taskId: string): string[] {
+export function getTaskTags(taskId: string): string[] {
   const joins = db
     .select()
     .from(taskTags)
@@ -125,6 +125,75 @@ function getTaskTags(taskId: string): string[] {
     .where(inArray(tags.id, tagIds))
     .all()
   return tagRows.map((t) => t.name)
+}
+
+// Batched twins of getTaskTags / getTaskLinks.
+//
+// The per-task helpers above cost up to three queries EACH — task_tags, then
+// tags, then task_links — so rendering the unfiltered board ran ~14,000
+// queries on top of the ACL work. Same class of bug as the effectiveRole
+// loop below, found only after fixing that one and re-measuring: the
+// unfiltered list was still 6.0s server-side with the ACL path down to 4ms.
+//
+// These return a Map keyed by task id, and are pinned to agree with the
+// per-task helpers by tasks-batch-helpers.test.ts. The per-task versions are
+// kept for the single-task routes, where one query beats a Map allocation.
+const SQLITE_IN_CHUNK = 500
+
+function chunked<T>(items: T[], size: number): T[][] {
+  const out: T[][] = []
+  for (let i = 0; i < items.length; i += size) out.push(items.slice(i, i + size))
+  return out
+}
+
+export function getTaskTagsBatch(taskIds: string[]): Map<string, string[]> {
+  const byTask = new Map<string, string[]>()
+  if (taskIds.length === 0) return byTask
+
+  const joins: { taskId: string; tagId: string }[] = []
+  for (const chunk of chunked(taskIds, SQLITE_IN_CHUNK)) {
+    joins.push(
+      ...db
+        .select({ taskId: taskTags.taskId, tagId: taskTags.tagId })
+        .from(taskTags)
+        .where(inArray(taskTags.taskId, chunk))
+        .all()
+    )
+  }
+  if (joins.length === 0) return byTask
+
+  const nameById = new Map<string, string>()
+  const tagIds = [...new Set(joins.map((j) => j.tagId))]
+  for (const chunk of chunked(tagIds, SQLITE_IN_CHUNK)) {
+    for (const row of db.select().from(tags).where(inArray(tags.id, chunk)).all()) {
+      nameById.set(row.id, row.name)
+    }
+  }
+
+  // A join row whose tag was deleted resolves to no name — drop it rather
+  // than emitting undefined, matching what getTaskTags does (the tag simply
+  // does not come back from the second query).
+  for (const j of joins) {
+    const name = nameById.get(j.tagId)
+    if (name === undefined) continue
+    const list = byTask.get(j.taskId)
+    if (list) list.push(name)
+    else byTask.set(j.taskId, [name])
+  }
+  return byTask
+}
+
+export function getTaskLinksBatch(taskIds: string[]): Map<string, TaskLink[]> {
+  const byTask = new Map<string, TaskLink[]>()
+  if (taskIds.length === 0) return byTask
+  for (const chunk of chunked(taskIds, SQLITE_IN_CHUNK)) {
+    for (const row of db.select().from(taskLinks).where(inArray(taskLinks.taskId, chunk)).all()) {
+      const list = byTask.get(row.taskId)
+      if (list) list.push(row)
+      else byTask.set(row.taskId, [row])
+    }
+  }
+  return byTask
 }
 
 // Helper to parse JSON fields from database
@@ -186,13 +255,13 @@ app.get('/', (c) => {
     : base
   ).orderBy(asc(tasks.position)).all()
 
-  // Tag filtering stays in memory — it needs the task_tags join per row — but
-  // it now runs over the FILTERED set rather than the whole table.
+  // Tag filtering stays in memory — it needs the task_tags join — but it runs
+  // over the FILTERED set, and off ONE batched read rather than a query per
+  // row. The same map is reused to build the response below.
+  let tagsByTask = getTaskTagsBatch(allTasks.map((t) => t.id))
   if (tag) {
-    allTasks = allTasks.filter((t) => {
-      const taskTags = getTaskTags(t.id)
-      return taskTags.includes(tag)
-    })
+    allTasks = allTasks.filter((t) => (tagsByTask.get(t.id) ?? []).includes(tag))
+    tagsByTask = getTaskTagsBatch(allTasks.map((t) => t.id))
   }
 
   // D-5 PR 3: filter by effectiveRole. Tenant-visible tasks pass through for
@@ -209,7 +278,18 @@ app.get('/', (c) => {
   const roles = effectiveRolesForTasks(userId, allTasks)
   allTasks = allTasks.filter((t) => roles.get(t.id) != null)
 
-  return c.json(allTasks.map((t) => toApiResponse(t, true)))
+  // Links batched for the same reason as tags — toApiResponse(t, true) would
+  // otherwise issue one task_links query per row.
+  const linksByTask = getTaskLinksBatch(allTasks.map((t) => t.id))
+  return c.json(
+    allTasks.map((t) => ({
+      ...t,
+      viewState: t.viewState ? JSON.parse(t.viewState) : null,
+      agentOptions: t.agentOptions ? JSON.parse(t.agentOptions) : null,
+      tags: tagsByTask.get(t.id) ?? [],
+      links: linksByTask.get(t.id) ?? [],
+    }))
+  )
 })
 
 // POST /api/tasks - Create task
