@@ -34,6 +34,17 @@ RUN bun run build
 # -------------------- runtime --------------------
 FROM oven/bun:1-debian AS runtime
 
+# GHCR links a package to a repository via this label — and labels are
+# INHERITED from the base image. oven/bun sets
+# org.opencontainers.image.source=https://github.com/oven-sh/bun, so without
+# this line our published package claims oven-sh/bun as its source, is linked
+# to THAT repo, and Divinci-AI/fulcrum's GITHUB_TOKEN has no rights over it.
+# That is why docker-image.yml built both arches successfully and then died
+# with `denied: permission_denied: read_package` (run 32565889989).
+LABEL org.opencontainers.image.source="https://github.com/Divinci-AI/fulcrum" \
+      org.opencontainers.image.description="Fulcrum SaaS tenant container" \
+      org.opencontainers.image.licenses="PolyForm-Perimeter-1.0.0"
+
 # Runtime system deps:
 #   - dtach: persistent terminal sessions (CLAUDE.md "Terminal Architecture")
 #   - git: worktree creation in server/services/task-service.ts
